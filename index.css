@@ -1,0 +1,149 @@
+@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-image: 
+      linear-gradient(#4d004d 1px, transparent 1px),
+      linear-gradient(90deg, #4d004d 1px, transparent 1px);
+    background-size: 20px 20px;
+    background-color: #0d001a;
+    cursor: crosshair;
+    letter-spacing: 0.5px;
+  }
+  
+  * {
+    border-radius: 0 !important; /* brutalist/y2k edges */
+  }
+
+  /* Make scrollbars blocky and neon */
+  ::-webkit-scrollbar {
+    width: 14px;
+    height: 14px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #1a0033;
+    border-left: 2px solid #00ffff;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #ff00ff;
+    border: 2px solid #00ffff;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #ff33ff;
+  }
+  
+  /* Buttons and neon effects */
+  button {
+    box-shadow: 2px 2px 0px #00ffff !important;
+    text-transform: uppercase;
+    font-weight: bold;
+    border: 2px solid #ff00ff !important;
+  }
+  button:active {
+    box-shadow: inset 2px 2px 0px #00ffff !important;
+    transform: translate(2px, 2px);
+  }
+  
+  .border, .border-b, .border-t, .border-l, .border-r {
+    border-style: dotted !important;
+  }
+
+  input, select, textarea {
+    border: 2px dashed #00ffff !important;
+    background-color: #1a0033 !important;
+    color: #ff00ff !important;
+  }
+  input:focus, select:focus, textarea:focus {
+    border-style: solid !important;
+    box-shadow: 2px 2px 0px #ff00ff !important;
+    outline: none !important;
+  }
+}
+
+.light-theme {
+  filter: invert(1) hue-rotate(180deg);
+  background-color: #000;
+}
+
+.light-theme img,
+.light-theme image,
+.light-theme canvas,
+.light-theme video {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+@keyframes wiggle {
+  0% { transform: rotate(0deg); }
+  25% { transform: rotate(-5deg); }
+  50% { transform: rotate(0deg); }
+  75% { transform: rotate(5deg); }
+  100% { transform: rotate(0deg); }
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+  20%, 40%, 60%, 80% { transform: translateX(5px); }
+}
+
+@keyframes bounce {
+  0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-20px); }
+  60% { transform: translateY(-10px); }
+}
+
+@keyframes fadeTransition {
+  0% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes fade {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+
+@keyframes slide-in {
+  0%, 100% { transform: translateX(-50px); opacity: 0; }
+  20%, 80% { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slide-up {
+  0%, 100% { transform: translateY(50px); opacity: 0; }
+  20%, 80% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slide-down {
+  0%, 100% { transform: translateY(-50px); opacity: 0; }
+  20%, 80% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes zoom {
+  0%, 100% { transform: scale(0.5); opacity: 0; }
+  50% { transform: scale(1); opacity: 1; }
+}
+
+.resizing-sidebar {
+  cursor: col-resize !important;
+  user-select: none !important;
+}

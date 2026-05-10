@@ -1,0 +1,11240 @@
+import React, { useState, useRef, useEffect } from "react";
+import { v4 as uuidv4 } from "uuid";
+import {
+  Play,
+  Download,
+  MousePointer2,
+  Square,
+  Image as ImageIcon,
+  Layers,
+  Settings,
+  MoveUp,
+  MoveDown,
+  Trash2,
+  Copy,
+  Undo,
+  Redo,
+  FolderPlus,
+  Search,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  MessageSquare,
+  Backpack,
+  Plus,
+  FileCode,
+  Folder,
+  HelpCircle,
+  Save,
+  Upload,
+  CheckCircle2,
+  Wand2,
+  X,
+  PackageX,
+  RotateCw,
+  Type,
+  Music,
+  Eye,
+  EyeOff,
+  Lock,
+  Unlock,
+  Sun,
+  Moon,
+  LayoutTemplate,
+  Palette,
+  ToggleRight,
+  Pointer,
+  MousePointerClick,
+  Menu,
+  Star,
+  Check,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Key,
+  Book,
+  Shield,
+  ChevronDown,
+  Package,
+  LogIn,
+  Gift,
+  ArrowDown,
+  Video,
+} from "lucide-react";
+import Matter from "matter-js";
+import {
+  Project,
+  SceneObject,
+  CursorType,
+  AnimationType,
+  InteractionType,
+  Asset,
+  BlendMode,
+  DialogueTree,
+  DialogueNode,
+  InventoryItem,
+  Scene,
+  Quest,
+  QuestObjective,
+} from "./types";
+import { analyzeAssetVibe } from "./services/gemini";
+import { generateExportHtml } from "./utils/exportHtml";
+import { TEMPLATES } from "./utils/templates";
+import { ImageEditorModal } from "./components/ImageEditorModal";
+import { AISpriteModal } from "./components/AISpriteModal";
+import { AssetPickerModal } from "./components/AssetPickerModal";
+import { get, set } from "idb-keyval";
+
+const TypewriterText = ({
+  text,
+  speed = 15,
+}: {
+  text: string;
+  speed?: number;
+}) => {
+  const [displayedText, setDisplayedText] = useState("");
+
+  useEffect(() => {
+    if (speed <= 0) {
+      setDisplayedText(text);
+      return;
+    }
+
+    setDisplayedText("");
+    let i = 0;
+    const interval = setInterval(() => {
+      setDisplayedText(text.substring(0, i + 1));
+      i++;
+      if (i >= text.length) clearInterval(interval);
+    }, speed);
+
+    return () => clearInterval(interval);
+  }, [text, speed]);
+
+  return (
+    <div className="relative">
+      <div className="invisible whitespace-pre-wrap">{text}</div>
+      <div className="absolute inset-0 whitespace-pre-wrap">
+        {displayedText}
+      </div>
+    </div>
+  );
+};
+
+const LabelWithHelp = ({
+  label,
+  helpText,
+  className = "",
+}: {
+  label: string;
+  helpText: string;
+  className?: string;
+}) => (
+  <div className={`flex items-center gap-1 group relative w-max ${className}`}>
+    <label className="text-xs text-neutral-500">{label}</label>
+    <HelpCircle
+      size={12}
+      className="text-neutral-500 hover:text-neutral-300 cursor-help transition-colors"
+    />
+    <div className="absolute left-0 top-full mt-1 hidden group-hover:block w-48 p-2 bg-neutral-950 text-neutral-300 text-[10px] rounded border border-neutral-700 shadow-xl z-[100] pointer-events-none whitespace-normal font-normal leading-relaxed">
+      {helpText}
+    </div>
+  </div>
+);
+
+export const DEFAULT_ASSETS: Asset[] = [];
+
+const App: React.FC = () => {
+  const [project, setProject] = useState<Project>({
+    id: uuidv4(),
+    name: "My Neocities Game",
+    currentSceneId: "scene-1",
+    currentUiMenuId: null,
+    assets: DEFAULT_ASSETS,
+    globalSettings: {
+      useDayNightCycle: false,
+      enableNeeds: true,
+      enableTTRPGStats: true,
+      stageWidth: 800,
+      stageHeight: 600,
+      snapToGrid: false,
+      gridSize: 32,
+      showGhostOutlines: true,
+    },
+    scenes: [
+      {
+        id: "scene-1",
+        name: "Start Scene",
+        width: 800,
+        height: 600,
+        backgroundColor: "#2a2a2a",
+        objects: [],
+      },
+    ],
+    uiMenus: [],
+    dialogueTrees: [],
+    inventoryItems: [],
+    quests: [],
+    gameFlags: [],
+  });
+
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [selectedMultiIds, setSelectedMultiIds] = useState<string[]>([]);
+  const [selectionBox, setSelectionBox] = useState<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>(null);
+  const [selectionStart, setSelectionStart] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [triggeredObjects, setTriggeredObjects] = useState<Set<string>>(
+    new Set(),
+  );
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    objectId: string | null;
+  } | null>(null);
+  const [clipboard, setClipboard] = useState<SceneObject[]>([]);
+  const [activeBin, setActiveBin] = useState<string>("all");
+  const [isFetchingGithub, setIsFetchingGithub] = useState(false);
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+
+  // RPG Systems State
+  const [activeQuestId, setActiveQuestId] = useState<string | null>(null);
+  const [newEventText, setNewEventText] = useState("");
+  const [recentAssetIds, setRecentAssetIds] = useState<string[]>([]);
+
+  const [editorMode, setEditorMode] = useState<
+    | "stage"
+    | "dialogue"
+    | "items"
+    | "scenes"
+    | "ui_maker"
+    | "ui_stage"
+    | "rpg_systems"
+  >("stage");
+  const [leftSidebarTab, setLeftSidebarTab] = useState<"librarian" | "theme">(
+    "librarian",
+  );
+  const [rightSidebarTab, setRightSidebarTab] = useState<
+    "properties" | "layers" | "prefabs"
+  >("properties");
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(288);
+  const [activeTreeId, setActiveTreeId] = useState<string | null>(null);
+  const [playerInventory, setPlayerInventory] = useState<string[]>([]);
+  const [playerFlags, setPlayerFlags] = useState<string[]>([]);
+  const [selectedInventoryItemId, setSelectedInventoryItemId] = useState<
+    string | null
+  >(null);
+  const [collectedObjects, setCollectedObjects] = useState<string[]>([]);
+  const [activeUiMenus, setActiveUiMenus] = useState<string[]>([]);
+  const [activeDialogue, setActiveDialogue] = useState<{
+    treeId: string;
+    nodeId: string;
+  } | null>(null);
+  const [activeCutscene, setActiveCutscene] = useState<{
+    src: string;
+    targetSceneId?: string;
+  } | null>(null);
+  const [playerNeeds, setPlayerNeeds] = useState<Record<string, number>>({
+    rest: 100,
+    hunger: 100,
+    connection: 100,
+    spiritual: 100,
+    novelty: 100,
+  });
+  const [playerSkills, setPlayerSkills] = useState<Record<string, number>>({
+    naturalist: 5,
+    occultist: 2,
+    scribal: 8,
+  });
+  const [gameTime, setGameTime] = useState<number>(8); // 0-24
+
+  const [assetPickerCb, setAssetPickerCb] = useState<{
+    onSelect: (id: string) => void;
+    filterType?: "image" | "audio";
+    onlyOnCanvas?: boolean;
+  } | null>(null);
+
+  const [history, setHistory] = useState<{
+    past: Project[];
+    future: Project[];
+  }>({ past: [], future: [] });
+  const dragStartProjectRef = useRef<Project | null>(null);
+  const [assetSearch, setAssetSearch] = useState("");
+  const [transition, setTransition] = useState<{
+    active: boolean;
+    type: string;
+  }>({ active: false, type: "fade" });
+  const [physicsState, setPhysicsState] = useState<
+    Record<string, { x: number; y: number; rotation: number }>
+  >({});
+
+  const [editorError, setEditorError] = useState<string | null>(null);
+
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">(
+    "saved",
+  );
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [promptModal, setPromptModal] = useState<{
+    isOpen: boolean;
+    message: string;
+    defaultValue: string;
+    onSubmit: (val: string) => void;
+  } | null>(null);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [confirmTemplateId, setConfirmTemplateId] = useState<string | null>(
+    null,
+  );
+  const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+
+  const [isInventoryOpen, setIsInventoryOpen] = useState(false);
+  const [isCraftingOpen, setIsCraftingOpen] = useState(false);
+  const [isQuestLogOpen, setIsQuestLogOpen] = useState(false);
+  const [craftSlot1, setCraftSlot1] = useState<string | null>(null);
+  const [craftSlot2, setCraftSlot2] = useState<string | null>(null);
+
+  const showError = (msg: string) => {
+    setEditorError(msg);
+    setTimeout(() => setEditorError(null), 5000);
+  };
+
+  const pushHistory = (newProj: Project) => {
+    setHistory((h) => ({ past: [...h.past.slice(-20), project], future: [] }));
+    setProject(newProj);
+  };
+
+  const undo = () => {
+    if (history.past.length === 0) return;
+    const previous = history.past[history.past.length - 1];
+    setHistory((h) => ({
+      past: h.past.slice(0, -1),
+      future: [project, ...h.future],
+    }));
+    setProject(previous);
+  };
+
+  const redo = () => {
+    if (history.future.length === 0) return;
+    const next = history.future[0];
+    setHistory((h) => ({
+      past: [...h.past, project],
+      future: h.future.slice(1),
+    }));
+    setProject(next);
+  };
+
+  // Load from IndexedDB (fallback to LocalStorage) on mount
+  useEffect(() => {
+    const loadProject = async () => {
+      try {
+        let saved = await get("neocities_project");
+        if (!saved) {
+          const localSaved = localStorage.getItem("neocities_project");
+          if (localSaved) {
+            saved = JSON.parse(localSaved);
+          }
+        }
+        if (saved) {
+          const parsed = saved;
+          setProject((prev) => ({
+            ...prev,
+            ...parsed,
+            dialogueTrees: parsed.dialogueTrees
+              ? parsed.dialogueTrees.map((t: any) => ({
+                  ...t,
+                  nodes: t.nodes
+                    ? t.nodes.map((n: any) => ({
+                        ...n,
+                        choices: n.choices || [],
+                      }))
+                    : [],
+                }))
+              : [],
+            inventoryItems: parsed.inventoryItems || [],
+            assets: parsed.assets || [],
+            scenes: parsed.scenes
+              ? parsed.scenes.map((s: any) => ({
+                  ...s,
+                  objects: s.objects || [],
+                }))
+              : prev.scenes,
+            uiMenus: parsed.uiMenus
+              ? parsed.uiMenus.map((s: any) => ({
+                  ...s,
+                  objects: s.objects || [],
+                }))
+              : prev.uiMenus || [],
+            currentUiMenuId: parsed.currentUiMenuId || null,
+            globalSettings: {
+              ...prev.globalSettings,
+              ...(parsed.globalSettings || {}),
+            },
+          }));
+        }
+      } catch (e) {
+        console.error("Failed to load project", e);
+      }
+    };
+    loadProject();
+  }, []);
+
+  // Save to IndexedDB on change
+  useEffect(() => {
+    const saveProject = async () => {
+      setSaveStatus("saving");
+      try {
+        await set("neocities_project", project);
+        setSaveStatus("saved");
+      } catch (e) {
+        console.error("Failed to save project to IndexedDB", e);
+        setSaveStatus("error");
+        showError("Failed to save project. Storage quota may be exceeded.");
+      }
+    };
+
+    // Debounce save slightly to avoid thrashing
+    const timeoutId = setTimeout(saveProject, 500);
+    return () => clearTimeout(timeoutId);
+  }, [project]);
+
+  const handleExportProject = () => {
+    try {
+      const jsonStr = JSON.stringify(project);
+      const blob = new Blob([jsonStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const downloadAnchorNode = document.createElement("a");
+      downloadAnchorNode.setAttribute("href", url);
+      downloadAnchorNode.setAttribute(
+        "download",
+        `${project.name.replace(/\s+/g, "_")}_backup.json`,
+      );
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      document.body.removeChild(downloadAnchorNode);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      showError("Failed to export project: " + err);
+    }
+  };
+
+  const handleImportProject = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        let content = event.target?.result as string;
+        if (file.name.endsWith(".html")) {
+          const startIndex = content.indexOf(
+            '<script id="__GAME_DATA__" type="application/json">',
+          );
+          if (startIndex !== -1) {
+            const dataStart =
+              startIndex +
+              '<script id="__GAME_DATA__" type="application/json">'.length;
+            const endIndex = content.indexOf("</script>", dataStart);
+            if (endIndex !== -1) {
+              content = content.substring(dataStart, endIndex);
+            } else {
+              showError("No embedded project data found in HTML.");
+              return;
+            }
+          } else {
+            showError("No embedded project data found in HTML.");
+            return;
+          }
+        }
+        const parsed = JSON.parse(content);
+        if (parsed && parsed.id && parsed.scenes) {
+          setProject(parsed);
+          setHistory({ past: [], future: [] });
+          showError("Project loaded successfully!");
+        } else {
+          showError("Invalid project file format.");
+        }
+      } catch (err) {
+        showError("Failed to parse project file.");
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const bgmRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const currentScene = project.scenes.find(
+      (s) => s.id === project.currentSceneId,
+    );
+    if (isPlaying && currentScene?.bgmAssetId) {
+      const audioAsset = project.assets.find(
+        (a) => a.id === currentScene.bgmAssetId,
+      );
+      if (audioAsset) {
+        if (!bgmRef.current) {
+          bgmRef.current = new Audio(audioAsset.src);
+          bgmRef.current.loop = true;
+        } else if (bgmRef.current.src !== audioAsset.src) {
+          bgmRef.current.pause();
+          bgmRef.current = new Audio(audioAsset.src);
+          bgmRef.current.loop = true;
+        }
+        bgmRef.current
+          .play()
+          .catch((e) => console.error("Audio playback failed", e));
+      }
+    } else {
+      if (bgmRef.current) {
+        bgmRef.current.pause();
+      }
+    }
+
+    return () => {
+      if (!isPlaying && bgmRef.current) {
+        bgmRef.current.pause();
+      }
+    };
+  }, [isPlaying, project.currentSceneId, project.assets, project.scenes]);
+
+  useEffect(() => {
+    let timeInterval: ReturnType<typeof setInterval> | null = null;
+    if (isPlaying && project.globalSettings.useDayNightCycle) {
+      timeInterval = setInterval(() => {
+        setGameTime((prev) => {
+          const next = prev + 0.1;
+          return next >= 24 ? 0 : next;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (timeInterval) clearInterval(timeInterval);
+    };
+  }, [isPlaying, project.globalSettings.useDayNightCycle]);
+
+  // Auto-save game state in preview mode
+  useEffect(() => {
+    if (isPlaying) {
+      const stateToSave = {
+        inventory: playerInventory,
+        needs: playerNeeds,
+        time: gameTime,
+        skills: playerSkills,
+        collectedObjects: collectedObjects,
+        flags: playerFlags,
+      };
+      localStorage.setItem(
+        `neocities_game_save_${project.id}`,
+        JSON.stringify(stateToSave),
+      );
+    }
+  }, [
+    playerInventory,
+    playerNeeds,
+    gameTime,
+    playerSkills,
+    collectedObjects,
+    playerFlags,
+    isPlaying,
+    project.id,
+  ]);
+
+  useEffect(() => {
+    if (isPlaying) {
+      const engine = Matter.Engine.create();
+      const runner = Matter.Runner.create();
+      const bodies: Record<string, Matter.Body> = {};
+
+      const ground = Matter.Bodies.rectangle(
+        project.globalSettings.stageWidth / 2,
+        project.globalSettings.stageHeight + 25,
+        project.globalSettings.stageWidth,
+        50,
+        { isStatic: true },
+      );
+      const leftWall = Matter.Bodies.rectangle(
+        -25,
+        project.globalSettings.stageHeight / 2,
+        50,
+        project.globalSettings.stageHeight,
+        { isStatic: true },
+      );
+      const rightWall = Matter.Bodies.rectangle(
+        project.globalSettings.stageWidth + 25,
+        project.globalSettings.stageHeight / 2,
+        50,
+        project.globalSettings.stageHeight,
+        { isStatic: true },
+      );
+      Matter.Composite.add(engine.world, [ground, leftWall, rightWall]);
+
+      const currentScene = project.scenes.find(
+        (s) => s.id === project.currentSceneId,
+      );
+      if (currentScene) {
+        currentScene.objects.forEach((obj) => {
+          if (obj.hasPhysics) {
+            const body = Matter.Bodies.rectangle(
+              obj.x + obj.width / 2,
+              obj.y + obj.height / 2,
+              obj.width,
+              obj.height,
+              { restitution: 0.6, friction: 0.1, density: 0.05 },
+            );
+            Matter.Body.setAngle(body, obj.rotation * (Math.PI / 180));
+            bodies[obj.id] = body;
+            Matter.Composite.add(engine.world, body);
+          }
+        });
+      }
+
+      let mouseConstraint: any = null;
+      if (stageRef.current) {
+        const mouse = Matter.Mouse.create(stageRef.current);
+        mouseConstraint = Matter.MouseConstraint.create(engine, {
+          mouse: mouse,
+          constraint: {
+            stiffness: 0.2,
+            render: {
+              visible: false,
+            },
+          },
+        });
+        Matter.Composite.add(engine.world, mouseConstraint);
+      }
+
+      Matter.Runner.run(runner, engine);
+
+      let animationFrameId: number;
+      const updatePhysics = () => {
+        const newPhysicsState: Record<
+          string,
+          { x: number; y: number; rotation: number }
+        > = {};
+        for (const id in bodies) {
+          const body = bodies[id];
+          const obj = currentScene?.objects.find((o) => o.id === id);
+          if (obj) {
+            newPhysicsState[id] = {
+              x: body.position.x - obj.width / 2,
+              y: body.position.y - obj.height / 2,
+              rotation: body.angle * (180 / Math.PI),
+            };
+          }
+        }
+        setPhysicsState(newPhysicsState);
+        animationFrameId = requestAnimationFrame(updatePhysics);
+      };
+      updatePhysics();
+
+      return () => {
+        cancelAnimationFrame(animationFrameId);
+        if (mouseConstraint) {
+          Matter.Mouse.clearSourceEvents(mouseConstraint.mouse);
+        }
+        Matter.Runner.stop(runner);
+        Matter.Engine.clear(engine);
+      };
+    } else {
+      setPhysicsState({});
+    }
+  }, [isPlaying, project.currentSceneId]);
+
+  // Dragging state for stage objects
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  // Parallax tracking state
+  const [mouseRatio, setMouseRatio] = useState({ x: 0, y: 0 });
+
+  const stageRef = useRef<HTMLDivElement>(null);
+
+  const getWorkingScene = () => {
+    if (editorMode === "ui_stage") {
+      return (
+        (project.uiMenus || []).find((s) => s.id === project.currentUiMenuId) ||
+        (project.uiMenus || [])[0] ||
+        null
+      );
+    }
+    return (
+      project.scenes.find((s) => s.id === project.currentSceneId) ||
+      project.scenes[0] ||
+      null
+    );
+  };
+  const currentScene = getWorkingScene() || {
+    id: "fallback",
+    name: "Fallback",
+    width: 800,
+    height: 600,
+    backgroundColor: "#000",
+    objects: [],
+  };
+  const selectedObject = currentScene?.objects.find(
+    (o) => o.id === selectedObjectId,
+  );
+
+  const updateScene = (updates: Partial<typeof currentScene>) => {
+    if (!currentScene) return;
+    const isUI = editorMode === "ui_stage";
+    const newProject = {
+      ...project,
+      [isUI ? "uiMenus" : "scenes"]: (
+        project[isUI ? "uiMenus" : "scenes"] || []
+      ).map((s) => (s.id === currentScene.id ? { ...s, ...updates } : s)),
+    };
+    pushHistory(newProject);
+  };
+
+  const updateObject = (id: string, updates: Partial<SceneObject>) => {
+    if (!currentScene) return;
+    const isUI = editorMode === "ui_stage";
+    const newProject = {
+      ...project,
+      [isUI ? "uiMenus" : "scenes"]: (
+        project[isUI ? "uiMenus" : "scenes"] || []
+      ).map((s) =>
+        s.id === currentScene.id
+          ? {
+              ...s,
+              objects: s.objects.map((o) =>
+                o.id === id ? { ...o, ...updates } : o,
+              ),
+            }
+          : s,
+      ),
+    };
+    pushHistory(newProject);
+  };
+
+  const updateObjectTransient = (id: string, updates: Partial<SceneObject>) => {
+    if (!currentScene) return;
+    const isUI = editorMode === "ui_stage";
+    setProject((prev) => ({
+      ...prev,
+      [isUI ? "uiMenus" : "scenes"]: (
+        prev[isUI ? "uiMenus" : "scenes"] || []
+      ).map((s) =>
+        s.id === currentScene.id
+          ? {
+              ...s,
+              objects: s.objects.map((o) =>
+                o.id === id ? { ...o, ...updates } : o,
+              ),
+            }
+          : s,
+      ),
+    }));
+  };
+
+  const handleDragStartAsset = (e: React.DragEvent, asset: any) => {
+    // Omitting extremely large Data URL (base64) strings from the drag payload prevents crashing Chrome/Firefox
+    // We will retrieve the src later by using the asset.id from the project.assets list
+    const transferPayload = {
+      ...asset,
+      src: asset.id ? undefined : asset.src,
+    };
+    e.dataTransfer.setData("application/json", JSON.stringify(transferPayload));
+  };
+
+  const handleDropOnStage = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!stageRef.current) return;
+
+    const rect = stageRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    try {
+      const assetData = e.dataTransfer.getData("application/json");
+      if (assetData) {
+        const asset = JSON.parse(assetData);
+
+        let objDefaults: Partial<SceneObject> = {};
+        if (asset.type === "prefab") {
+          if (asset.prefabType === "chest") {
+            objDefaults = {
+              isText: true,
+              textContent: "🎁",
+              textFontSize: 64,
+              width: 64,
+              height: 64,
+              interaction: "give-item",
+              name: "Loot Chest",
+            };
+            // Optional: automatically ask user what item? We can just leave it blank for now.
+            showError(
+              'Loot Chest dropped! Remember to select it and assign the "Item to Give" in the Interaction settings.',
+            );
+          } else if (asset.prefabType === "door") {
+            objDefaults = {
+              isHitbox: true,
+              width: 64,
+              height: 128,
+              interaction: "scene_change",
+              name: "Portal / Door",
+            };
+            showError(
+              'Portal dropped! Select it and assign the "Portal Destination" in the property panel.',
+            );
+          } else if (asset.prefabType === "npc") {
+            objDefaults = {
+              isText: true,
+              textContent: "🧙‍♂️",
+              textFontSize: 64,
+              width: 64,
+              height: 64,
+              interaction: "dialogue",
+              name: "NPC",
+            };
+            showError(
+              'NPC dropped! Select it and assign a "Dialogue Tree" in the Interaction settings.',
+            );
+          }
+        }
+
+        let actualSrc = asset.src || "";
+        if (asset.id && !asset.src) {
+          const matchedAsset = project.assets.find((a: any) => a.id === asset.id);
+          if (matchedAsset) actualSrc = matchedAsset.src;
+        }
+
+        const newObj: SceneObject = {
+          id: uuidv4(),
+          name: asset.name,
+          src: actualSrc,
+          x: x - 50, // Center roughly
+          y: y - 50,
+          width:
+            asset.type === "ui_element"
+              ? asset.uiElementType === "panel"
+                ? 200
+                : asset.uiElementType === "progress"
+                  ? 150
+                  : 50
+              : asset.type === "hitbox"
+                ? 100
+                : asset.type === "script"
+                  ? 64
+                  : asset.type === "text"
+                    ? 200
+                    : 100,
+          height:
+            asset.type === "ui_element"
+              ? asset.uiElementType === "panel"
+                ? 200
+                : asset.uiElementType === "progress"
+                  ? 20
+                  : 50
+              : asset.type === "hitbox"
+                ? 100
+                : asset.type === "script"
+                  ? 64
+                  : asset.type === "text"
+                    ? 50
+                    : 100,
+          rotation: 0,
+          zIndex: currentScene?.objects.length || 0,
+          opacity: 1,
+          locked: false,
+          cursor: asset.type === "prefab" ? "pointer" : "default",
+          animation: "none",
+          interaction: "none",
+          isVideo: asset.type === "video",
+          isHitbox: asset.type === "hitbox",
+          isScript: asset.type === "script",
+          isText: asset.type === "text",
+          isUiElement: asset.type === "ui_element",
+          uiElementType: asset.uiElementType,
+          uiColorPrimary: "#00ffff",
+          uiColorSecondary: "#ff00ff",
+          uiIconType: "check",
+          uiValue: 50,
+          uiChecked: true,
+          uiBorderType: "solid",
+          textContent:
+            asset.type === "text"
+              ? "New Text"
+              : asset.type === "ui_element" && asset.uiElementType === "tooltip"
+                ? "Tooltip text"
+                : undefined,
+          textColor: "#ffffff",
+          textFontSize: 24,
+          textFontFamily: "sans-serif",
+          blendMode: "normal",
+          parallaxSpeed: 1,
+          hasPhysics: false,
+          scriptAssetId: asset.type === "script" ? asset.id : undefined,
+          ...objDefaults,
+        };
+
+        updateScene({ objects: [...currentScene.objects, newObj] });
+        setSelectedObjectId(newObj.id);
+      }
+    } catch (err) {
+      console.error("Drop error", err);
+    }
+  };
+
+  const handleStageDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  // Resizing state
+  const [resizingId, setResizingId] = useState<string | null>(null);
+  const [resizeStart, setResizeStart] = useState({ w: 0, h: 0, x: 0, y: 0 });
+
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
+  const [rotateStart, setRotateStart] = useState({
+    r: 0,
+    cx: 0,
+    cy: 0,
+    startAngle: 0,
+  });
+
+  // Object dragging on stage
+  const handleObjectPointerDown = (e: React.PointerEvent, obj: SceneObject) => {
+    if (isPlaying || obj.locked) return;
+    e.stopPropagation();
+
+    if (e.shiftKey) {
+      if (selectedMultiIds.includes(obj.id)) {
+        setSelectedMultiIds((prev) => prev.filter((id) => id !== obj.id));
+        setSelectedObjectId((prev) => (prev === obj.id ? null : prev));
+      } else {
+        if (!selectedMultiIds.includes(selectedObjectId || "")) {
+          setSelectedMultiIds(
+            selectedObjectId ? [selectedObjectId, obj.id] : [obj.id],
+          );
+        } else {
+          setSelectedMultiIds((prev) => [...prev, obj.id]);
+        }
+        setSelectedObjectId(obj.id);
+      }
+    } else {
+      // If we click an object already in multi-selection, don't clear.
+      // This allows dragging the whole group.
+      if (!selectedMultiIds.includes(obj.id)) {
+        setSelectedObjectId(obj.id);
+        setSelectedMultiIds([obj.id]);
+      } else {
+        setSelectedObjectId(obj.id);
+      }
+    }
+
+    setDraggingId(obj.id);
+    dragStartProjectRef.current = project;
+
+    // Calculate offset from top-left of object
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    setDragOffset({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    });
+
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch (err) {}
+  };
+
+  const handleResizePointerDown = (e: React.PointerEvent, obj: SceneObject) => {
+    if (isPlaying || obj.locked) return;
+    e.stopPropagation();
+    setResizingId(obj.id);
+    dragStartProjectRef.current = project;
+    setResizeStart({ w: obj.width, h: obj.height, x: e.clientX, y: e.clientY });
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch (err) {}
+  };
+
+  const handleRotatePointerDown = (e: React.PointerEvent, obj: SceneObject) => {
+    if (isPlaying || obj.locked) return;
+    e.stopPropagation();
+    setRotatingId(obj.id);
+    dragStartProjectRef.current = project;
+
+    // Find absolute center of the object relative to viewport
+    const parentEl = (e.currentTarget as HTMLElement).parentElement;
+    if (!parentEl) return;
+
+    const rect = parentEl.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+
+    // Calculate initial angle of mouse pointer relative to center
+    const startAngle =
+      Math.atan2(e.clientY - cy, e.clientX - cx) * (180 / Math.PI);
+
+    setRotateStart({ r: obj.rotation || 0, cx, cy, startAngle });
+
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch (err) {}
+  };
+
+  const handleObjectPointerMove = (e: React.PointerEvent) => {
+    if (isPlaying) {
+      if (stageRef.current) {
+        const rect = stageRef.current.getBoundingClientRect();
+        const mx = (e.clientX - rect.left) / rect.width - 0.5;
+        const my = (e.clientY - rect.top) / rect.height - 0.5;
+        setMouseRatio({ x: mx, y: my });
+      }
+      return;
+    }
+
+    if (resizingId) {
+      const dx = e.clientX - resizeStart.x;
+      const dy = e.clientY - resizeStart.y;
+      updateObjectTransient(resizingId, {
+        width: Math.max(10, resizeStart.w + dx),
+        height: Math.max(10, resizeStart.h + dy),
+      });
+      return;
+    }
+
+    if (rotatingId) {
+      const angle =
+        Math.atan2(e.clientY - rotateStart.cy, e.clientX - rotateStart.cx) *
+        (180 / Math.PI);
+      let newRot = rotateStart.r + (angle - rotateStart.startAngle);
+
+      // Snap to 45 deg if shift
+      if (e.shiftKey) {
+        newRot = Math.round(newRot / 45) * 45;
+      }
+
+      updateObjectTransient(rotatingId, { rotation: Math.floor(newRot) % 360 });
+      return;
+    }
+
+    if (selectionStart && stageRef.current) {
+      const rect = stageRef.current.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      setSelectionBox({
+        x: selectionStart.x,
+        y: selectionStart.y,
+        w: mx - selectionStart.x,
+        h: my - selectionStart.y,
+      });
+      return;
+    }
+
+    if (!draggingId || !stageRef.current) return;
+
+    const rect = stageRef.current.getBoundingClientRect();
+    let newX = e.clientX - rect.left - dragOffset.x;
+    let newY = e.clientY - rect.top - dragOffset.y;
+
+    // Snap to grid if enabled or shift is held
+    if (project.globalSettings.snapToGrid || e.shiftKey) {
+      const grid = project.globalSettings.gridSize || 20;
+      newX = Math.round(newX / grid) * grid;
+      newY = Math.round(newY / grid) * grid;
+    }
+
+    if (selectedMultiIds.length > 1 && selectedMultiIds.includes(draggingId)) {
+      const startSceneList =
+        editorMode === "ui_stage"
+          ? dragStartProjectRef.current?.uiMenus
+          : dragStartProjectRef.current?.scenes;
+      const startScene = startSceneList?.find(
+        (s: any) =>
+          s.id ===
+          (editorMode === "ui_stage"
+            ? dragStartProjectRef.current?.currentUiMenuId
+            : dragStartProjectRef.current?.currentSceneId),
+      );
+      const startDragObj = startScene?.objects.find(
+        (o: any) => o.id === draggingId,
+      );
+
+      if (!startDragObj) return;
+      const dx = newX - startDragObj.x;
+      const dy = newY - startDragObj.y;
+
+      setProject((prev) => {
+        const isUI = editorMode === "ui_stage";
+        const sceneList = isUI ? prev.uiMenus : prev.scenes;
+        if (!sceneList) return prev;
+
+        return {
+          ...prev,
+          [isUI ? "uiMenus" : "scenes"]: sceneList.map((s: any) =>
+            s.id === (isUI ? prev.currentUiMenuId : prev.currentSceneId)
+              ? {
+                  ...s,
+                  objects: s.objects.map((o: any) => {
+                    if (!selectedMultiIds.includes(o.id)) return o;
+                    const startObj = startScene?.objects.find(
+                      (so: any) => so.id === o.id,
+                    );
+                    if (!startObj) return o;
+                    return { ...o, x: startObj.x + dx, y: startObj.y + dy };
+                  }),
+                }
+              : s,
+          ),
+        };
+      });
+    } else {
+      updateObjectTransient(draggingId, { x: newX, y: newY });
+    }
+  };
+
+  const handleObjectPointerUp = (e: React.PointerEvent) => {
+    if (selectionBox) {
+      const bx = Math.min(selectionBox.x, selectionBox.x + selectionBox.w);
+      const by = Math.min(selectionBox.y, selectionBox.y + selectionBox.h);
+      const bw = Math.abs(selectionBox.w);
+      const bh = Math.abs(selectionBox.h);
+
+      const selectedIds = currentScene.objects
+        .filter((obj) => {
+          return (
+            !obj.locked &&
+            obj.x < bx + bw &&
+            obj.x + obj.width > bx &&
+            obj.y < by + bh &&
+            obj.y + obj.height > by
+          );
+        })
+        .map((o) => o.id);
+
+      setSelectedMultiIds(selectedIds);
+      if (selectedIds.length > 0) setSelectedObjectId(selectedIds[0]);
+      else setSelectedObjectId(null);
+      setSelectionBox(null);
+      setSelectionStart(null);
+    }
+
+    if (draggingId || resizingId || rotatingId) {
+      if (dragStartProjectRef.current) {
+        setHistory((h) => ({
+          past: [...h.past.slice(-20), dragStartProjectRef.current!],
+          future: [],
+        }));
+      }
+    }
+    if (draggingId) {
+      try {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch (err) {}
+      setDraggingId(null);
+    }
+    if (resizingId) {
+      try {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch (err) {}
+      setResizingId(null);
+    }
+    if (rotatingId) {
+      try {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch (err) {}
+      setRotatingId(null);
+    }
+  };
+
+  // Global keyboard shortcuts for Undo/Redo/Clipboard
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if typing in an input text area
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      )
+        return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setSelectedMultiIds(currentScene.objects.map((o) => o.id));
+        setSelectedObjectId(null);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        const idsToCopy =
+          selectedMultiIds.length > 0
+            ? selectedMultiIds
+            : selectedObjectId
+              ? [selectedObjectId]
+              : [];
+        if (idsToCopy.length > 0) {
+          e.preventDefault();
+          const objs = currentScene.objects.filter((o) =>
+            idsToCopy.includes(o.id),
+          );
+          setClipboard(objs);
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x") {
+        const idsToCut =
+          selectedMultiIds.length > 0
+            ? selectedMultiIds
+            : selectedObjectId
+              ? [selectedObjectId]
+              : [];
+        if (idsToCut.length > 0) {
+          e.preventDefault();
+          const objs = currentScene.objects.filter((o) =>
+            idsToCut.includes(o.id),
+          );
+          setClipboard(objs);
+          updateScene({
+            objects: currentScene.objects.filter(
+              (o) => !idsToCut.includes(o.id),
+            ),
+          });
+          setSelectedMultiIds([]);
+          setSelectedObjectId(null);
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+        if (clipboard.length > 0) {
+          e.preventDefault();
+          const newObjs = clipboard.map((o) => ({
+            ...o,
+            id: uuidv4(),
+            x: o.x + 20,
+            y: o.y + 20,
+          }));
+          updateScene({ objects: [...currentScene.objects, ...newObjs] });
+          setSelectedMultiIds(newObjs.map((o) => o.id));
+          if (newObjs.length === 1) setSelectedObjectId(newObjs[0].id);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [
+    history,
+    project,
+    clipboard,
+    selectedObjectId,
+    selectedMultiIds,
+    currentScene,
+  ]);
+
+  // Keyboard nudging and duplication
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((!selectedObjectId && selectedMultiIds.length === 0) || isPlaying)
+        return;
+      // Don't nudge if typing in an input
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      )
+        return;
+
+      const idsToModify =
+        selectedMultiIds.length > 0
+          ? selectedMultiIds
+          : selectedObjectId
+            ? [selectedObjectId]
+            : [];
+      const objs = currentScene.objects.filter(
+        (o) => idsToModify.includes(o.id) && !o.locked,
+      );
+      if (objs.length === 0) return;
+
+      // Duplicate with Ctrl+D or Cmd+D
+      if ((e.ctrlKey || e.metaKey) && e.key === "d") {
+        e.preventDefault();
+        const newObjs = objs.map((obj) => ({
+          ...obj,
+          id: uuidv4(),
+          x: obj.x + 20,
+          y: obj.y + 20,
+        }));
+        updateScene({ objects: [...currentScene.objects, ...newObjs] });
+        setSelectedMultiIds(newObjs.map((o) => o.id));
+        setSelectedObjectId(newObjs[0]?.id || null);
+        return;
+      }
+
+      const step = e.shiftKey ? 10 : 1;
+      let dx = 0;
+      let dy = 0;
+
+      if (e.key === "ArrowUp") dy = -step;
+      else if (e.key === "ArrowDown") dy = step;
+      else if (e.key === "ArrowLeft") dx = -step;
+      else if (e.key === "ArrowRight") dx = step;
+      else if (e.key === "Delete" || e.key === "Backspace") {
+        updateScene({
+          objects: currentScene.objects.filter(
+            (o) => !idsToModify.includes(o.id),
+          ),
+        });
+        setSelectedMultiIds([]);
+        setSelectedObjectId(null);
+        return;
+      }
+
+      if (dx !== 0 || dy !== 0) {
+        e.preventDefault();
+        // Since we are nudging array of objects, we use updateScene directly instead of updateObject so they move together
+        updateScene({
+          objects: currentScene.objects.map((o) => {
+            if (idsToModify.includes(o.id) && !o.locked) {
+              return { ...o, x: o.x + dx, y: o.y + dy };
+            }
+            return o;
+          }),
+        });
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedObjectId, selectedMultiIds, currentScene.objects, isPlaying]);
+
+  const handleExport = () => {
+    try {
+      const html = generateExportHtml(project);
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "game.html";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      showError("Failed to export HTML: " + err);
+      console.error(err);
+    }
+  };
+
+  const [page, setPage] = useState(1);
+  const ITEMS_PER_PAGE = 50;
+
+  const fetchFromGitHub = async () => {
+    setIsFetchingGithub(true);
+    try {
+      let treeData: any[] = [];
+
+      try {
+        const headers: HeadersInit = {};
+        if (import.meta.env.VITE_GITHUB_TOKEN) {
+          headers["Authorization"] =
+            `token ${import.meta.env.VITE_GITHUB_TOKEN}`;
+        }
+
+        // Try to fetch the full recursive tree
+        const response = await fetch(
+          "https://api.github.com/repos/thenabu222/entropic-ai/git/trees/main?recursive=1",
+          { headers },
+        );
+        if (!response.ok) throw new Error(`API Error: ${response.status}`);
+        const data = await response.json();
+        if (data && Array.isArray(data.tree)) {
+          treeData = data.tree;
+        }
+      } catch (err) {
+        console.warn(
+          "Recursive fetch failed, falling back to root directory",
+          err,
+        );
+        // Fallback to root directory if recursive fails (e.g., due to size or rate limits)
+        const headers: HeadersInit = {};
+        if (import.meta.env.VITE_GITHUB_TOKEN) {
+          headers["Authorization"] =
+            `token ${import.meta.env.VITE_GITHUB_TOKEN}`;
+        }
+        const fallbackResponse = await fetch(
+          "https://api.github.com/repos/thenabu222/entropic-ai/contents/",
+          { headers },
+        );
+        if (!fallbackResponse.ok)
+          throw new Error(`Fallback API Error: ${fallbackResponse.status}`);
+        const fallbackData = await fallbackResponse.json();
+        if (Array.isArray(fallbackData)) {
+          treeData = fallbackData.map((f: any) => ({
+            path: f.name,
+            type: f.type === "file" ? "blob" : "tree",
+            download_url: f.download_url,
+          }));
+        }
+      }
+
+      const validFiles = treeData.filter(
+        (file: any) =>
+          file.type === "blob" &&
+          file.path &&
+          file.path.match(/\.(png|jpg|jpeg|gif|webp|js|ts)$/i),
+      );
+
+      const newAssets: Asset[] = validFiles.map((file: any) => {
+        const name = file.path.split("/").pop();
+        const parts = file.path.split("/");
+        parts.pop(); // remove filename
+        const category = parts.length > 0 ? parts.join("/") : "root";
+
+        // Properly encode the path to handle spaces and special characters
+        const encodedPath = file.path
+          .split("/")
+          .map((p: string) => encodeURIComponent(p))
+          .join("/");
+
+        const isScript = file.path.match(/\.(js|ts)$/i);
+
+        return {
+          id: uuidv4(),
+          type: isScript ? "script" : "image",
+          category,
+          src:
+            file.download_url ||
+            `https://raw.githubusercontent.com/thenabu222/entropic-ai/main/${encodedPath}`,
+          name: name,
+        };
+      });
+
+      setProject((p) => {
+        let updatedAssets = [...p.assets];
+        const timestamp = Date.now();
+        const srcReplacements = new Map<string, string>();
+        const nameReplacements = new Map<string, string>();
+
+        newAssets.forEach((newA) => {
+          const existingIndex = updatedAssets.findIndex(
+            (a) => a.name === newA.name,
+          );
+          const newSrc = newA.src + `?t=${timestamp}`;
+          nameReplacements.set(newA.name, newSrc);
+
+          if (existingIndex !== -1) {
+            srcReplacements.set(updatedAssets[existingIndex].src, newSrc);
+            updatedAssets[existingIndex] = {
+              ...updatedAssets[existingIndex],
+              src: newSrc,
+            };
+          } else {
+            updatedAssets.unshift({
+              ...newA,
+              src: newSrc,
+            });
+          }
+        });
+
+        // Deep replace src in scenes and uiMenus
+        const migrateObjects = (scenes: Scene[]) => {
+          return scenes.map((scene) => ({
+            ...scene,
+            objects: scene.objects.map((obj) => {
+              let updatedSrc = obj.src;
+              if (srcReplacements.has(obj.src)) {
+                updatedSrc = srcReplacements.get(obj.src)!;
+              } else if (
+                obj.src &&
+                obj.src.startsWith("data:") &&
+                nameReplacements.has(obj.name)
+              ) {
+                updatedSrc = nameReplacements.get(obj.name)!;
+              }
+              return { ...obj, src: updatedSrc };
+            }),
+          }));
+        };
+
+        return {
+          ...p,
+          assets: updatedAssets,
+          scenes: migrateObjects(p.scenes || []),
+          uiMenus: migrateObjects(p.uiMenus || []),
+        };
+      });
+    } catch (error: any) {
+      console.error("GitHub fetch failed", error);
+      showError(
+        `Failed to fetch from GitHub: ${error.message || "Network Error"}. You may have hit the GitHub API rate limit.`,
+      );
+    } finally {
+      setIsFetchingGithub(false);
+    }
+  };
+
+  // Sidebar Resizing Logic
+  useEffect(() => {
+    const handlePointerMove = (e: PointerEvent) => {
+      if (document.body.classList.contains("resizing-sidebar")) {
+        const newWidth = Math.max(
+          200,
+          Math.min(800, document.body.clientWidth - e.clientX),
+        );
+        setRightSidebarWidth(newWidth);
+      }
+    };
+    const handlePointerUp = () => {
+      if (document.body.classList.contains("resizing-sidebar")) {
+        document.body.classList.remove("resizing-sidebar");
+      }
+    };
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleClick = () => {
+      if (contextMenu) setContextMenu(null);
+    };
+    window.addEventListener("pointerdown", handleClick);
+    return () => window.removeEventListener("pointerdown", handleClick);
+  }, [contextMenu]);
+
+  // Auto-fetch from GitHub on mount
+  useEffect(() => {
+    fetchFromGitHub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const moveZIndex = (id: string, dir: 1 | -1) => {
+    const obj = currentScene.objects.find((o) => o.id === id);
+    if (!obj) return;
+    updateObject(id, { zIndex: obj.zIndex + dir });
+  };
+
+  const [previewDialogue, setPreviewDialogue] = useState<string | null>(null);
+
+  const handleObjectClick = (obj: SceneObject) => {
+    if (!isPlaying) return;
+    if (obj.triggerOnce && triggeredObjects.has(obj.id)) return;
+
+    if (obj.triggerOnce) {
+      setTriggeredObjects((prev) => new Set(prev).add(obj.id));
+    }
+
+    if (obj.audioSrc) {
+      const audioAsset = project.assets.find((a) => a.id === obj.audioSrc);
+      if (audioAsset) {
+        const audio = new Audio(audioAsset.src);
+        audio.play().catch((e) => console.error("SFX playback failed", e));
+      }
+    }
+
+    // Evaluate global Skill requirement block (if the object has a skill set to something other than 'none' and interaction is NOT skill_check)
+    if (
+      obj.requiredSkill &&
+      obj.requiredSkill !== "none" &&
+      obj.interaction !== "skill_check"
+    ) {
+      const diff = obj.skillCheckDifficulty || 0;
+      const roll =
+        Math.floor(Math.random() * 20) +
+        1 +
+        (playerSkills[obj.requiredSkill] || 0);
+      if (roll < diff) {
+        setPreviewDialogue(
+          `[Skill Check Failed] ${obj.requiredSkill} roll: ${roll} vs ${diff}`,
+        );
+        setTimeout(() => setPreviewDialogue(null), 3000);
+        return; // Stop interaction!
+      }
+    }
+
+    // Process Needs Effect
+    if (obj.needsEffect) {
+      try {
+        if (typeof obj.needsEffect === "string") {
+          const effect = JSON.parse(obj.needsEffect);
+          // skip string parsing if it's already an object
+        }
+        const effect =
+          typeof obj.needsEffect === "string"
+            ? JSON.parse(obj.needsEffect)
+            : obj.needsEffect;
+        let changed = false;
+        const nextNeeds = { ...playerNeeds };
+        for (const [key, val] of Object.entries(effect) as [string, number][]) {
+          if (val && nextNeeds[key] !== undefined) {
+            nextNeeds[key] += val;
+            changed = true;
+          }
+        }
+        if (changed) setPlayerNeeds(nextNeeds);
+      } catch (e) {
+        console.error("Failed to parse needs effect", e);
+      }
+    }
+
+    if (obj.requireItemId && !playerInventory.includes(obj.requireItemId)) {
+      const item = project.inventoryItems.find(
+        (i) => i.id === obj.requireItemId,
+      );
+      setPreviewDialogue(
+        `You need ${item?.name || "a specific item"} to interact with this.`,
+      );
+      setTimeout(() => setPreviewDialogue(null), 3000);
+      return;
+    }
+
+    if (
+      obj.requireItemId &&
+      obj.consumeRequiredItem &&
+      playerInventory.includes(obj.requireItemId)
+    ) {
+      setPlayerInventory((prev) => {
+        const next = [...prev];
+        const idx = next.indexOf(obj.requireItemId!);
+        if (idx !== -1) next.splice(idx, 1);
+        return next;
+      });
+      const reqItem = project.inventoryItems.find(
+        (i) => i.id === obj.requireItemId,
+      );
+      if (reqItem) {
+        setPreviewDialogue(`You used up: ${reqItem.name}`);
+        setTimeout(() => setPreviewDialogue(null), 3000);
+      }
+    }
+
+    if (obj.interaction === "dialogue" && obj.interactionData) {
+      setPreviewDialogue(obj.interactionData);
+      setTimeout(() => setPreviewDialogue(null), 3000);
+    } else if (obj.interaction === "start-dialogue" && obj.dialogueTreeId) {
+      const tree = project.dialogueTrees.find(
+        (t) => t.id === obj.dialogueTreeId,
+      );
+      if (tree && tree.startNodeId) {
+        setActiveDialogue({ treeId: tree.id, nodeId: tree.startNodeId });
+      }
+    } else if (
+      obj.interaction === "give-item" ||
+      obj.interaction === "collect"
+    ) {
+      if (obj.giveItemId) {
+        setPlayerInventory((prev) => [...prev, obj.giveItemId!]);
+        const item = project.inventoryItems.find(
+          (i) => i.id === obj.giveItemId,
+        );
+        setPreviewDialogue(
+          obj.interactionData || `You obtained: ${item?.name || "an item"}!`,
+        );
+        setTimeout(() => setPreviewDialogue(null), 3000);
+      } else if (!obj.giveItemId) {
+        setPreviewDialogue(obj.interactionData || `You interacted with this!`);
+        setTimeout(() => setPreviewDialogue(null), 3000);
+      }
+
+      if (obj.interaction === "collect") {
+        setCollectedObjects((prev) => [...prev, obj.id]);
+      }
+    } else if (obj.interaction === "link" && obj.interactionData) {
+      window.open(obj.interactionData, "_blank");
+    } else if (obj.interaction === "modify_number" && obj.targetUiId) {
+      const amount = parseFloat(obj.interactionData || "0");
+
+      const updateObjHelper = (s: Scene) => {
+        return {
+          ...s,
+          objects: s.objects.map((o) => {
+            if (o.id === obj.targetUiId) {
+              if (o.uiElementType === "progress") {
+                return {
+                  ...o,
+                  uiValue: Math.max(
+                    0,
+                    Math.min(100, (o.uiValue || 0) + amount),
+                  ),
+                };
+              } else if (o.isText && o.textContent !== undefined) {
+                const currentNum = parseFloat(o.textContent || "0");
+                if (!isNaN(currentNum))
+                  return {
+                    ...o,
+                    textContent: (currentNum + amount).toString(),
+                  };
+              }
+            }
+            return o;
+          }),
+        };
+      };
+
+      setProject((prev) => ({
+        ...prev,
+        scenes: (prev.scenes || []).map(updateObjHelper),
+        uiMenus: (prev.uiMenus || []).map(updateObjHelper),
+      }));
+    } else if (obj.interaction === "open_ui" && obj.targetUiId) {
+      setActiveUiMenus((prev) => [...prev, obj.targetUiId!]);
+    } else if (obj.interaction === "close_ui") {
+      setActiveUiMenus((prev) => {
+        if (obj.targetUiId) {
+          return prev.filter((id) => id !== obj.targetUiId);
+        }
+        const next = [...prev];
+        if (next.length > 0) next.pop(); // Close the topmost UI menu
+        return next;
+      });
+    } else if (obj.interaction === "scene_change" && obj.interactionData) {
+      const targetScene = project.scenes.find(
+        (s) => s.id === obj.interactionData,
+      );
+      if (targetScene) {
+        setTransition({ active: true, type: "fade" });
+        setTimeout(() => {
+          setProject((p) => ({ ...p, currentSceneId: targetScene.id }));
+        }, 500);
+        setTimeout(() => {
+          setTransition({ active: false, type: "fade" });
+        }, 1000);
+      } else {
+        showError(`Scene not found: ${obj.interactionData}`);
+      }
+    } else if (obj.interaction === "toggle_inventory") {
+      setIsInventoryOpen((prev) => !prev);
+    } else if (obj.interaction === "open_crafting") {
+      setIsCraftingOpen(true);
+    } else if (obj.interaction === "open_quest_log") {
+      setIsQuestLogOpen(true);
+    } else if (obj.interaction === "set_flag" && obj.interactionData) {
+      if (!playerFlags.includes(obj.interactionData)) {
+        setPlayerFlags((prev) => [...prev, obj.interactionData!]);
+        setPreviewDialogue(`Story Event Triggered!`);
+        setTimeout(() => setPreviewDialogue(null), 3000);
+      }
+    } else if (obj.interaction === "save_game") {
+      const stateToSave = {
+        inventory: playerInventory,
+        needs: playerNeeds,
+        time: gameTime,
+        skills: playerSkills,
+        collectedObjects: collectedObjects,
+        flags: playerFlags,
+      };
+      localStorage.setItem(
+        `neocities_game_save_${project.id}`,
+        JSON.stringify(stateToSave),
+      );
+      setPreviewDialogue("Game Saved!");
+      setTimeout(() => setPreviewDialogue(null), 2000);
+    } else if (obj.interaction === "load_game") {
+      const saved = localStorage.getItem(`neocities_game_save_${project.id}`);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed.inventory) setPlayerInventory(parsed.inventory);
+          if (parsed.needs) setPlayerNeeds(parsed.needs);
+          if (parsed.time) setGameTime(parsed.time);
+          if (parsed.skills) setPlayerSkills(parsed.skills);
+          if (parsed.collectedObjects)
+            setCollectedObjects(parsed.collectedObjects);
+          if (parsed.flags) setPlayerFlags(parsed.flags);
+          setPreviewDialogue("Game Loaded!");
+        } catch (e) {
+          setPreviewDialogue("Load failed: Corrupted save data.");
+        }
+      } else {
+        setPreviewDialogue("No save game found.");
+      }
+      setTimeout(() => setPreviewDialogue(null), 3000);
+    } else if (obj.interaction === "skill_check") {
+      const skill = obj.requiredSkill || "none";
+      const dc = obj.skillCheckDifficulty || 10;
+      const roll = Math.floor(Math.random() * 20) + 1;
+      const modifier = 2; // Hardcoded for now, could be dynamic later
+      const total = roll + modifier;
+      const success = total >= dc;
+
+      const skillName = skill.charAt(0).toUpperCase() + skill.slice(1);
+      const resultText = success
+        ? `[${skillName} Check: ${total} vs DC ${dc} - SUCCESS]\n\n${obj.interactionData || "You succeeded!"}`
+        : `[${skillName} Check: ${total} vs DC ${dc} - FAILED]\n\nYou failed to interact with this object.`;
+
+      setPreviewDialogue(resultText);
+      setTimeout(() => setPreviewDialogue(null), 4000);
+    } else if (obj.interaction === "sound" && obj.interactionData) {
+      const audioAsset = project.assets.find(
+        (a) => a.id === obj.interactionData,
+      );
+      if (audioAsset) {
+        const audio = new Audio(audioAsset.src);
+        audio.play().catch((e) => console.error("SFX playback failed", e));
+      }
+    } else if (obj.interaction === "sound" && obj.interactionData) {
+      const audioAsset = project.assets.find(
+        (a) => a.id === obj.interactionData,
+      );
+      if (audioAsset) {
+        const audio = new Audio(audioAsset.src);
+        audio.play().catch((e) => console.error("SFX playback failed", e));
+      }
+    } else if (obj.interaction === "run_script" && obj.scriptAssetId) {
+      const scriptAsset = project.assets.find(
+        (a) => a.id === obj.scriptAssetId,
+      );
+      if (scriptAsset && scriptAsset.src) {
+        fetch(scriptAsset.src)
+          .then((res) => res.text())
+          .then((code) => {
+            try {
+              const context = {
+                project,
+                setProject,
+                playerInventory,
+                setPlayerInventory,
+                setPreviewDialogue,
+                obj,
+              };
+              const func = new Function("context", code);
+              func(context);
+            } catch (err) {
+              console.error("Script execution failed", err);
+              setPreviewDialogue("Script execution failed!");
+              setTimeout(() => setPreviewDialogue(null), 3000);
+            }
+          })
+          .catch((err) => {
+            console.error("Failed to fetch script", err);
+          });
+      }
+    } else if (obj.interaction === "play_cutscene" && obj.interactionData) {
+      const videoAsset = project.assets.find((a) => a.id === obj.interactionData);
+      if (videoAsset) {
+        setActiveCutscene({
+          src: videoAsset.src,
+          targetSceneId: obj.scriptAssetId || undefined
+        });
+      }
+    }
+  };
+
+  const usedAssetSrcs = new Set(
+    project.scenes.flatMap((s) => s.objects.map((o) => o.src)),
+  );
+  const sortedImageAssets = [
+    ...project.assets.filter((a) => a.type === "image"),
+  ].sort((a, b) => {
+    const aUsed = usedAssetSrcs.has(a.src);
+    const bUsed = usedAssetSrcs.has(b.src);
+    if (aUsed && !bUsed) return -1;
+    if (!aUsed && bUsed) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  const uiBg = project.globalSettings.uiColorBackground || "#1a0033";
+  const uiPrimary = project.globalSettings.uiColorPrimary || "#00ffff";
+  const uiSecondary = project.globalSettings.uiColorSecondary || "#94a3b8";
+  const uiFont = project.globalSettings.uiFontFamily || "sans-serif";
+  const uiRadius = `${project.globalSettings.uiBorderRadius ?? 8}px`;
+
+  return (
+    <div className="flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans overflow-hidden">
+      {/* Top Bar */}
+      {editorError && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[9999] bg-red-500 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2">
+          <span>{editorError}</span>
+          <button
+            onClick={() => setEditorError(null)}
+            className="text-white/80 hover:text-white"
+          >
+            &times;
+          </button>
+        </div>
+      )}
+      {promptModal?.isOpen && (
+        <div className="fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center">
+          <div className="bg-neutral-800 p-6 rounded-lg shadow-xl border border-neutral-700 w-80">
+            <h3 className="text-lg font-medium text-white mb-4">
+              {promptModal.message}
+            </h3>
+            <input
+              autoFocus
+              type="text"
+              defaultValue={promptModal.defaultValue}
+              className="w-full bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-white mb-4 focus:outline-none focus:border-emerald-500"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  promptModal.onSubmit(e.currentTarget.value);
+                  setPromptModal(null);
+                } else if (e.key === "Escape") {
+                  setPromptModal(null);
+                }
+              }}
+              id="prompt-input"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setPromptModal(null)}
+                className="px-4 py-2 text-sm text-neutral-400 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const el = document.getElementById(
+                    "prompt-input",
+                  ) as HTMLInputElement;
+                  if (el) {
+                    promptModal.onSubmit(el.value);
+                  }
+                  setPromptModal(null);
+                }}
+                className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <header className="flex items-center justify-between px-4 py-2 bg-neutral-950 border-b border-neutral-800 relative">
+        <div className="flex items-center gap-4">
+          <h1 className="text-lg font-bold text-emerald-400">
+            Neocities Game Builder
+          </h1>
+          <button
+            onClick={() => setIsTemplateModalOpen(true)}
+            className="flex items-center gap-1 bg-amber-500 hover:bg-amber-400 text-black px-2 py-1 rounded text-xs font-bold transition-colors"
+          >
+            <Plus size={14} /> New
+          </button>
+          <input
+            type="text"
+            value={project.name}
+            onChange={(e) => setProject({ ...project, name: e.target.value })}
+            className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-500"
+          />
+        </div>
+
+        <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-lg border border-neutral-800 absolute left-1/2 -translate-x-1/2">
+          <button
+            onClick={() => setEditorMode("scenes")}
+            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${editorMode === "scenes" ? "bg-neutral-700 text-white" : "text-neutral-400 hover:text-neutral-200 flex items-center gap-2"}`}
+          >
+            <Layers size={14} /> Scenes
+          </button>
+          <button
+            onClick={() => setEditorMode("ui_maker")}
+            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${editorMode === "ui_maker" ? "bg-neutral-700 text-white" : "text-neutral-400 hover:text-neutral-200 flex items-center gap-2"}`}
+          >
+            <LayoutTemplate size={14} /> UI
+          </button>
+          <button
+            onClick={() => setEditorMode("stage")}
+            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${editorMode === "stage" ? "bg-neutral-700 text-white" : "text-neutral-400 hover:text-neutral-200 flex items-center gap-2"}`}
+          >
+            <ImageIcon size={14} /> Stage
+          </button>
+          <button
+            onClick={() => setEditorMode("dialogue")}
+            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${editorMode === "dialogue" ? "bg-neutral-700 text-white" : "text-neutral-400 hover:text-neutral-200 flex items-center gap-2"}`}
+          >
+            <MessageSquare size={14} /> Dialogue
+          </button>
+          <button
+            onClick={() => setEditorMode("items")}
+            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${editorMode === "items" ? "bg-neutral-700 text-white" : "text-neutral-400 hover:text-neutral-200 flex items-center gap-2"}`}
+          >
+            <Backpack size={14} /> Items
+          </button>
+          <button
+            onClick={() => setEditorMode("rpg_systems")}
+            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${editorMode === "rpg_systems" ? "bg-neutral-700 text-white" : "text-neutral-400 hover:text-neutral-200 flex items-center gap-2"}`}
+          >
+            <Shield size={14} /> RPG Systems
+          </button>
+          {editorMode === "ui_stage" && (
+            <button
+              onClick={() => setEditorMode("ui_stage")}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors bg-neutral-700 text-white flex items-center gap-2 ml-2`}
+            >
+              <LayoutTemplate size={14} /> UI Stage
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Save Status Indicator */}
+          <div className="flex items-center gap-1 mr-2 text-xs font-mono">
+            {saveStatus === "saving" && (
+              <span className="text-amber-500 animate-pulse">Saving...</span>
+            )}
+            {saveStatus === "saved" && (
+              <span className="text-emerald-500 flex items-center gap-1">
+                <CheckCircle2 size={12} /> Saved
+              </span>
+            )}
+            {saveStatus === "error" && (
+              <span className="text-red-500 font-bold">Save Failed!</span>
+            )}
+          </div>
+
+          <button
+            onClick={undo}
+            disabled={history.past.length === 0}
+            className="p-1.5 text-neutral-400 hover:text-white disabled:opacity-30"
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo size={18} />
+          </button>
+          <button
+            onClick={redo}
+            disabled={history.future.length === 0}
+            className="p-1.5 text-neutral-400 hover:text-white disabled:opacity-30 mr-2"
+            title="Redo (Ctrl+Y)"
+          >
+            <Redo size={18} />
+          </button>
+
+          <div className="h-6 w-px bg-neutral-800 mx-2"></div>
+
+          <div className="flex items-center gap-2 mr-2 cursor-pointer hover:text-neutral-200">
+            <input
+              type="checkbox"
+              checked={project.globalSettings.snapToGrid}
+              onChange={(e) =>
+                setProject((p) => ({
+                  ...p,
+                  globalSettings: {
+                    ...p.globalSettings,
+                    snapToGrid: e.target.checked,
+                  },
+                }))
+              }
+              className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950"
+            />
+            <LabelWithHelp
+              label="Snap Grid"
+              className="text-neutral-400"
+              helpText="Align objects to a grid when moving them."
+            />
+          </div>
+          <div className="flex items-center gap-2 mr-4 cursor-pointer hover:text-neutral-200">
+            <input
+              type="checkbox"
+              checked={project.globalSettings.showGhostOutlines}
+              onChange={(e) =>
+                setProject((p) => ({
+                  ...p,
+                  globalSettings: {
+                    ...p.globalSettings,
+                    showGhostOutlines: e.target.checked,
+                  },
+                }))
+              }
+              className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950"
+            />
+            <LabelWithHelp
+              label="Ghosts"
+              className="text-neutral-400"
+              helpText="Show outlines of invisible objects and hitboxes."
+            />
+          </div>
+
+          {/* Backup / Restore Controls */}
+          <div className="flex items-center gap-1 mr-2">
+            <button
+              onClick={handleExportProject}
+              className="flex items-center gap-1 px-2 py-1.5 bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 rounded text-xs transition-colors"
+              title="Backup Project (JSON)"
+            >
+              <Save size={14} /> Backup
+            </button>
+            <label
+              className="flex items-center gap-1 px-2 py-1.5 bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 rounded text-xs transition-colors cursor-pointer"
+              title="Restore Project (JSON or HTML)"
+            >
+              <Upload size={14} /> Restore
+              <input
+                type="file"
+                accept=".json,.html"
+                className="hidden"
+                ref={fileInputRef}
+                onChange={handleImportProject}
+              />
+            </label>
+          </div>
+
+          <button
+            onClick={() => {
+              const newState = !isPlaying;
+              setIsPlaying(newState);
+              if (newState) {
+                // Try to load save game state
+                try {
+                  const saved = localStorage.getItem(
+                    `neocities_game_save_${project.id}`,
+                  );
+                  if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (parsed.inventory) setPlayerInventory(parsed.inventory);
+                    if (parsed.needs) setPlayerNeeds(parsed.needs);
+                    if (parsed.time) setGameTime(parsed.time);
+                    if (parsed.skills) setPlayerSkills(parsed.skills);
+                    if (parsed.collectedObjects)
+                      setCollectedObjects(parsed.collectedObjects);
+                    if (parsed.flags) setPlayerFlags(parsed.flags);
+                  } else {
+                    setPlayerInventory([]);
+                    setCollectedObjects([]);
+                    setPlayerNeeds({
+                      rest: 100,
+                      hunger: 100,
+                      connection: 100,
+                      spiritual: 100,
+                      novelty: 100,
+                    });
+                    setPlayerSkills({
+                      naturalist: 5,
+                      occultist: 2,
+                      scribal: 8,
+                    });
+                    setGameTime(8);
+                  }
+                } catch (e) {
+                  setPlayerInventory([]);
+                  setCollectedObjects([]);
+                }
+              } else {
+                setPlayerInventory([]);
+                setCollectedObjects([]);
+                setTriggeredObjects(new Set());
+              }
+              setActiveUiMenus(
+                newState
+                  ? (project.uiMenus || [])
+                      .filter((m) => m.isOpenByDefault)
+                      .map((m) => m.id)
+                  : [],
+              );
+              setActiveDialogue(null);
+              setPreviewDialogue(null);
+              setIsInventoryOpen(false);
+            }}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm font-medium transition-colors ${isPlaying ? "bg-amber-500/20 text-amber-400" : "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"}`}
+          >
+            <Play size={16} />
+            {isPlaying ? "Stop" : "Play"}
+          </button>
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-1 px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 rounded text-sm font-medium transition-colors"
+          >
+            <Download size={16} />
+            Export
+          </button>
+        </div>
+      </header>
+
+      <div className="flex flex-1 overflow-hidden">
+        {(editorMode === "stage" || editorMode === "ui_stage") && (
+          <>
+            {/* Left Sidebar */}
+            <aside className="w-64 bg-neutral-900 border-r border-neutral-800 flex flex-col">
+              <div className="flex border-b border-neutral-800 bg-neutral-950">
+                <button
+                  onClick={() => setLeftSidebarTab("librarian")}
+                  className={`flex-1 p-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${leftSidebarTab === "librarian" ? "text-emerald-400 border-b-2 border-emerald-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
+                >
+                  <ImageIcon size={14} /> Assets
+                </button>
+                <button
+                  onClick={() => setLeftSidebarTab("theme")}
+                  className={`flex-1 p-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${leftSidebarTab === "theme" ? "text-emerald-400 border-b-2 border-emerald-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
+                >
+                  <Palette size={14} /> UI Theme
+                </button>
+              </div>
+
+              {leftSidebarTab === "librarian" && (
+                <>
+                  <div className="p-3 border-b border-neutral-800 flex justify-between items-center bg-neutral-900">
+                    <div className="flex gap-2 w-full justify-between">
+                      <button
+                        onClick={() => setIsAiModalOpen(true)}
+                        className="cursor-pointer text-[10px] bg-emerald-600 border border-emerald-500 text-white font-bold px-2 py-1 rounded hover:bg-emerald-500 flex items-center gap-1 shadow-lg"
+                      >
+                        <Wand2 size={10} /> AI Make
+                      </button>
+                      <button
+                        onClick={fetchFromGitHub}
+                        disabled={isFetchingGithub}
+                        className="cursor-pointer text-[10px] bg-indigo-500/20 text-indigo-400 px-2 py-1 rounded hover:bg-indigo-500/30 disabled:opacity-50"
+                      >
+                        {isFetchingGithub ? "Syncing..." : "Sync GH"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          const inUse = new Set([
+                            ...project.scenes.flatMap((s) =>
+                              s.objects.map((o) => o.src),
+                            ),
+                            ...project.uiMenus.flatMap((s) =>
+                              s.objects.map((o) => o.src),
+                            ),
+                            ...project.inventoryItems
+                              .map((i) =>
+                                i.iconAssetId
+                                  ? project.assets.find(
+                                      (a) => a.id === i.iconAssetId,
+                                    )?.src
+                                  : null,
+                              )
+                              .filter(Boolean),
+                          ]);
+                          setProject((p) => ({
+                            ...p,
+                            assets: p.assets.filter(
+                              (a) =>
+                                !a.src.startsWith("data:") || inUse.has(a.src),
+                            ),
+                          }));
+                          showError(
+                            "Unused base64 assets removed to save space.",
+                          );
+                        }}
+                        className="cursor-pointer text-[10px] bg-red-500/20 text-red-400 px-2 py-1 rounded hover:bg-red-500/30 ring-1 ring-red-500/50 hover:ring-red-500"
+                        title="Remove unused local assets to fix export size"
+                      >
+                        Purge Base64
+                      </button>
+                      <label
+                        className="cursor-pointer text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded hover:bg-emerald-500/30 ring-1 ring-emerald-500/50 hover:ring-emerald-500"
+                        title="Upload a folder of assets"
+                      >
+                        Folder
+                        <input
+                          type="file"
+                          className="hidden"
+                          webkitdirectory="true"
+                          directory="true"
+                          onChange={async (e) => {
+                            const files = e.target.files;
+                            if (!files || files.length === 0) return;
+
+                            const newAssets: Asset[] = [];
+                            const promises = Array.from(files).map(
+                              (file: File) => {
+                                return new Promise<void>((resolve) => {
+                                  const isAudio =
+                                    file.type.startsWith("audio/");
+                                  const isImage =
+                                    file.type.startsWith("image/");
+                                  const isVideo =
+                                    file.type.startsWith("video/");
+                                  if (!isAudio && !isImage && !isVideo) {
+                                    resolve();
+                                    return;
+                                  }
+
+                                  let category = isAudio
+                                    ? "audio"
+                                    : isVideo
+                                      ? "video"
+                                      : "unsorted";
+                                  // Need any here because webkitRelativePath is missing from basic React File types
+                                  const pathParts = (file as any)
+                                    .webkitRelativePath
+                                    ? (file as any).webkitRelativePath.split(
+                                        "/",
+                                      )
+                                    : [];
+                                  if (pathParts.length > 2) {
+                                    category =
+                                      pathParts[pathParts.length - 2] ||
+                                      category;
+                                  } else if (pathParts.length === 2) {
+                                    category = pathParts[0];
+                                  }
+
+                                  const reader = new FileReader();
+                                  reader.onload = (ev) => {
+                                    const src = ev.target?.result as string;
+                                    newAssets.push({
+                                      id: uuidv4(),
+                                      type: isAudio
+                                        ? "audio"
+                                        : isVideo
+                                          ? "video"
+                                          : "image",
+                                      category,
+                                      src,
+                                      name: file.name,
+                                    });
+                                    resolve();
+                                  };
+                                  reader.onerror = () => resolve();
+                                  reader.readAsDataURL(file);
+                                });
+                              },
+                            );
+
+                            await Promise.all(promises);
+                            if (newAssets.length > 0) {
+                              setProject((p) => ({
+                                ...p,
+                                assets: [...newAssets, ...p.assets],
+                              }));
+                            }
+                          }}
+                        />
+                      </label>
+                      <label
+                        className="cursor-pointer text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded hover:bg-emerald-500/30 ring-1 ring-emerald-500/50 hover:ring-emerald-500"
+                        title="Upload one or more files"
+                      >
+                        Files
+                        <input
+                          type="file"
+                          multiple
+                          className="hidden"
+                          accept="image/*, audio/*, video/*"
+                          onChange={async (e) => {
+                            const files = e.target.files;
+                            if (!files || files.length === 0) return;
+
+                            const newAssets: Asset[] = [];
+                            const vibesToAnalyze: Asset[] = [];
+
+                            const promises = Array.from(files).map(
+                              (file: File) => {
+                                return new Promise<void>((resolve) => {
+                                  const isAudio =
+                                    file.type.startsWith("audio/");
+                                  const isImage =
+                                    file.type.startsWith("image/");
+                                  const isVideo =
+                                    file.type.startsWith("video/");
+                                  if (!isAudio && !isImage && !isVideo) {
+                                    resolve();
+                                    return;
+                                  }
+
+                                  const reader = new FileReader();
+                                  reader.onload = (ev) => {
+                                    const src = ev.target?.result as string;
+                                    const newAsset: Asset = {
+                                      id: uuidv4(),
+                                      type: isAudio
+                                        ? "audio"
+                                        : isVideo
+                                          ? "video"
+                                          : "image",
+                                      category: isAudio
+                                        ? "audio"
+                                        : isVideo
+                                          ? "video"
+                                          : "unsorted",
+                                      src,
+                                      name: file.name,
+                                    };
+                                    newAssets.push(newAsset);
+                                    if (isImage && files.length <= 5) {
+                                      // Only auto-analyze if 5 or fewer files uploaded at once
+                                      vibesToAnalyze.push(newAsset);
+                                    }
+                                    resolve();
+                                  };
+                                  reader.onerror = () => resolve();
+                                  reader.readAsDataURL(file);
+                                });
+                              },
+                            );
+
+                            await Promise.all(promises);
+
+                            if (newAssets.length > 0) {
+                              setProject((p) => ({
+                                ...p,
+                                assets: [...newAssets, ...p.assets],
+                              }));
+
+                              // Analyze vibes in background
+                              vibesToAnalyze.forEach(async (asset) => {
+                                try {
+                                  const vibe = await analyzeAssetVibe(
+                                    asset.src,
+                                  );
+                                  setProject((p) => ({
+                                    ...p,
+                                    assets: p.assets.map((a) =>
+                                      a.id === asset.id
+                                        ? {
+                                            ...a,
+                                            description: vibe.description || "",
+                                            tags: vibe.tags || [],
+                                            category: (
+                                              vibe.tags || []
+                                            ).includes("background")
+                                              ? "backgrounds"
+                                              : "sprites",
+                                          }
+                                        : a,
+                                    ),
+                                  }));
+                                } catch (err) {
+                                  console.error("Vibe analysis failed", err);
+                                }
+                              });
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
+                    <div className="mb-4 space-y-2">
+                      <div className="relative">
+                        <Search
+                          size={14}
+                          className="absolute left-2 top-2.5 text-neutral-500"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Search assets..."
+                          value={assetSearch}
+                          onChange={(e) => setAssetSearch(e.target.value)}
+                          className="w-full bg-neutral-800 text-neutral-300 text-xs rounded-lg pl-8 pr-3 py-2 border border-neutral-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+
+                      {/* Breadcrumb Navigation */}
+                      <div className="flex items-center gap-1 text-xs text-neutral-400 overflow-x-auto pb-1 custom-scrollbar">
+                        <button
+                          onClick={() => {
+                            setActiveBin("all");
+                            setPage(1);
+                          }}
+                          className={`hover:text-white whitespace-nowrap ${activeBin === "all" ? "text-emerald-400 font-medium" : ""}`}
+                        >
+                          All
+                        </button>
+                        <span className="text-neutral-600">/</span>
+                        <button
+                          onClick={() => {
+                            setActiveBin("");
+                            setPage(1);
+                          }}
+                          className={`hover:text-white whitespace-nowrap ${activeBin === "" ? "text-emerald-400 font-medium" : ""}`}
+                        >
+                          Root
+                        </button>
+                        {activeBin !== "all" &&
+                          activeBin !== "" &&
+                          activeBin
+                            .split("/")
+                            .filter(Boolean)
+                            .map((part, i, arr) => (
+                              <React.Fragment key={i}>
+                                <span className="text-neutral-600">/</span>
+                                <button
+                                  onClick={() => {
+                                    setActiveBin(arr.slice(0, i + 1).join("/"));
+                                    setPage(1);
+                                  }}
+                                  className={`hover:text-white whitespace-nowrap ${i === arr.length - 1 ? "text-emerald-400 font-medium" : ""}`}
+                                >
+                                  {part}
+                                </button>
+                              </React.Fragment>
+                            ))}
+                      </div>
+                    </div>
+
+                    {editorMode === "ui_stage" ? (
+                      <div className="grid grid-cols-2 gap-2 mb-4">
+                        <div
+                          draggable
+                          onDragStart={(e) =>
+                            handleDragStartAsset(e, {
+                              type: "ui_element",
+                              uiElementType: "panel",
+                              name: "UI Panel",
+                            })
+                          }
+                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                        >
+                          <Square size={16} className="text-emerald-400" />
+                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                            Panel
+                          </span>
+                        </div>
+                        <div
+                          draggable
+                          onDragStart={(e) =>
+                            handleDragStartAsset(e, {
+                              type: "ui_element",
+                              uiElementType: "button",
+                              name: "UI Button",
+                            })
+                          }
+                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                        >
+                          <MousePointerClick
+                            size={16}
+                            className="text-emerald-400"
+                          />
+                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                            Button
+                          </span>
+                        </div>
+                        <div
+                          draggable
+                          onDragStart={(e) =>
+                            handleDragStartAsset(e, {
+                              type: "ui_element",
+                              uiElementType: "progress",
+                              name: "UI Progress",
+                            })
+                          }
+                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                        >
+                          <Menu size={16} className="text-emerald-400" />
+                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                            Progress
+                          </span>
+                        </div>
+                        <div
+                          draggable
+                          onDragStart={(e) =>
+                            handleDragStartAsset(e, {
+                              type: "ui_element",
+                              uiElementType: "toggle",
+                              name: "UI Toggle",
+                            })
+                          }
+                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                        >
+                          <ToggleRight size={16} className="text-emerald-400" />
+                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                            Toggle
+                          </span>
+                        </div>
+                        <div
+                          draggable
+                          onDragStart={(e) =>
+                            handleDragStartAsset(e, {
+                              type: "ui_element",
+                              uiElementType: "icon",
+                              name: "UI Icon",
+                            })
+                          }
+                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                        >
+                          <Star size={16} className="text-emerald-400" />
+                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                            Icon
+                          </span>
+                        </div>
+                        <div
+                          draggable
+                          onDragStart={(e) =>
+                            handleDragStartAsset(e, {
+                              type: "ui_element",
+                              uiElementType: "tooltip",
+                              name: "UI Tooltip",
+                            })
+                          }
+                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                        >
+                          <MessageSquare
+                            size={16}
+                            className="text-emerald-400"
+                          />
+                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                            Tooltip
+                          </span>
+                        </div>
+                        <div
+                          draggable
+                          onDragStart={(e) =>
+                            handleDragStartAsset(e, {
+                              type: "ui_element",
+                              uiElementType: "selection",
+                              name: "UI Selection Indicator",
+                            })
+                          }
+                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                        >
+                          <Pointer size={16} className="text-emerald-400" />
+                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                            Selection
+                          </span>
+                        </div>
+                        <div
+                          draggable
+                          onDragStart={(e) =>
+                            handleDragStartAsset(e, {
+                              type: "text",
+                              name: "Text",
+                            })
+                          }
+                          className="p-2 border border-dashed border-indigo-500/50 bg-indigo-500/10 rounded-lg cursor-grab hover:bg-indigo-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                        >
+                          <Type size={16} className="text-indigo-400" />
+                          <span className="text-[10px] font-medium text-indigo-200 uppercase">
+                            Text
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2 mb-4">
+                        <div
+                          draggable
+                          onDragStart={(e) =>
+                            handleDragStartAsset(e, {
+                              type: "hitbox",
+                              name: "Clickable Area",
+                            })
+                          }
+                          className="flex-1 p-2 border border-dashed border-red-500/50 bg-red-500/10 rounded-lg cursor-grab hover:bg-red-500/20 flex flex-col items-center justify-center gap-1 transition-colors text-center"
+                        >
+                          <Square size={16} className="text-red-400" />
+                          <span className="text-[10px] font-medium text-red-200 uppercase leading-tight">
+                            Clickable Area
+                          </span>
+                        </div>
+                        <div
+                          draggable
+                          onDragStart={(e) =>
+                            handleDragStartAsset(e, {
+                              type: "text",
+                              name: "Text",
+                            })
+                          }
+                          className="flex-1 p-2 border border-dashed border-indigo-500/50 bg-indigo-500/10 rounded-lg cursor-grab hover:bg-indigo-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                        >
+                          <Type size={16} className="text-indigo-400" />
+                          <span className="text-[10px] font-medium text-indigo-200 uppercase">
+                            Text
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {editorMode === "stage" && (
+                      <div className="mb-4">
+                        <div className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-2">
+                          Smart Prefabs
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div
+                            draggable
+                            onDragStart={(e) =>
+                              handleDragStartAsset(e, {
+                                type: "prefab",
+                                prefabType: "chest",
+                                name: "Loot Chest",
+                              })
+                            }
+                            className="p-2 border border-dashed border-amber-500/50 bg-amber-500/10 rounded-lg cursor-grab hover:bg-amber-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                          >
+                            <Package size={16} className="text-amber-400" />
+                            <span className="text-[10px] font-medium text-amber-200 uppercase truncate w-full text-center">
+                              Chest
+                            </span>
+                          </div>
+                          <div
+                            draggable
+                            onDragStart={(e) =>
+                              handleDragStartAsset(e, {
+                                type: "prefab",
+                                prefabType: "door",
+                                name: "Door / Portal",
+                              })
+                            }
+                            className="p-2 border border-dashed border-blue-500/50 bg-blue-500/10 rounded-lg cursor-grab hover:bg-blue-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                          >
+                            <LogIn size={16} className="text-blue-400" />
+                            <span className="text-[10px] font-medium text-blue-200 uppercase truncate w-full text-center">
+                              Portal
+                            </span>
+                          </div>
+                          <div
+                            draggable
+                            onDragStart={(e) =>
+                              handleDragStartAsset(e, {
+                                type: "prefab",
+                                prefabType: "npc",
+                                name: "NPC",
+                              })
+                            }
+                            className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                          >
+                            <MessageSquare
+                              size={16}
+                              className="text-emerald-400"
+                            />
+                            <span className="text-[10px] font-medium text-emerald-200 uppercase truncate w-full text-center">
+                              NPC
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Subfolders */}
+                    {activeBin !== "all" &&
+                      (() => {
+                        const allCategories = Array.from(
+                          new Set<string>(
+                            project.assets.map((a) => a.category || ""),
+                          ),
+                        );
+                        const subfolders = new Set<string>();
+                        allCategories.forEach((cat) => {
+                          if (activeBin === "") {
+                            if (cat && cat !== "root")
+                              subfolders.add(cat.split("/")[0]);
+                          } else if (cat.startsWith(activeBin + "/")) {
+                            const remaining = cat.substring(
+                              activeBin.length + 1,
+                            );
+                            if (remaining)
+                              subfolders.add(remaining.split("/")[0]);
+                          }
+                        });
+                        const folders = Array.from(subfolders)
+                          .filter(Boolean)
+                          .sort();
+
+                        if (folders.length === 0) return null;
+
+                        return (
+                          <div className="grid grid-cols-2 gap-2 mb-4">
+                            {folders.map((sub) => (
+                              <div
+                                key={sub}
+                                onClick={() => {
+                                  setActiveBin(
+                                    activeBin ? `${activeBin}/${sub}` : sub,
+                                  );
+                                  setPage(1);
+                                }}
+                                className="bg-neutral-800 border border-neutral-700/50 rounded-lg cursor-pointer hover:bg-neutral-700 p-2 flex items-center gap-2 transition-colors"
+                              >
+                                <Folder
+                                  size={14}
+                                  className="text-emerald-400 shrink-0"
+                                />
+                                <span className="text-xs text-neutral-300 truncate">
+                                  {sub}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+
+                    <div className="grid grid-cols-2 gap-2">
+                      {project.assets
+                        .filter((a) => {
+                          if (assetSearch)
+                            return a.name
+                              .toLowerCase()
+                              .includes(assetSearch.toLowerCase());
+                          if (activeBin === "all") return true;
+                          const cat = a.category === "root" ? "" : a.category;
+                          return cat === activeBin;
+                        })
+                        .slice(0, page * ITEMS_PER_PAGE)
+                        .map((asset) => (
+                          <div
+                            key={asset.id}
+                            draggable
+                            onDragStart={(e) => handleDragStartAsset(e, asset)}
+                            className="bg-neutral-800 rounded-lg cursor-grab hover:ring-2 hover:ring-emerald-500/50 overflow-hidden group relative flex flex-col"
+                          >
+                            <div className="h-20 bg-neutral-900 flex items-center justify-center p-2 relative group/info">
+                              {asset.type === "script" ? (
+                                <FileCode
+                                  size={32}
+                                  className="text-neutral-500"
+                                />
+                              ) : asset.type === "audio" ? (
+                                <Music size={32} className="text-emerald-500" />
+                              ) : asset.type === "video" ? (
+                                <video
+                                  src={asset.src}
+                                  className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md"
+                                />
+                              ) : (
+                                <img
+                                  src={asset.src}
+                                  alt={asset.name}
+                                  className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md"
+                                  loading="lazy"
+                                />
+                              )}
+                              <div className="absolute bottom-1 right-1 flex items-center gap-1 opacity-0 group-hover/info:opacity-100 transition-opacity">
+                                {asset.type === "image" && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingAssetId(asset.id);
+                                    }}
+                                    className="p-1.5 bg-neutral-950/80 hover:bg-emerald-500/80 text-white rounded"
+                                    title="Edit Image"
+                                  >
+                                    <Wand2 size={12} />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setPromptModal({
+                                      isOpen: true,
+                                      message: "Enter new folder name:",
+                                      defaultValue: asset.category,
+                                      onSubmit: (newCat) => {
+                                        if (newCat) {
+                                          const newProj = {
+                                            ...project,
+                                            assets: project.assets.map((a) =>
+                                              a.id === asset.id
+                                                ? {
+                                                    ...a,
+                                                    category: newCat as any,
+                                                  }
+                                                : a,
+                                            ),
+                                          };
+                                          pushHistory(newProj);
+                                        }
+                                      },
+                                    });
+                                  }}
+                                  className="p-1.5 bg-neutral-950/80 hover:bg-emerald-500/80 text-white rounded"
+                                  title="Move to Folder"
+                                >
+                                  <FolderPlus size={12} />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="p-2 border-t border-neutral-700/50">
+                              <span
+                                className="text-[10px] text-neutral-300 truncate block font-medium"
+                                title={asset.name}
+                              >
+                                {asset.name}
+                              </span>
+                              <span className="text-[8px] uppercase tracking-wider text-neutral-500 mt-0.5 block">
+                                {asset.category}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+
+                    {project.assets.filter(
+                      (a) => activeBin === "all" || a.category === activeBin,
+                    ).length >
+                      page * ITEMS_PER_PAGE && (
+                      <button
+                        onClick={() => setPage((p) => p + 1)}
+                        className="w-full mt-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-medium rounded-lg transition-colors"
+                      >
+                        Load More
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {leftSidebarTab === "theme" && (
+                <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col gap-5">
+                  <div>
+                    <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                      <LayoutTemplate size={16} /> UI Theme Designer
+                    </h3>
+                    <p className="text-xs text-neutral-400 mb-4">
+                      Design the look of menus, dialogue boxes, and overlays.
+                    </p>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-xs text-neutral-500 block mb-1">
+                          Preset Themes
+                        </label>
+                        <select
+                          value={project.globalSettings.uiTheme || "default"}
+                          onChange={(e) => {
+                            const theme = e.target.value as any;
+                            const presets: Record<string, any> = {
+                              default: {
+                                primary: "#00ffff",
+                                bg: "#1a0033",
+                                radius: 0,
+                                font: '"VT323", monospace',
+                              },
+                              minimalist: {
+                                primary: "#000000",
+                                bg: "rgba(255,255,255,0.95)",
+                                radius: 0,
+                                font: "Helvetica, Arial, sans-serif",
+                              },
+                              barbie: {
+                                primary: "#ff69b4",
+                                bg: "rgba(255, 228, 225, 0.9)",
+                                radius: 24,
+                                font: '"Comic Sans MS", cursive',
+                              },
+                              terminal: {
+                                primary: "#00ff00",
+                                bg: "rgba(0,0,0,0.9)",
+                                radius: 0,
+                                font: "monospace",
+                              },
+                              cyberpunk: {
+                                primary: "#fcee0a",
+                                bg: "rgba(0,0,0,0.85)",
+                                radius: 0,
+                                font: "Impact, sans-serif",
+                              },
+                              fantasy: {
+                                primary: "#d4af37",
+                                bg: "rgba(43, 27, 23, 0.9)",
+                                radius: 12,
+                                font: "Papyrus, fantasy",
+                              },
+                              retro: {
+                                primary: "#ffffff",
+                                bg: "rgba(0,0,170,0.9)",
+                                radius: 0,
+                                font: '"Press Start 2P", monospace',
+                              },
+                            };
+                            const s = presets[theme];
+                            pushHistory({
+                              ...project,
+                              globalSettings: {
+                                ...project.globalSettings,
+                                uiTheme: theme,
+                                uiColorPrimary: s.primary,
+                                uiColorBackground: s.bg,
+                                uiBorderRadius: s.radius,
+                                uiFontFamily: s.font,
+                              },
+                            });
+                          }}
+                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-500"
+                        >
+                          <option value="default">Default Dark</option>
+                          <option value="minimalist">Minimalist Light</option>
+                          <option value="barbie">Barbie Core / Y2K</option>
+                          <option value="terminal">Hacker Terminal</option>
+                          <option value="cyberpunk">Cyberpunk Neon</option>
+                          <option value="fantasy">Ancient / Fantasy</option>
+                          <option value="retro">Retro 8-bit</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-neutral-500 block mb-1">
+                          Accent (Primary) Color
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={
+                              project.globalSettings.uiColorPrimary || "#10b981"
+                            }
+                            onChange={(e) =>
+                              pushHistory({
+                                ...project,
+                                globalSettings: {
+                                  ...project.globalSettings,
+                                  uiColorPrimary: e.target.value,
+                                },
+                              })
+                            }
+                            className="w-8 h-8 rounded border-none bg-transparent cursor-pointer"
+                          />
+                          <input
+                            type="text"
+                            value={
+                              project.globalSettings.uiColorPrimary || "#10b981"
+                            }
+                            onChange={(e) =>
+                              pushHistory({
+                                ...project,
+                                globalSettings: {
+                                  ...project.globalSettings,
+                                  uiColorPrimary: e.target.value,
+                                },
+                              })
+                            }
+                            className="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-neutral-500 block mb-1">
+                          Background Color (RGBA)
+                        </label>
+                        <input
+                          type="text"
+                          value={
+                            project.globalSettings.uiColorBackground ||
+                            "rgba(0,0,0,0.8)"
+                          }
+                          onChange={(e) =>
+                            pushHistory({
+                              ...project,
+                              globalSettings: {
+                                ...project.globalSettings,
+                                uiColorBackground: e.target.value,
+                              },
+                            })
+                          }
+                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-neutral-500 block mb-1">
+                          Border Radius (px)
+                        </label>
+                        <input
+                          type="number"
+                          value={project.globalSettings.uiBorderRadius ?? 8}
+                          onChange={(e) =>
+                            pushHistory({
+                              ...project,
+                              globalSettings: {
+                                ...project.globalSettings,
+                                uiBorderRadius: parseInt(e.target.value),
+                              },
+                            })
+                          }
+                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-neutral-500 block mb-1">
+                          Font Family
+                        </label>
+                        <select
+                          value={
+                            project.globalSettings.uiFontFamily || "sans-serif"
+                          }
+                          onChange={(e) =>
+                            pushHistory({
+                              ...project,
+                              globalSettings: {
+                                ...project.globalSettings,
+                                uiFontFamily: e.target.value,
+                              },
+                            })
+                          }
+                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-500"
+                        >
+                          <option value="sans-serif">System Sans-Serif</option>
+                          <option value="serif">System Serif</option>
+                          <option value="monospace">
+                            Monospace / Terminal
+                          </option>
+                          <option value="Helvetica, Arial, sans-serif">
+                            Helvetica / Arial
+                          </option>
+                          <option value='"Comic Sans MS", cursive'>
+                            Comic Sans / Bubbly
+                          </option>
+                          <option value="Impact, sans-serif">
+                            Impact / Heavy
+                          </option>
+                          <option value="Papyrus, fantasy">
+                            Papyrus / Ancient
+                          </option>
+                          <option value='"Press Start 2P", monospace'>
+                            8-Bit Pixel
+                          </option>
+                        </select>
+                      </div>
+
+                      <div className="pt-4 border-t border-neutral-800">
+                        <label className="flex items-center gap-2 cursor-pointer mb-2">
+                          <input
+                            type="checkbox"
+                            checked={!!project.globalSettings.customCss}
+                            onChange={(e) => {
+                              if (!e.target.checked) {
+                                pushHistory({
+                                  ...project,
+                                  globalSettings: {
+                                    ...project.globalSettings,
+                                    customCss: undefined,
+                                  },
+                                });
+                              } else {
+                                pushHistory({
+                                  ...project,
+                                  globalSettings: {
+                                    ...project.globalSettings,
+                                    customCss: "/* Custom CSS Editor */\\n",
+                                  },
+                                });
+                              }
+                            }}
+                          />
+                          <span className="text-xs text-neutral-300">
+                            Enable Custom CSS
+                          </span>
+                        </label>
+                        {project.globalSettings.customCss !== undefined && (
+                          <textarea
+                            value={project.globalSettings.customCss}
+                            onChange={(e) =>
+                              pushHistory({
+                                ...project,
+                                globalSettings: {
+                                  ...project.globalSettings,
+                                  customCss: e.target.value,
+                                },
+                              })
+                            }
+                            className="w-full h-32 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-[10px] font-mono text-neutral-400 focus:text-neutral-200 outline-none custom-scrollbar"
+                            placeholder="body { ... }"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </aside>
+
+            {/* Center - Stage */}
+            <main
+              className="flex-1 bg-neutral-950 overflow-auto p-4 relative flex flex-col"
+              onPointerDown={() => setSelectedObjectId(null)}
+            >
+              {/* Quick Edit Toggle for Canvas */}
+              {(editorMode === "stage" || editorMode === "ui_stage") &&
+                !isPlaying && (
+                  <div
+                    className="absolute top-4 left-1/2 -translate-x-1/2 z-[5000] flex bg-neutral-900 border border-neutral-700 p-1 rounded-lg shadow-2xl items-center gap-1"
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <div
+                      className={`relative flex items-center rounded-md transition-all ${editorMode === "stage" ? "bg-indigo-600 text-white shadow-inner" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+                    >
+                      <div className="pl-3 pr-1 py-1.5 pointer-events-none absolute font-bold text-sm">
+                        🎮 Edit Scene:
+                      </div>
+                      <select
+                        className={`appearance-none bg-transparent outline-none pl-[98px] pr-8 py-1.5 text-sm font-bold w-48 cursor-pointer ${editorMode === "stage" ? "text-white" : "text-neutral-300"}`}
+                        value={project.currentSceneId}
+                        onChange={(e) => {
+                          setEditorMode("stage");
+                          pushHistory({
+                            ...project,
+                            currentSceneId: e.target.value,
+                          });
+                        }}
+                        onClick={() => setEditorMode("stage")}
+                      >
+                        {project.scenes.map((s) => (
+                          <option
+                            key={s.id}
+                            value={s.id}
+                            className="bg-neutral-800 text-white"
+                          >
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">
+                        <ChevronDown size={14} />
+                      </div>
+                    </div>
+
+                    <div
+                      className={`relative flex items-center rounded-md transition-all ${editorMode === "ui_stage" ? "bg-emerald-600 text-white shadow-inner" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+                    >
+                      <div className="pl-3 pr-1 py-1.5 pointer-events-none absolute font-bold text-sm">
+                        ✨ Edit UI:
+                      </div>
+                      <select
+                        className={`appearance-none bg-transparent outline-none pl-[80px] pr-8 py-1.5 text-sm font-bold w-44 cursor-pointer ${editorMode === "ui_stage" ? "text-white" : "text-neutral-300"}`}
+                        value={project.currentUiMenuId || ""}
+                        onChange={(e) => {
+                          if (!e.target.value) return;
+                          setEditorMode("ui_stage");
+                          pushHistory({
+                            ...project,
+                            currentUiMenuId: e.target.value,
+                          });
+                        }}
+                        onClick={() => {
+                          if (project.uiMenus?.length)
+                            setEditorMode("ui_stage");
+                        }}
+                      >
+                        {!project.uiMenus?.length && (
+                          <option value="">No UI Menus</option>
+                        )}
+                        {(project.uiMenus || []).map((s) => (
+                          <option
+                            key={s.id}
+                            value={s.id}
+                            className="bg-neutral-800 text-white"
+                          >
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">
+                        <ChevronDown size={14} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+              <div
+                className={`relative mx-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 ${isPlaying ? "overflow-hidden" : "overflow-visible"} border border-neutral-800`}
+                style={{
+                  width:
+                    currentScene.width ||
+                    project.globalSettings.stageWidth ||
+                    800,
+                  height:
+                    currentScene.height ||
+                    project.globalSettings.stageHeight ||
+                    600,
+                  cursor: (isPlaying || true) && project.globalSettings.customCursorAssetId 
+                      ? `url('${project.assets.find(a => a.id === project.globalSettings.customCursorAssetId)?.src}'), auto` 
+                      : undefined
+                }}
+              >
+                {/* Ghost Background Stage for UI Editing */}
+                {editorMode === "ui_stage" &&
+                  !isPlaying &&
+                  (() => {
+                    const bgScene =
+                      project.scenes.find(
+                        (s) => s.id === project.currentSceneId,
+                      ) || project.scenes[0];
+                    if (!bgScene) return null;
+                    return (
+                      <div
+                        className="absolute pointer-events-none opacity-30 select-none grayscale z-0 ring-1 ring-neutral-700/50"
+                        style={{
+                          left: "0px",
+                          top: "0px",
+                          width:
+                            bgScene.width ||
+                            project.globalSettings.stageWidth ||
+                            800,
+                          height:
+                            bgScene.height ||
+                            project.globalSettings.stageHeight ||
+                            600,
+                          backgroundColor: bgScene.backgroundColor,
+                          overflow: "hidden",
+                        }}
+                      >
+                        {bgScene.objects
+                          .sort((a, b) => a.zIndex - b.zIndex)
+                          .map((obj) => (
+                            <div
+                              key={`ghost-bg-${obj.id}`}
+                              className="absolute"
+                              style={{
+                                left: obj.x,
+                                top: obj.y,
+                                width: obj.width,
+                                height: obj.height,
+                                transform: `rotate(${obj.rotation}deg)`,
+                              }}
+                            >
+                              {!obj.isUiElement &&
+                                !obj.isHitbox &&
+                                !obj.isText &&
+                                (obj.isVideo ? (
+                                  <video
+                                    src={obj.src}
+                                    className="w-full h-full object-fill opacity-50 pointer-events-none"
+                                  />
+                                ) : (
+                                  <img
+                                    src={obj.src}
+                                    className="w-full h-full object-fill opacity-50 pointer-events-none"
+                                  />
+                                ))}
+                            </div>
+                          ))}
+                      </div>
+                    );
+                  })()}
+
+                <div
+                  ref={stageRef}
+                  onDrop={handleDropOnStage}
+                  onDragOver={handleStageDragOver}
+                  onPointerDown={(e) => {
+                    if (isPlaying) return;
+                    // Only start drag pan / selection if clicking directly on stage or its background
+                    if (e.target !== stageRef.current) return;
+                    e.stopPropagation();
+                    try {
+                      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+                    } catch (err) {}
+                    const rect = stageRef.current?.getBoundingClientRect();
+                    if (!rect) return;
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    if (!e.shiftKey) {
+                      setSelectedObjectId(null);
+                      setSelectedMultiIds([]);
+                    }
+                    setSelectionStart({ x, y });
+                    setSelectionBox({ x, y, w: 0, h: 0 });
+                  }}
+                  onPointerMove={handleObjectPointerMove}
+                  onPointerUp={(e) => {
+                    handleObjectPointerUp(e);
+                    try {
+                      (e.target as HTMLElement).releasePointerCapture(
+                        e.pointerId,
+                      );
+                    } catch (err) {}
+                  }}
+                  onContextMenu={(e) => {
+                    if (isPlaying) return;
+                    if (e.target !== stageRef.current) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSelectedObjectId(null);
+                    setSelectedMultiIds([]);
+                    setContextMenu({
+                      x: e.clientX,
+                      y: e.clientY,
+                      objectId: null,
+                    });
+                  }}
+                  className={`absolute inset-0 shadow-2xl transition-all ${isPlaying ? "overflow-hidden" : "overflow-visible"} ${editorMode === "ui_stage" ? "ring-4 ring-indigo-500/40 shadow-[0_0_30px_rgba(99,102,241,0.2)]" : "ring-2 ring-pink-500 shadow-[0_0_40px_rgba(0,0,0,0.5)] z-10"}`}
+                  style={{
+                    backgroundColor: currentScene.backgroundColor,
+                    backgroundImage: project.globalSettings.snapToGrid
+                      ? `linear-gradient(to right, #ffffff10 1px, transparent 1px), linear-gradient(to bottom, #ffffff10 1px, transparent 1px)`
+                      : "none",
+                    backgroundSize: `${project.globalSettings.gridSize || 32}px ${project.globalSettings.gridSize || 32}px`,
+                    filter:
+                      isPlaying && project.globalSettings.useDayNightCycle
+                        ? gameTime > 18 || gameTime < 6
+                          ? "brightness(0.5) sepia(0.3) hue-rotate(180deg)"
+                          : gameTime > 16
+                            ? "brightness(0.8) sepia(0.5) hue-rotate(-20deg)"
+                            : "brightness(1)"
+                        : "none",
+                    transition: "filter 2s ease",
+                  }}
+                >
+                  {/* Draw selection box */}
+                  {selectionBox && !isPlaying && (
+                    <div
+                      className="absolute border border-emerald-500 bg-emerald-500/20 pointer-events-none z-[9999]"
+                      style={{
+                        left:
+                          selectionBox.w >= 0
+                            ? selectionBox.x
+                            : selectionBox.x + selectionBox.w,
+                        top:
+                          selectionBox.h >= 0
+                            ? selectionBox.y
+                            : selectionBox.y + selectionBox.h,
+                        width: Math.abs(selectionBox.w),
+                        height: Math.abs(selectionBox.h),
+                      }}
+                    />
+                  )}
+
+                  {/* Render Stage Objects */}
+                  {currentScene.objects
+                    .sort((a, b) => a.zIndex - b.zIndex)
+                    .map((obj) => {
+                      if (isPlaying && collectedObjects.includes(obj.id))
+                        return null;
+
+                      // Evaluate Story Event Conditions
+                      if (isPlaying) {
+                        const currentFlags = Array.isArray(project.gameFlags) ? playerFlags : [];
+                        if (obj.showIfFlag && !currentFlags.includes(obj.showIfFlag)) {
+                          return null;
+                        }
+                        if (obj.hideIfFlag && currentFlags.includes(obj.hideIfFlag)) {
+                          return null;
+                        }
+                      }
+
+                      const isSelected =
+                        (obj.id === selectedObjectId ||
+                          selectedMultiIds.includes(obj.id)) &&
+                        !activeUiMenus.length;
+                      const phys = physicsState[obj.id];
+                      const renderX = phys ? phys.x : obj.x;
+                      const renderY = phys ? phys.y : obj.y;
+                      const renderRot = phys ? phys.rotation : obj.rotation;
+
+                      const stageW =
+                        currentScene.width ||
+                        project.globalSettings.stageWidth ||
+                        800;
+                      const stageH =
+                        currentScene.height ||
+                        project.globalSettings.stageHeight ||
+                        600;
+
+                      const isOutOfBounds =
+                        !isPlaying &&
+                        (renderX + obj.width < 0 ||
+                          renderY + obj.height < 0 ||
+                          renderX > stageW ||
+                          renderY > stageH);
+
+                      // Apply animation classes
+                      let animClass = "";
+                      let animStyle: React.CSSProperties = {};
+
+                      if (isPlaying || isSelected) {
+                        if (obj.animation === "glow") {
+                          animClass =
+                            "drop-shadow-[0_0_15px_rgba(255,255,255,0.8)]";
+                        } else if (obj.animation !== "none") {
+                          const duration =
+                            obj.animationDuration ||
+                            (obj.animation === "pulse"
+                              ? 2
+                              : obj.animation === "float"
+                                ? 3
+                                : 0.5);
+                          const easing = obj.animationEasing || "ease-in-out";
+                          animStyle.animation = `${obj.animation} ${duration}s ${easing} infinite`;
+                        }
+                      }
+
+                      const filterStr = [
+                        obj.filters?.brightness !== undefined
+                          ? `brightness(${obj.filters.brightness})`
+                          : "",
+                        obj.filters?.contrast !== undefined
+                          ? `contrast(${obj.filters.contrast})`
+                          : "",
+                        obj.filters?.saturate !== undefined
+                          ? `saturate(${obj.filters.saturate})`
+                          : "",
+                        obj.filters?.hueRotate !== undefined
+                          ? `hue-rotate(${obj.filters.hueRotate}deg)`
+                          : "",
+                        obj.filters?.blur !== undefined
+                          ? `blur(${obj.filters.blur}px)`
+                          : "",
+                        obj.filters?.sepia !== undefined
+                          ? `sepia(${obj.filters.sepia})`
+                          : "",
+                        obj.filters?.invert !== undefined
+                          ? `invert(${obj.filters.invert})`
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ");
+
+                      return (
+                        <div
+                          key={obj.id}
+                          onClick={() => {
+                            const anyBlockingUi = activeUiMenus.some(
+                              (id) =>
+                                (project.uiMenus || []).find((m) => m.id === id)
+                                  ?.blocksClicks,
+                            );
+                            if (isPlaying && anyBlockingUi) return; // Disable base scene interactions if UI blocking clicks
+                            handleObjectClick(obj);
+                          }}
+                          onPointerDown={(e) => {
+                            const anyBlockingUi = activeUiMenus.some(
+                              (id) =>
+                                (project.uiMenus || []).find((m) => m.id === id)
+                                  ?.blocksClicks,
+                            );
+                            if (isPlaying && anyBlockingUi) return;
+                            handleObjectPointerDown(e, obj);
+                          }}
+                          onPointerEnter={() => {
+                            if (!isPlaying) return;
+                            if (obj.triggerOnEnter === true) {
+                              if (
+                                obj.triggerOnce &&
+                                triggeredObjects.has(obj.id)
+                              )
+                                return;
+                              const anyBlockingUi = activeUiMenus.some(
+                                (id) =>
+                                  (project.uiMenus || []).find(
+                                    (m) => m.id === id,
+                                  )?.blocksClicks,
+                              );
+                              if (anyBlockingUi) return;
+                              handleObjectClick(obj);
+                              if (obj.triggerOnce) {
+                                setTriggeredObjects((prev) =>
+                                  new Set(prev).add(obj.id),
+                                );
+                              }
+                            }
+                          }}
+                          onContextMenu={(e) => {
+                            if (isPlaying) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setSelectedObjectId(obj.id);
+                            setContextMenu({
+                              x: e.clientX,
+                              y: e.clientY,
+                              objectId: obj.id,
+                            });
+                          }}
+                          onDoubleClick={(e) => {
+                            if (isPlaying || obj.locked) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            showError(
+                              "Please rename the object in the properties panel.",
+                            );
+                          }}
+                          onPointerMove={handleObjectPointerMove}
+                          onPointerUp={handleObjectPointerUp}
+                          className={`absolute ${animClass} ${obj.customCssClasses || ""}`}
+                          style={{
+                            ...animStyle,
+                            filter: filterStr || undefined,
+                            left: renderX,
+                            top: renderY,
+                            width: obj.width,
+                            height: obj.height,
+                            zIndex: obj.zIndex,
+                            opacity: isOutOfBounds
+                              ? (obj.opacity || 1) * 0.3
+                              : obj.opacity,
+                            transform: `${
+                              isPlaying &&
+                              obj.parallaxSpeed !== undefined &&
+                              obj.parallaxSpeed !== 1
+                                ? `translate(${-mouseRatio.x * ((obj.parallaxSpeed - 1) * 50)}px, ${-mouseRatio.y * ((obj.parallaxSpeed - 1) * 50)}px) `
+                                : ""
+                            }rotate(${renderRot}deg)`,
+                            cursor: isPlaying
+                              ? activeUiMenus.some(
+                                  (id) =>
+                                    (project.uiMenus || []).find(
+                                      (m) => m.id === id,
+                                    )?.blocksClicks,
+                                )
+                                ? "default"
+                                : obj.cursor
+                              : obj.locked
+                                ? "default"
+                                : "move",
+                            outline:
+                              isSelected && !isPlaying
+                                ? "2px solid #34d399"
+                                : "none",
+                            outlineOffset: "2px",
+                            backgroundColor: obj.isHitbox
+                              ? isPlaying
+                                ? "transparent"
+                                : project.globalSettings.showGhostOutlines
+                                  ? "rgba(239, 68, 68, 0.3)"
+                                  : "transparent"
+                              : "transparent",
+                            border:
+                              obj.isHitbox &&
+                              !isPlaying &&
+                              project.globalSettings.showGhostOutlines
+                                ? "1px dashed #ef4444"
+                                : "none",
+                            mixBlendMode: obj.blendMode || "normal",
+                          }}
+                        >
+                          {/* Smart Overlays (Editor only) */}
+                          {!isPlaying && (
+                            <div
+                              className="absolute top-0 right-0 -translate-y-[calc(100%+4px)] pointer-events-none flex flex-col gap-1 z-[1000] scale-100 origin-bottom-right"
+                              style={{
+                                // Inverse rotation so badges stay upright
+                                transform: `rotate(${-renderRot}deg)`,
+                              }}
+                            >
+                              {obj.interaction === "scene_change" && (
+                                <div className="bg-blue-600/90 backdrop-blur border border-blue-400 text-white text-[9px] px-1.5 py-0.5 rounded shadow flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                  <ArrowRight size={10} /> To{" "}
+                                  {project.scenes.find(
+                                    (s) => s.id === obj.interactionData,
+                                  )?.name || "Unknown"}
+                                </div>
+                              )}
+                              {obj.requireItemId && (
+                                <div className="bg-amber-600/90 backdrop-blur border border-amber-400 text-white text-[9px] px-1.5 py-0.5 rounded shadow flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                  <Lock size={10} /> Req:{" "}
+                                  {project.inventoryItems.find(
+                                    (i) => i.id === obj.requireItemId,
+                                  )?.name || "Unknown"}
+                                </div>
+                              )}
+
+                              {obj.interaction === "dialogue" && (
+                                <div className="bg-emerald-600/90 backdrop-blur border border-emerald-400 text-white text-[9px] px-1.5 py-0.5 rounded shadow flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                  <MessageSquare size={10} /> Dialogue
+                                </div>
+                              )}
+                              {obj.interaction === "play_cutscene" && (
+                                <div className="bg-blue-600/90 backdrop-blur border border-blue-400 text-white text-[9px] px-1.5 py-0.5 rounded shadow flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                  <Video size={10} /> Cutscene
+                                </div>
+                              )}
+                              {obj.interaction === "give-item" &&
+                                obj.giveItemId && (
+                                  <div className="bg-purple-600/90 backdrop-blur border border-purple-400 text-white text-[9px] px-1.5 py-0.5 rounded shadow flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                    <Gift size={10} /> Gives:{" "}
+                                    {project.inventoryItems?.find(
+                                      (i) => i.id === obj.giveItemId,
+                                    )?.name || "Unknown"}
+                                  </div>
+                                )}
+                              {obj.interaction === "open_ui" &&
+                                obj.targetUiId && (
+                                  <div className="bg-indigo-600/90 backdrop-blur border border-indigo-400 text-white text-[9px] px-1.5 py-0.5 rounded shadow flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                    <Eye size={10} /> Opens:{" "}
+                                    {project.uiMenus?.find(
+                                      (m) => m.id === obj.targetUiId,
+                                    )?.name || "Unknown UI"}
+                                  </div>
+                                )}
+                              {obj.isUiElement && obj.uiBindingId && (
+                                <div className="bg-indigo-600/90 backdrop-blur border border-indigo-400 text-white text-[9px] px-1.5 py-0.5 rounded shadow flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                  <Settings size={10} /> Bounds:{" "}
+                                  {obj.uiBindingId}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {(!obj.isHitbox ||
+                            (obj.isHitbox &&
+                              !isPlaying &&
+                              project.globalSettings.showGhostOutlines)) &&
+                            !obj.isScript &&
+                            !obj.isText && (
+                              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                                {obj.isHitbox && (
+                                  <span className="text-red-900/50 font-bold text-[10px] text-center leading-tight">
+                                    CLICK TARGET
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          {obj.isScript && !isPlaying && (
+                            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center bg-blue-500/20 border border-dashed border-blue-500 rounded">
+                              <FileCode size={24} className="text-blue-400" />
+                              <span className="text-blue-400 font-bold text-[10px] mt-1 truncate w-full text-center px-1">
+                                {obj.name}
+                              </span>
+                            </div>
+                          )}
+                          {obj.isUiElement &&
+                            (() => {
+                              const borderStyle =
+                                obj.uiBorderType === "none"
+                                  ? "none"
+                                  : obj.uiBorderType === "double"
+                                    ? "4px double"
+                                    : obj.uiBorderType === "bevel"
+                                      ? "3px outset"
+                                      : "2px solid";
+
+                              if (obj.uiElementType === "panel") {
+                                return (
+                                  <div
+                                    className="w-full h-full pointer-events-none"
+                                    style={{
+                                      backgroundColor:
+                                        obj.uiColorSecondary || "#171717",
+                                      border: `${borderStyle} ${obj.uiColorPrimary || "#10b981"}`,
+                                      borderRadius:
+                                        obj.uiBorderRadius ??
+                                        project.globalSettings.uiBorderRadius,
+                                    }}
+                                  />
+                                );
+                              }
+                              if (obj.uiElementType === "progress") {
+                                return (
+                                  <div
+                                    className="w-full h-full pointer-events-none overflow-hidden"
+                                    style={{
+                                      backgroundColor:
+                                        obj.uiColorSecondary || "#171717",
+                                      border: `${borderStyle} ${obj.uiColorPrimary || "#10b981"}`,
+                                      borderRadius:
+                                        obj.uiBorderRadius ??
+                                        project.globalSettings.uiBorderRadius,
+                                    }}
+                                  >
+                                    <div
+                                      className="h-full transition-all"
+                                      style={{
+                                        width: `${Math.max(0, Math.min(100, obj.uiValue || 0))}%`,
+                                        backgroundColor:
+                                          obj.uiColorPrimary || "#10b981",
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              }
+                              if (obj.uiElementType === "button") {
+                                return (
+                                  <div
+                                    className="w-full h-full pointer-events-none flex items-center justify-center shadow-lg"
+                                    style={{
+                                      backgroundColor:
+                                        obj.uiColorPrimary || "#10b981",
+                                      color: obj.uiColorSecondary || "#ffffff",
+                                      border: `${borderStyle} color-mix(in srgb, ${obj.uiColorPrimary || "#10b981"} 80%, black)`,
+                                      borderRadius:
+                                        obj.uiBorderRadius ??
+                                        project.globalSettings.uiBorderRadius,
+                                      fontFamily:
+                                        project.globalSettings.uiFontFamily,
+                                      fontSize: obj.textFontSize || 16,
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    {obj.textContent || "Button"}
+                                  </div>
+                                );
+                              }
+                              if (obj.uiElementType === "icon") {
+                                return (
+                                  <div
+                                    className="w-full h-full pointer-events-none flex items-center justify-center"
+                                    style={{
+                                      color: obj.uiColorPrimary || "#10b981",
+                                    }}
+                                  >
+                                    {obj.uiIconType === "bag" ? (
+                                      <Backpack
+                                        size={Math.min(obj.width, obj.height)}
+                                      />
+                                    ) : obj.uiIconType === "sword" ? (
+                                      <svg
+                                        width={Math.min(obj.width, obj.height)}
+                                        height={Math.min(obj.width, obj.height)}
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      >
+                                        <path d="m5 19-3 3" />
+                                        <path d="m14 4-9 9" />
+                                        <path
+                                          d="M18 20c-1.1-.9-2-2-2-2L14 16l-4-4 2-2 4 4c0 0 1.1.9 2 2 .4.9 1 2 2 2 0 0 .1 0 .2.1C21.7 18.2 22 17 22 16s-.3-2.2-.8-2.1c-.1-.1-.1-.2-.2-.2-2 0-3.1-.6-4-1l-3.3-1.6c-.6-.3-1.3-.4-2-.2L9 11l-3 3-1-1 3-3-2-2L4 6 5 5l2 2 2 2 3-3 1 1-3 3 1.8 3.5c.2.6.3 1.3.2 2l-1.6 3.3c-.4.9-1 2-1 4 0 .1-.1.2-.2.2-1.1.5-2.3.2-2.3-.8S2.8 21 3.5 20c.1 0 .1.1.2.2 0 0 1.1.9 2.1 2z"
+                                          opacity=".2"
+                                        />
+                                        <path d="M20 4 11 13" />
+                                        <path d="m18 20-2-2" />
+                                        <path d="m4 6 2 2" />
+                                      </svg>
+                                    ) : obj.uiIconType === "book" ? (
+                                      <Book
+                                        size={Math.min(obj.width, obj.height)}
+                                      />
+                                    ) : obj.uiIconType === "gear" ? (
+                                      <Settings
+                                        size={Math.min(obj.width, obj.height)}
+                                      />
+                                    ) : obj.uiIconType === "potion" ? (
+                                      <svg
+                                        width={Math.min(obj.width, obj.height)}
+                                        height={Math.min(obj.width, obj.height)}
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      >
+                                        <path d="M8 22h8" />
+                                        <path d="M12 2v6" />
+                                        <path d="M6 14v-2c0-1.1.9-2 2-2h8c1.1 0 2 .9 2 2v2a6 6 0 0 1-6 6h-4a6 6 0 0 1-6-6z" />
+                                      </svg>
+                                    ) : obj.uiIconType === "key" ? (
+                                      <Key
+                                        size={Math.min(obj.width, obj.height)}
+                                      />
+                                    ) : obj.uiIconType === "check" ? (
+                                      <Check
+                                        size={Math.min(obj.width, obj.height)}
+                                      />
+                                    ) : obj.uiIconType === "cancel" ? (
+                                      <X
+                                        size={Math.min(obj.width, obj.height)}
+                                      />
+                                    ) : obj.uiIconType === "arrow-left" ? (
+                                      <ArrowLeft
+                                        size={Math.min(obj.width, obj.height)}
+                                      />
+                                    ) : obj.uiIconType === "arrow-right" ? (
+                                      <ArrowRight
+                                        size={Math.min(obj.width, obj.height)}
+                                      />
+                                    ) : obj.uiIconType === "arrow-up" ? (
+                                      <ArrowUp
+                                        size={Math.min(obj.width, obj.height)}
+                                      />
+                                    ) : (
+                                      <Star
+                                        size={Math.min(obj.width, obj.height)}
+                                      />
+                                    )}
+                                  </div>
+                                );
+                              }
+                              if (obj.uiElementType === "toggle") {
+                                return (
+                                  <div
+                                    className="w-full h-full pointer-events-none rounded-full flex items-center p-1 transition-colors relative"
+                                    style={{
+                                      backgroundColor: obj.uiChecked
+                                        ? obj.uiColorPrimary || "#10b981"
+                                        : obj.uiColorSecondary || "#525252",
+                                    }}
+                                  >
+                                    <div
+                                      className="bg-white rounded-full h-full aspect-square shadow-sm transition-transform absolute"
+                                      style={{
+                                        transform: obj.uiChecked
+                                          ? `translateX(${obj.width - obj.height}px)`
+                                          : "translateX(0)",
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              }
+                              if (obj.uiElementType === "tooltip") {
+                                return (
+                                  <div
+                                    className="w-full h-full pointer-events-none flex items-center justify-center p-2 shadow-lg relative"
+                                    style={{
+                                      backgroundColor:
+                                        obj.uiColorSecondary || "#171717",
+                                      color: obj.uiColorPrimary || "#ffffff",
+                                      border: `1px solid ${obj.uiColorPrimary || "#10b981"}`,
+                                      borderRadius:
+                                        project.globalSettings.uiBorderRadius,
+                                      fontFamily:
+                                        project.globalSettings.uiFontFamily,
+                                      fontSize: obj.textFontSize || 12,
+                                    }}
+                                  >
+                                    {obj.textContent || "Tooltip"}
+                                    <div
+                                      className="absolute top-full left-1/2 -translate-x-1/2 border-solid border-t-8 border-l-8 border-r-8 border-transparent"
+                                      style={{
+                                        borderTopColor:
+                                          obj.uiColorPrimary || "#10b981",
+                                        borderLeftColor: "transparent",
+                                        borderRightColor: "transparent",
+                                        borderBottomColor: "transparent",
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              }
+                              if (obj.uiElementType === "selection") {
+                                return (
+                                  <div
+                                    className="w-full h-full pointer-events-none flex items-center justify-center animate-pulse"
+                                    style={{
+                                      color: obj.uiColorPrimary || "#10b981",
+                                    }}
+                                  >
+                                    <Pointer
+                                      size={Math.min(obj.width, obj.height)}
+                                    />
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
+                          {!obj.isHitbox &&
+                            !obj.isScript &&
+                            !obj.isText &&
+                            !obj.isUiElement &&
+                            (obj.isVideo ? (
+                              <video
+                                src={obj.src}
+                                className="w-full h-full object-fill pointer-events-none"
+                                autoPlay
+                                loop
+                                muted={!isPlaying}
+                                playsInline
+                                style={{
+                                  transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
+                                }}
+                              />
+                            ) : (
+                              <img
+                                src={obj.src}
+                                alt={obj.name}
+                                className="w-full h-full object-fill pointer-events-none"
+                                draggable={false}
+                                style={{
+                                  transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
+                                }}
+                              />
+                            ))}
+                          {obj.isText &&
+                            (() => {
+                              const txtBaseStyle: React.CSSProperties = {
+                                color: obj.textColor || "#ffffff",
+                                fontSize: `${obj.textFontSize || 16}px`,
+                                fontFamily: obj.textFontFamily || "sans-serif",
+                                fontWeight: obj.textWeight || "normal",
+                                letterSpacing: `${obj.textLetterSpacing || 0}px`,
+                                textShadow: obj.textShadow || "none",
+                                WebkitTextStroke: obj.textOutline
+                                  ? `1px ${obj.textOutlineColor || "#000000"}`
+                                  : "none",
+                                transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
+                                pointerEvents: "none",
+                              };
+
+                              const boxStyle: React.CSSProperties = {
+                                width: "100%",
+                                height: "100%",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent:
+                                  obj.textAlign === "left"
+                                    ? "flex-start"
+                                    : obj.textAlign === "right"
+                                      ? "flex-end"
+                                      : "center",
+                                textAlign: obj.textAlign || "center",
+                                overflow: "hidden",
+                                wordBreak: "break-word",
+                                lineHeight: obj.textLineHeight
+                                  ? `${obj.textLineHeight}`
+                                  : "1.2",
+                              };
+
+                              if (obj.textStyle === "narrative") {
+                                boxStyle.background = "rgba(0,0,0,0.8)";
+                                boxStyle.border = "2px solid #555";
+                                boxStyle.padding = "8px";
+                                boxStyle.borderRadius = "8px";
+                              } else if (obj.textStyle === "speech") {
+                                boxStyle.background = "#ffffff";
+                                txtBaseStyle.color = obj.textColor || "#000000";
+                                boxStyle.border = "2px solid #000";
+                                boxStyle.padding = "12px";
+                                boxStyle.borderRadius = "20px";
+                              } else if (obj.textStyle === "thought") {
+                                boxStyle.background = "#f0f0f0";
+                                txtBaseStyle.color = obj.textColor || "#000000";
+                                boxStyle.border = "2px dashed #aaa";
+                                boxStyle.borderRadius = "30px";
+                                boxStyle.padding = "10px";
+                              } else if (obj.textStyle === "sign") {
+                                boxStyle.background = "#8b5a2b";
+                                txtBaseStyle.color = obj.textColor || "#ffffff";
+                                boxStyle.border = "3px solid #5c3a21";
+                                boxStyle.borderRadius = "2px";
+                                boxStyle.padding = "4px";
+                                boxStyle.boxShadow =
+                                  "2px 2px 5px rgba(0,0,0,0.5)";
+                              }
+
+                              return (
+                                <div style={boxStyle}>
+                                  <span style={txtBaseStyle}>
+                                    {obj.textContent}
+                                  </span>
+                                </div>
+                              );
+                            })()}
+
+                          {/* Resize Handles (Simplified) */}
+                          {isSelected && !isPlaying && !obj.locked && (
+                            <>
+                              <div
+                                className="absolute -top-10 left-1/2 -translate-x-1/2 w-6 h-6 bg-emerald-500 rounded-full cursor-grab hover:bg-emerald-400 flex items-center justify-center text-black active:cursor-grabbing shadow-lg transition-transform hover:scale-110"
+                                onPointerDown={(e) =>
+                                  handleRotatePointerDown(e, obj)
+                                }
+                              >
+                                <RotateCw size={12} strokeWidth={3} />
+                              </div>
+                              <div className="absolute -top-4 left-1/2 -translate-x-1/2 w-px h-4 bg-emerald-500 pointer-events-none" />
+                              <div
+                                className="absolute -bottom-2 -right-2 w-4 h-4 bg-emerald-500 rounded-full cursor-se-resize shadow-md transition-transform hover:scale-110"
+                                onPointerDown={(e) =>
+                                  handleResizePointerDown(e, obj)
+                                }
+                              />
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+
+                {/* Ghost Foreground UI for Stage Editing */}
+                {editorMode === "stage" &&
+                  !isPlaying &&
+                  (project.uiMenus || [])
+                    .filter((m) => m.isOpenByDefault)
+                    .map((uiMenu, menuIndex) => (
+                      <div
+                        key={`ghost-fg-ui-${uiMenu.id}`}
+                        className="absolute pointer-events-none select-none z-[500]"
+                        style={{
+                          left: "0px",
+                          top: "0px",
+                          width:
+                            uiMenu.width ||
+                            project.globalSettings.stageWidth ||
+                            800,
+                          height:
+                            uiMenu.height ||
+                            project.globalSettings.stageHeight ||
+                            600,
+                          overflow: "visible",
+                        }}
+                      >
+                        {uiMenu.objects.map((obj) => (
+                          <div
+                            key={`ghost-fg-obj-${obj.id}`}
+                            className="absolute border border-dashed border-emerald-500/30 opacity-60 mix-blend-screen"
+                            style={{
+                              left: obj.x,
+                              top: obj.y,
+                              width: obj.width,
+                              height: obj.height,
+                              transform: `rotate(${obj.rotation}deg)`,
+                            }}
+                          >
+                            <span className="absolute -top-4 left-0 text-[8px] text-emerald-400 bg-black/50 px-1 rounded truncate max-w-full">
+                              {obj.name}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+
+                {/* Render Active UI Menus */}
+                {isPlaying &&
+                  activeUiMenus.map((uiId, menuIndex) => {
+                    const uiMenu = (project.uiMenus || []).find(
+                      (m) => m.id === uiId,
+                    );
+                    if (!uiMenu) return null;
+
+                    return (
+                      <div
+                        key={`ui-${uiId}-${menuIndex}`}
+                        className={`absolute ${uiMenu.blocksClicks ? "pointer-events-auto" : "pointer-events-none"}`}
+                        style={{
+                          zIndex: 1000 + menuIndex,
+                          backgroundColor: uiMenu.backgroundColor,
+                          width:
+                            uiMenu.width ||
+                            project.globalSettings.stageWidth ||
+                            800,
+                          height:
+                            uiMenu.height ||
+                            project.globalSettings.stageHeight ||
+                            600,
+                          left: "0px",
+                          top: "0px",
+                          overflow: "visible",
+                        }}
+                      >
+                        {uiMenu.objects
+                          .sort((a, b) => a.zIndex - b.zIndex)
+                          .map((obj) => {
+                            if (isPlaying && collectedObjects.includes(obj.id)) return null;
+
+                            // Evaluate Story Event Conditions
+                            if (isPlaying) {
+                              const currentFlags = Array.isArray(project.gameFlags) ? playerFlags : [];
+                              if (obj.showIfFlag && !currentFlags.includes(obj.showIfFlag)) {
+                                return null;
+                              }
+                              if (obj.hideIfFlag && currentFlags.includes(obj.hideIfFlag)) {
+                                return null;
+                              }
+                            }
+
+                            // Compute rendering properties similarly to stage objects, but no physics
+                            const renderX = obj.x;
+                            const renderY = obj.y;
+                            const renderRot = obj.rotation;
+
+                            let animClass = "";
+                            let animStyle: React.CSSProperties = {};
+
+                            if (obj.animation === "glow") {
+                              animClass =
+                                "drop-shadow-[0_0_15px_rgba(255,255,255,0.8)]";
+                            } else if (obj.animation !== "none") {
+                              const duration =
+                                obj.animationDuration ||
+                                (obj.animation === "pulse"
+                                  ? 2
+                                  : obj.animation === "float"
+                                    ? 3
+                                    : 0.5);
+                              const easing =
+                                obj.animationEasing || "ease-in-out";
+                              animStyle.animation = `${obj.animation} ${duration}s ${easing} infinite`;
+                            }
+
+                            const filterStr = [
+                              obj.filters?.brightness !== undefined
+                                ? `brightness(${obj.filters.brightness})`
+                                : "",
+                              obj.filters?.contrast !== undefined
+                                ? `contrast(${obj.filters.contrast})`
+                                : "",
+                              obj.filters?.saturate !== undefined
+                                ? `saturate(${obj.filters.saturate})`
+                                : "",
+                              obj.filters?.hueRotate !== undefined
+                                ? `hue-rotate(${obj.filters.hueRotate}deg)`
+                                : "",
+                              obj.filters?.blur !== undefined
+                                ? `blur(${obj.filters.blur}px)`
+                                : "",
+                              obj.filters?.sepia !== undefined
+                                ? `sepia(${obj.filters.sepia})`
+                                : "",
+                              obj.filters?.invert !== undefined
+                                ? `invert(${obj.filters.invert})`
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ");
+
+                            return (
+                              <div
+                                key={`ui-obj-${obj.id}`}
+                                onClick={() => handleObjectClick(obj)}
+                                className={`absolute ${animClass}`}
+                                style={{
+                                  ...animStyle,
+                                  filter: filterStr || undefined,
+                                  left: renderX,
+                                  top: renderY,
+                                  width: obj.width,
+                                  height: obj.height,
+                                  zIndex: obj.zIndex,
+                                  opacity: obj.opacity,
+                                  transform: `rotate(${renderRot}deg)`,
+                                  cursor: obj.cursor,
+                                  backgroundColor: obj.isHitbox
+                                    ? "transparent"
+                                    : "transparent",
+                                  mixBlendMode: obj.blendMode || "normal",
+                                  pointerEvents: "auto",
+                                }}
+                              >
+                                {obj.isUiElement &&
+                                  (() => {
+                                    const borderStyle =
+                                      obj.uiBorderType === "none"
+                                        ? "none"
+                                        : obj.uiBorderType === "double"
+                                          ? "4px double"
+                                          : obj.uiBorderType === "bevel"
+                                            ? "3px outset"
+                                            : "2px solid";
+
+                                    let boundValue = obj.uiValue || 0;
+                                    let boundChecked = obj.uiChecked || false;
+                                    let boundText =
+                                      obj.textContent ||
+                                      (obj.uiElementType === "button"
+                                        ? "Button"
+                                        : "Tooltip");
+
+                                    if (
+                                      obj.uiBindingType === "need" &&
+                                      obj.uiBindingId
+                                    ) {
+                                      boundValue =
+                                        playerNeeds[obj.uiBindingId] || 0;
+                                    } else if (
+                                      obj.uiBindingType === "inventory_count" &&
+                                      obj.uiBindingId
+                                    ) {
+                                      const count = playerInventory.filter(
+                                        (id) => id === obj.uiBindingId,
+                                      ).length;
+                                      boundText = count > 0 ? `${count}` : "0";
+                                    } else if (
+                                      obj.uiBindingType === "flag" &&
+                                      obj.uiBindingId
+                                    ) {
+                                      boundChecked = playerFlags.includes(
+                                        obj.uiBindingId,
+                                      );
+                                    }
+
+                                    if (obj.uiElementType === "panel") {
+                                      return (
+                                        <div
+                                          className="w-full h-full pointer-events-none"
+                                          style={{
+                                            backgroundColor:
+                                              obj.uiColorSecondary || "#171717",
+                                            border: `${borderStyle} ${obj.uiColorPrimary || "#10b981"}`,
+                                            borderRadius:
+                                              obj.uiBorderRadius ??
+                                              project.globalSettings
+                                                .uiBorderRadius ??
+                                              0,
+                                          }}
+                                        />
+                                      );
+                                    }
+                                    if (obj.uiElementType === "progress") {
+                                      return (
+                                        <div
+                                          className="w-full h-full pointer-events-none overflow-hidden"
+                                          style={{
+                                            backgroundColor:
+                                              obj.uiColorSecondary || "#171717",
+                                            border: `${borderStyle} ${obj.uiColorPrimary || "#10b981"}`,
+                                            borderRadius:
+                                              obj.uiBorderRadius ??
+                                              project.globalSettings
+                                                .uiBorderRadius ??
+                                              0,
+                                          }}
+                                        >
+                                          <div
+                                            className="h-full transition-all"
+                                            style={{
+                                              width: `${Math.max(0, Math.min(100, boundValue))}%`,
+                                              backgroundColor:
+                                                obj.uiColorPrimary || "#10b981",
+                                            }}
+                                          />
+                                        </div>
+                                      );
+                                    }
+                                    if (obj.uiElementType === "button") {
+                                      return (
+                                        <div
+                                          className="w-full h-full pointer-events-none flex items-center justify-center shadow-lg"
+                                          style={{
+                                            backgroundColor:
+                                              obj.uiColorPrimary || "#10b981",
+                                            color:
+                                              obj.uiColorSecondary || "#ffffff",
+                                            border: `${borderStyle} color-mix(in srgb, ${obj.uiColorPrimary || "#10b981"} 80%, black)`,
+                                            borderRadius:
+                                              obj.uiBorderRadius ??
+                                              project.globalSettings
+                                                .uiBorderRadius ??
+                                              0,
+                                            fontFamily:
+                                              project.globalSettings
+                                                .uiFontFamily,
+                                            fontSize: obj.textFontSize || 16,
+                                            fontWeight: "bold",
+                                          }}
+                                        >
+                                          {boundText}
+                                        </div>
+                                      );
+                                    }
+                                    if (obj.uiElementType === "icon") {
+                                      return (
+                                        <div
+                                          className="w-full h-full pointer-events-none flex items-center justify-center"
+                                          style={{
+                                            color:
+                                              obj.uiColorPrimary || "#10b981",
+                                          }}
+                                        >
+                                          {obj.uiIconType === "bag" ? (
+                                            <Backpack
+                                              size={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                            />
+                                          ) : obj.uiIconType === "sword" ? (
+                                            <svg
+                                              width={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                              height={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                              viewBox="0 0 24 24"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              strokeWidth="2"
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                            >
+                                              <path d="m5 19-3 3" />
+                                              <path d="m14 4-9 9" />
+                                              <path
+                                                d="M18 20c-1.1-.9-2-2-2-2L14 16l-4-4 2-2 4 4c0 0 1.1.9 2 2 .4.9 1 2 2 2 0 0 .1 0 .2.1C21.7 18.2 22 17 22 16s-.3-2.2-.8-2.1c-.1-.1-.1-.2-.2-.2-2 0-3.1-.6-4-1l-3.3-1.6c-.6-.3-1.3-.4-2-.2L9 11l-3 3-1-1 3-3-2-2L4 6 5 5l2 2 2 2 3-3 1 1-3 3 1.8 3.5c.2.6.3 1.3.2 2l-1.6 3.3c-.4.9-1 2-1 4 0 .1-.1.2-.2.2-1.1.5-2.3.2-2.3-.8S2.8 21 3.5 20c.1 0 .1.1.2.2 0 0 1.1.9 2.1 2z"
+                                                opacity=".2"
+                                              />
+                                              <path d="M20 4 11 13" />
+                                              <path d="m18 20-2-2" />
+                                              <path d="m4 6 2 2" />
+                                            </svg>
+                                          ) : obj.uiIconType === "book" ? (
+                                            <Book
+                                              size={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                            />
+                                          ) : obj.uiIconType === "gear" ? (
+                                            <Settings
+                                              size={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                            />
+                                          ) : obj.uiIconType === "potion" ? (
+                                            <svg
+                                              width={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                              height={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                              viewBox="0 0 24 24"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              strokeWidth="2"
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                            >
+                                              <path d="M8 22h8" />
+                                              <path d="M12 2v6" />
+                                              <path d="M6 14v-2c0-1.1.9-2 2-2h8c1.1 0 2 .9 2 2v2a6 6 0 0 1-6 6h-4a6 6 0 0 1-6-6z" />
+                                            </svg>
+                                          ) : obj.uiIconType === "key" ? (
+                                            <Key
+                                              size={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                            />
+                                          ) : obj.uiIconType === "check" ? (
+                                            <Check
+                                              size={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                            />
+                                          ) : obj.uiIconType === "cancel" ? (
+                                            <X
+                                              size={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                            />
+                                          ) : obj.uiIconType ===
+                                            "arrow-left" ? (
+                                            <ArrowLeft
+                                              size={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                            />
+                                          ) : obj.uiIconType ===
+                                            "arrow-right" ? (
+                                            <ArrowRight
+                                              size={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                            />
+                                          ) : obj.uiIconType === "arrow-up" ? (
+                                            <ArrowUp
+                                              size={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                            />
+                                          ) : (
+                                            <Star
+                                              size={Math.min(
+                                                obj.width,
+                                                obj.height,
+                                              )}
+                                            />
+                                          )}
+                                        </div>
+                                      );
+                                    }
+                                    if (obj.uiElementType === "toggle") {
+                                      return (
+                                        <div
+                                          className="w-full h-full pointer-events-none rounded-full flex items-center p-1 transition-colors relative"
+                                          style={{
+                                            backgroundColor: boundChecked
+                                              ? obj.uiColorPrimary || "#10b981"
+                                              : obj.uiColorSecondary ||
+                                                "#525252",
+                                          }}
+                                        >
+                                          <div
+                                            className="bg-white rounded-full h-full aspect-square shadow-sm transition-transform absolute"
+                                            style={{
+                                              transform: boundChecked
+                                                ? `translateX(${obj.width - obj.height}px)`
+                                                : "translateX(0)",
+                                            }}
+                                          />
+                                        </div>
+                                      );
+                                    }
+                                    if (obj.uiElementType === "tooltip") {
+                                      return (
+                                        <div
+                                          className="w-full h-full pointer-events-none flex items-center justify-center p-2 shadow-lg relative"
+                                          style={{
+                                            backgroundColor:
+                                              obj.uiColorSecondary || "#171717",
+                                            color:
+                                              obj.uiColorPrimary || "#ffffff",
+                                            border: `1px solid ${obj.uiColorPrimary || "#10b981"}`,
+                                            borderRadius:
+                                              project.globalSettings
+                                                .uiBorderRadius,
+                                            fontFamily:
+                                              project.globalSettings
+                                                .uiFontFamily,
+                                            fontSize: obj.textFontSize || 12,
+                                          }}
+                                        >
+                                          {boundText}
+                                          <div
+                                            className="absolute top-full left-1/2 -translate-x-1/2 border-solid border-t-8 border-l-8 border-r-8 border-transparent"
+                                            style={{
+                                              borderTopColor:
+                                                obj.uiColorPrimary || "#10b981",
+                                              borderLeftColor: "transparent",
+                                              borderRightColor: "transparent",
+                                              borderBottomColor: "transparent",
+                                            }}
+                                          />
+                                        </div>
+                                      );
+                                    }
+                                    if (obj.uiElementType === "selection") {
+                                      return (
+                                        <div
+                                          className="w-full h-full pointer-events-none flex items-center justify-center animate-pulse"
+                                          style={{
+                                            color:
+                                              obj.uiColorPrimary || "#10b981",
+                                          }}
+                                        >
+                                          <Pointer
+                                            size={Math.min(
+                                              obj.width,
+                                              obj.height,
+                                            )}
+                                          />
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                {!obj.isHitbox &&
+                                  !obj.isScript &&
+                                  !obj.isText &&
+                                  !obj.isUiElement &&
+                                  (obj.isVideo ? (
+                                    <video
+                                      src={obj.src}
+                                      className="w-full h-full object-fill pointer-events-none"
+                                      autoPlay
+                                      loop
+                                      muted={!isPlaying}
+                                      playsInline
+                                      style={{
+                                        transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
+                                      }}
+                                    />
+                                  ) : (
+                                    <img
+                                      src={obj.src}
+                                      alt={obj.name}
+                                      className="w-full h-full object-fill pointer-events-none"
+                                      draggable={false}
+                                      style={{
+                                        transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
+                                      }}
+                                    />
+                                  ))}
+                                {obj.isText &&
+                                  (() => {
+                                    const txtBaseStyle: React.CSSProperties = {
+                                      color: obj.textColor || "#ffffff",
+                                      fontSize: `${obj.textFontSize || 16}px`,
+                                      fontFamily:
+                                        obj.textFontFamily || "sans-serif",
+                                      fontWeight: obj.textWeight || "normal",
+                                      letterSpacing: `${obj.textLetterSpacing || 0}px`,
+                                      textShadow: obj.textShadow || "none",
+                                      WebkitTextStroke: obj.textOutline
+                                        ? `1px ${obj.textOutlineColor || "#000000"}`
+                                        : "none",
+                                      transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
+                                      pointerEvents: "none",
+                                    };
+
+                                    const boxStyle: React.CSSProperties = {
+                                      width: "100%",
+                                      height: "100%",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent:
+                                        obj.textAlign === "left"
+                                          ? "flex-start"
+                                          : obj.textAlign === "right"
+                                            ? "flex-end"
+                                            : "center",
+                                      textAlign: obj.textAlign || "center",
+                                      overflow: "hidden",
+                                      wordBreak: "break-word",
+                                      lineHeight: obj.textLineHeight
+                                        ? `${obj.textLineHeight}`
+                                        : "1.2",
+                                    };
+
+                                    if (obj.textStyle === "narrative") {
+                                      boxStyle.background = "rgba(0,0,0,0.8)";
+                                      boxStyle.border = "2px solid #555";
+                                      boxStyle.padding = "8px";
+                                      boxStyle.borderRadius = "8px";
+                                    } else if (obj.textStyle === "speech") {
+                                      boxStyle.background = "#ffffff";
+                                      txtBaseStyle.color =
+                                        obj.textColor || "#000000";
+                                      boxStyle.border = "2px solid #000";
+                                      boxStyle.padding = "12px";
+                                      boxStyle.borderRadius = "20px";
+                                    } else if (obj.textStyle === "thought") {
+                                      boxStyle.background = "#f0f0f0";
+                                      txtBaseStyle.color =
+                                        obj.textColor || "#000000";
+                                      boxStyle.border = "2px dashed #aaa";
+                                      boxStyle.borderRadius = "30px";
+                                      boxStyle.padding = "10px";
+                                    } else if (obj.textStyle === "sign") {
+                                      boxStyle.background = "#8b5a2b";
+                                      txtBaseStyle.color =
+                                        obj.textColor || "#ffffff";
+                                      boxStyle.border = "3px solid #5c3a21";
+                                      boxStyle.borderRadius = "2px";
+                                      boxStyle.padding = "4px";
+                                      boxStyle.boxShadow =
+                                        "2px 2px 5px rgba(0,0,0,0.5)";
+                                    }
+
+                                    return (
+                                      <div style={boxStyle}>
+                                        <span style={txtBaseStyle}>
+                                          {obj.textContent}
+                                        </span>
+                                      </div>
+                                    );
+                                  })()}
+                              </div>
+                            );
+                          })}
+                      </div>
+                    );
+                  })}
+              </div>
+
+              {/* Fullscreen Cutscene Player */}
+              {isPlaying && activeCutscene && (
+                <div className="absolute inset-0 z-[1000] bg-black flex items-center justify-center">
+                  <video
+                    src={activeCutscene.src}
+                    autoPlay
+                    className="w-full h-full object-contain"
+                    onEnded={() => {
+                        if (activeCutscene.targetSceneId) {
+                            const targetScene = project.scenes.find((s) => s.id === activeCutscene.targetSceneId);
+                            if (targetScene) {
+                              setTransition({ active: true, type: "fade" });
+                              setTimeout(() => {
+                                setProject((p) => ({
+                                  ...p,
+                                  globalSettings: { ...p.globalSettings, currentSceneId: targetScene.id },
+                                }));
+                                setTransition({ active: false, type: "fade" });
+                              }, 1000);
+                            }
+                        }
+                        setActiveCutscene(null);
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (activeCutscene.targetSceneId) {
+                        const targetScene = project.scenes.find((s) => s.id === activeCutscene.targetSceneId);
+                        if (targetScene) {
+                          setTransition({ active: true, type: "fade" });
+                          setTimeout(() => {
+                            setProject((p) => ({
+                              ...p,
+                              globalSettings: { ...p.globalSettings, currentSceneId: targetScene.id },
+                            }));
+                            setTransition({ active: false, type: "fade" });
+                          }, 1000);
+                        }
+                      }
+                      setActiveCutscene(null);
+                    }}
+                    className="absolute top-4 right-4 bg-black/50 text-white px-3 py-1 rounded text-xs hover:bg-white/20 transition backdrop-blur flex justify-center items-center gap-1"
+                  >
+                    Skip <ArrowRight size={10} />
+                  </button>
+                </div>
+              )}
+
+              {/* Preview Dialogue Box */}
+              {isPlaying &&
+                previewDialogue &&
+                (() => {
+                  const dPos =
+                    project.globalSettings.dialoguePosition || "bottom";
+                  let posClass = "bottom-8 left-1/2 -translate-x-1/2";
+                  if (dPos === "top")
+                    posClass = "top-8 left-1/2 -translate-x-1/2";
+                  if (dPos === "center")
+                    posClass =
+                      "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2";
+                  return (
+                    <div
+                      className={`absolute ${posClass} w-4/5 max-w-lg shadow-2xl backdrop-blur-sm pointer-events-none drop-shadow-2xl`}
+                      style={{
+                        backgroundColor: `${uiBg}ee`,
+                        border: `2px solid ${uiPrimary}80`,
+                        borderRadius: uiRadius,
+                        fontFamily: uiFont,
+                        color: "#ffffff",
+                      }}
+                    >
+                      <div className="p-4 text-lg text-center font-medium drop-shadow-md">
+                        <TypewriterText
+                          text={previewDialogue}
+                          speed={project.globalSettings.typewriterSpeed ?? 15}
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
+
+              {transition.active && (
+                <div className="absolute inset-0 z-[1500] bg-black pointer-events-none animate-[fadeTransition_1s_ease-in-out]" />
+              )}
+
+              {/* Active Dialogue Tree Box */}
+              {isPlaying &&
+                activeDialogue &&
+                (() => {
+                  const tree = project.dialogueTrees.find(
+                    (t) => t.id === activeDialogue.treeId,
+                  );
+                  const node = tree?.nodes.find(
+                    (n) => n.id === activeDialogue.nodeId,
+                  );
+                  if (!node) return null;
+
+                  const dPos =
+                    project.globalSettings.dialoguePosition || "bottom";
+                  let posClass = "bottom-8 left-1/2 -translate-x-1/2";
+                  if (dPos === "top")
+                    posClass = "top-8 left-1/2 -translate-x-1/2";
+                  if (dPos === "center")
+                    posClass =
+                      "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2";
+
+                  const speakerAsset = node.speakerAssetId
+                    ? project.assets.find((a) => a.id === node.speakerAssetId)
+                    : null;
+
+                  return (
+                    <div
+                      className={`absolute ${posClass} w-11/12 max-w-2xl text-neutral-100 z-[2000] shadow-2xl flex flex-col overflow-hidden backdrop-blur-md filter drop-shadow-2xl dialogue-box`}
+                      style={{
+                        backgroundColor: `${uiBg}ee`,
+                        border: `2px solid ${uiPrimary}80`,
+                        borderRadius: uiRadius,
+                        fontFamily: uiFont,
+                        boxShadow: `0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px ${uiPrimary}40`,
+                      }}
+                    >
+                      <div
+                        className="px-6 py-3 border-b font-bold tracking-wide shadow-sm dialogue-title"
+                        style={{
+                          backgroundColor: `rgba(0,0,0,0.3)`,
+                          borderBottomColor: `${uiPrimary}50`,
+                          color: uiPrimary,
+                        }}
+                      >
+                        {node.speaker || "Unknown"}
+                      </div>
+                      <div className="flex p-6 max-h-[40vh] overflow-y-auto custom-scrollbar dialogue-content">
+                        {speakerAsset &&
+                          (!node.portraitPosition ||
+                            node.portraitPosition === "left") && (
+                            <div
+                              className="w-24 h-24 shrink-0 mr-6 rounded-lg overflow-hidden border shadow-inner p-1 flex items-center justify-center dialogue-portrait"
+                              style={{
+                                borderColor: `${uiPrimary}40`,
+                                backgroundColor: `rgba(0,0,0,0.4)`,
+                              }}
+                            >
+                              <img
+                                src={speakerAsset.src}
+                                alt={node.speaker}
+                                className="max-w-full max-h-full object-contain"
+                              />
+                            </div>
+                          )}
+                        <div className="text-lg font-medium leading-relaxed flex-1 text-white drop-shadow-sm self-center dialogue-text">
+                          <TypewriterText
+                            text={node.text}
+                            speed={project.globalSettings.typewriterSpeed ?? 15}
+                          />
+                        </div>
+                        {speakerAsset && node.portraitPosition === "right" && (
+                          <div
+                            className="w-24 h-24 shrink-0 ml-6 rounded-lg overflow-hidden border shadow-inner p-1 flex items-center justify-center dialogue-portrait"
+                            style={{
+                              borderColor: `${uiPrimary}40`,
+                              backgroundColor: `rgba(0,0,0,0.4)`,
+                            }}
+                          >
+                            <img
+                              src={speakerAsset.src}
+                              alt={node.speaker}
+                              className="max-w-full max-h-full object-contain"
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <div
+                        className="flex flex-col border-t relative dialogue-choices"
+                        style={{
+                          backgroundColor: "rgba(0,0,0,0.2)",
+                          borderTopColor: `${uiPrimary}50`,
+                        }}
+                      >
+                        {node.choices.length > 0 ? (
+                          node.choices
+                            .filter(
+                              (choice) =>
+                                !choice.requiredGameFlag ||
+                                playerFlags.includes(choice.requiredGameFlag),
+                            )
+                            .map((choice) => (
+                              <button
+                                key={choice.id}
+                                onClick={() => {
+                                  if (
+                                    choice.setGameFlag &&
+                                    !playerFlags.includes(choice.setGameFlag)
+                                  ) {
+                                    setPlayerFlags((prev) => [
+                                      ...prev,
+                                      choice.setGameFlag!,
+                                    ]);
+                                  }
+                                  if (choice.nextNodeId) {
+                                    setActiveDialogue({
+                                      treeId: tree!.id,
+                                      nodeId: choice.nextNodeId,
+                                    });
+                                  } else {
+                                    setActiveDialogue(null);
+                                  }
+                                }}
+                                className="px-6 py-4 text-left transition-colors border-b last:border-b-0 group dialogue-choice"
+                                style={{ borderBottomColor: `${uiPrimary}30` }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor = `${uiPrimary}20`;
+                                  e.currentTarget.style.color = uiPrimary;
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor =
+                                    "transparent";
+                                  e.currentTarget.style.color = "#e5e5e5";
+                                }}
+                              >
+                                <span className="inline-block transition-transform group-hover:translate-x-2 font-medium">
+                                  ▸ {choice.text}
+                                </span>
+                              </button>
+                            ))
+                        ) : (
+                          <button
+                            onClick={() => setActiveDialogue(null)}
+                            className="px-6 py-4 text-center transition-colors font-medium group dialogue-choice"
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = `${uiPrimary}20`;
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor =
+                                "transparent";
+                            }}
+                            style={{ color: uiPrimary }}
+                          >
+                            <span className="group-hover:tracking-wider transition-all">
+                              Continue...
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+              {/* Inventory UI for Gameplay and Theme Preview */}
+              {(isPlaying ||
+                !["dialogue", "items", "scenes"].includes(editorMode)) && (
+                <>
+                  {/* Needs Tracker */}
+                  {project.globalSettings.enableNeeds && (
+                    <div
+                      className="absolute top-4 right-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2"
+                      style={{
+                        backgroundColor: `${uiBg}cc`,
+                        border: `1px solid ${uiPrimary}80`,
+                        borderRadius: uiRadius,
+                        fontFamily: uiFont,
+                        width: "150px",
+                      }}
+                    >
+                      <div
+                        className="text-xs font-bold mb-1 opacity-80"
+                        style={{ color: uiPrimary }}
+                      >
+                        NEEDS
+                      </div>
+                      {[
+                        "rest",
+                        "hunger",
+                        "connection",
+                        "spiritual",
+                        "novelty",
+                      ].map((need) => (
+                        <div key={need} className="flex flex-col gap-1">
+                          <div
+                            className="flex justify-between text-[10px] uppercase font-bold"
+                            style={{ color: "#e5e5e5" }}
+                          >
+                            <span>{need}</span>
+                            <span>{Math.floor(playerNeeds[need])}%</span>
+                          </div>
+                          <div
+                            className="h-1.5 w-full overflow-hidden"
+                            style={{
+                              backgroundColor: "rgba(0,0,0,0.5)",
+                              borderRadius: "2px",
+                            }}
+                          >
+                            <div
+                              className="h-full transition-all"
+                              style={{
+                                width: `${Math.max(0, Math.min(100, playerNeeds[need]))}%`,
+                                backgroundColor: uiPrimary,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                      {project.globalSettings.useDayNightCycle && (
+                        <div
+                          className="mt-2 pt-2 border-t flex justify-between items-center text-[10px] font-bold"
+                          style={{
+                            borderColor: `${uiPrimary}40`,
+                            color: "#e5e5e5",
+                          }}
+                        >
+                          <span style={{ color: uiPrimary }}>TIME</span>
+                          <span>
+                            {Math.floor(gameTime).toString().padStart(2, "0")}:
+                            {Math.floor((gameTime % 1) * 60)
+                              .toString()
+                              .padStart(2, "0")}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Backpack Toggle Button */}
+                  {!project.globalSettings.hideDefaultInventoryBtn && (
+                    <button
+                      onClick={() => setIsInventoryOpen(!isInventoryOpen)}
+                      className="absolute bottom-4 right-4 w-14 h-14 flex items-center justify-center shadow-xl backdrop-blur-sm z-[2000] transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110"
+                      style={{
+                        backgroundColor: `${uiBg}ee`,
+                        borderColor: uiPrimary,
+                        borderRadius: uiRadius,
+                        color: uiPrimary,
+                      }}
+                    >
+                      <div className="relative">
+                        <Backpack size={24} color={uiPrimary} />
+                        {playerInventory.length > 0 && (
+                          <div
+                            className="absolute -top-2 -right-2 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2"
+                            style={{
+                              backgroundColor: uiPrimary,
+                              borderColor: uiBg,
+                            }}
+                          >
+                            {playerInventory.length}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  )}
+
+                  {/* Inventory Modal */}
+                  {isInventoryOpen && (
+                    <div
+                      className="absolute inset-0 bg-black/60 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+                      onClick={() => setIsInventoryOpen(false)}
+                    >
+                      <div
+                        className="max-w-3xl w-full max-h-[80%] flex flex-col shadow-2xl overflow-hidden border-2"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          backgroundColor: `${uiBg}ee`,
+                          borderColor: `${uiPrimary}80`,
+                          borderRadius: uiRadius,
+                          fontFamily: uiFont,
+                        }}
+                      >
+                        <div
+                          className="flex justify-between items-center p-4 border-b"
+                          style={{
+                            backgroundColor: "rgba(0,0,0,0.3)",
+                            borderBottomColor: `${uiPrimary}50`,
+                          }}
+                        >
+                          <h2
+                            className="text-xl font-bold flex items-center gap-2"
+                            style={{ color: uiPrimary }}
+                          >
+                            <Backpack size={24} />
+                            Inventory
+                          </h2>
+                          <button
+                            onClick={() => setIsInventoryOpen(false)}
+                            style={{ color: uiPrimary }}
+                            className="opacity-70 hover:opacity-100 transition-opacity"
+                          >
+                            <X size={24} />
+                          </button>
+                        </div>
+                        <div
+                          className="flex-1 overflow-y-auto p-6 custom-scrollbar"
+                          style={{ color: "#e5e5e5" }}
+                        >
+                          {playerInventory.length === 0 ? (
+                            <div
+                              className="text-center py-12 flex flex-col items-center gap-4"
+                              style={{ color: `${uiPrimary}80` }}
+                            >
+                              <PackageX size={48} className="opacity-50" />
+                              <p>Your inventory is empty.</p>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 pb-12">
+                              {playerInventory.map((itemId, idx) => {
+                                const item = project.inventoryItems.find(
+                                  (i) => i.id === itemId,
+                                );
+                                if (!item) return null;
+                                const iconAsset = item.iconAssetId
+                                  ? project.assets.find(
+                                      (a) => a.id === item.iconAssetId,
+                                    )
+                                  : null;
+                                const isSelected =
+                                  selectedInventoryItemId === itemId;
+                                const hasSelection =
+                                  selectedInventoryItemId !== null;
+
+                                return (
+                                  <div
+                                    key={`${itemId}-${idx}`}
+                                    className={`border overflow-hidden flex flex-col group transition-all cursor-pointer relative ${isSelected ? "scale-105 shadow-2xl ring-4 z-10" : ""}`}
+                                    style={{
+                                      backgroundColor: isSelected
+                                        ? "rgba(0,0,0,0.6)"
+                                        : "rgba(0,0,0,0.2)",
+                                      borderColor: isSelected
+                                        ? uiPrimary
+                                        : `${uiPrimary}40`,
+                                      borderRadius: uiRadius,
+                                      boxShadow: isSelected
+                                        ? `0 0 20px ${uiPrimary}80`
+                                        : "none",
+                                      ringColor: uiPrimary,
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      if (!isSelected) {
+                                        e.currentTarget.style.borderColor =
+                                          uiPrimary;
+                                        e.currentTarget.style.backgroundColor =
+                                          "rgba(0,0,0,0.4)";
+                                      }
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      if (!isSelected) {
+                                        e.currentTarget.style.borderColor = `${uiPrimary}40`;
+                                        e.currentTarget.style.backgroundColor =
+                                          "rgba(0,0,0,0.2)";
+                                      }
+                                    }}
+                                    onClick={() => {
+                                      if (selectedInventoryItemId === itemId) {
+                                        // Deselect or do default inspect
+                                        setSelectedInventoryItemId(null);
+                                        setIsInventoryOpen(false);
+                                        setPreviewDialogue(
+                                          item.description
+                                            ? `(Item): ${item.description}`
+                                            : `You look at: ${item.name}.`,
+                                        );
+                                        setTimeout(
+                                          () => setPreviewDialogue(null),
+                                          4000,
+                                        );
+                                      } else if (
+                                        selectedInventoryItemId &&
+                                        selectedInventoryItemId !== itemId
+                                      ) {
+                                        // Try to combine
+                                        const sourceItem =
+                                          project.inventoryItems.find(
+                                            (i) =>
+                                              i.id === selectedInventoryItemId,
+                                          );
+                                        const targetItem = item;
+                                        // Check both directions
+                                        const combinationFromSource =
+                                          sourceItem?.combinations?.find(
+                                            (c) => c.withItemId === itemId,
+                                          );
+                                        const combinationFromTarget =
+                                          targetItem?.combinations?.find(
+                                            (c) =>
+                                              c.withItemId ===
+                                              selectedInventoryItemId,
+                                          );
+                                        const combination =
+                                          combinationFromSource ||
+                                          combinationFromTarget;
+
+                                        if (combination) {
+                                          const activeSource =
+                                            combinationFromSource
+                                              ? sourceItem
+                                              : targetItem;
+                                          const activeTarget =
+                                            combinationFromSource
+                                              ? targetItem
+                                              : sourceItem;
+
+                                          setPlayerInventory((prev) => {
+                                            const next = [...prev];
+                                            if (
+                                              combination.destroySelf &&
+                                              activeSource
+                                            ) {
+                                              const idIdx = next.indexOf(
+                                                activeSource.id,
+                                              );
+                                              if (idIdx !== -1)
+                                                next.splice(idIdx, 1);
+                                            }
+                                            if (
+                                              combination.destroyTarget &&
+                                              activeTarget
+                                            ) {
+                                              const idIdx = next.indexOf(
+                                                activeTarget.id,
+                                              );
+                                              if (idIdx !== -1)
+                                                next.splice(idIdx, 1);
+                                            }
+                                            if (combination.resultItemId) {
+                                              next.push(
+                                                combination.resultItemId,
+                                              );
+                                            }
+                                            return next;
+                                          });
+
+                                          setSelectedInventoryItemId(null);
+                                          setPreviewDialogue(
+                                            combination.successMessage ||
+                                              "Items combined successfully!",
+                                          );
+                                          setTimeout(
+                                            () => setPreviewDialogue(null),
+                                            4000,
+                                          );
+                                        } else {
+                                          // Failed combination
+                                          setPreviewDialogue(
+                                            `These objects do not combine.`,
+                                          );
+                                          setTimeout(
+                                            () => setPreviewDialogue(null),
+                                            4000,
+                                          );
+                                          setSelectedInventoryItemId(null); // Deselect
+                                        }
+                                      } else {
+                                        // Select the item
+                                        setSelectedInventoryItemId(itemId);
+                                      }
+                                    }}
+                                  >
+                                    {isSelected && (
+                                      <div
+                                        className="absolute top-1 left-1 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-lg backdrop-blur-md animate-pulse"
+                                        style={{
+                                          backgroundColor: uiPrimary,
+                                          color: uiBg,
+                                        }}
+                                      >
+                                        SELECTED
+                                      </div>
+                                    )}
+                                    {hasSelection && !isSelected && (
+                                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                                        <div className="text-white font-bold text-xs bg-black/80 px-2 py-1 rounded shadow-lg">
+                                          Combine?
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    <div
+                                      className="aspect-square flex items-center justify-center p-4 relative"
+                                      style={{
+                                        backgroundColor: "rgba(0,0,0,0.3)",
+                                      }}
+                                    >
+                                      {iconAsset ? (
+                                        <img
+                                          src={iconAsset.src}
+                                          alt={item.name}
+                                          className={`w-full h-full object-contain drop-shadow-lg transition-transform ${isSelected ? "scale-110" : "group-hover:scale-110"}`}
+                                          draggable="false"
+                                        />
+                                      ) : (
+                                        <Backpack
+                                          size={48}
+                                          style={{ color: `${uiPrimary}40` }}
+                                          className="group-hover:opacity-80 transition-opacity"
+                                        />
+                                      )}
+                                    </div>
+                                    <div
+                                      className="p-3 border-t flex-1 flex flex-col"
+                                      style={{
+                                        borderTopColor: `${uiPrimary}20`,
+                                      }}
+                                    >
+                                      <h3
+                                        className="font-bold text-sm mb-1 leading-tight flex-1"
+                                        style={{ color: uiPrimary }}
+                                      >
+                                        {item.name}
+                                      </h3>
+                                      <p
+                                        className="text-[10px] line-clamp-3 leading-snug mb-2"
+                                        style={{ color: "#a1a1aa" }}
+                                      >
+                                        {item.description}
+                                      </p>
+
+                                      {isSelected && item.isUsable && (
+                                        <button
+                                          className="w-full py-1.5 mt-auto text-xs font-bold rounded shadow-lg hover:brightness-125 transition-all active:scale-95"
+                                          style={{
+                                            backgroundColor: uiPrimary,
+                                            color: uiBg,
+                                          }}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (item.consumeOnUse) {
+                                              setPlayerInventory((prev) => {
+                                                const next = [...prev];
+                                                const idx = next.indexOf(
+                                                  item.id,
+                                                );
+                                                if (idx !== -1)
+                                                  next.splice(idx, 1);
+                                                return next;
+                                              });
+                                            }
+                                            setIsInventoryOpen(false);
+                                            setSelectedInventoryItemId(null);
+
+                                            if (item.useSoundAssetId) {
+                                              const sound = project.assets.find(
+                                                (a) =>
+                                                  a.id === item.useSoundAssetId,
+                                              );
+                                              if (sound) {
+                                                const audio = new Audio(
+                                                  sound.src,
+                                                );
+                                                audio
+                                                  .play()
+                                                  .catch((e) =>
+                                                    console.error(
+                                                      "Could not play sound",
+                                                      e,
+                                                    ),
+                                                  );
+                                              }
+                                            }
+
+                                            if (item.statRestores) {
+                                              setPlayerNeeds((prev) => {
+                                                const next = { ...prev };
+                                                item.statRestores!.forEach(
+                                                  (restore) => {
+                                                    if (
+                                                      next[restore.stat] !==
+                                                      undefined
+                                                    ) {
+                                                      next[restore.stat] =
+                                                        Math.min(
+                                                          100,
+                                                          next[restore.stat] +
+                                                            restore.amount,
+                                                        );
+                                                    } else {
+                                                      next[restore.stat] =
+                                                        restore.amount;
+                                                    }
+                                                  },
+                                                );
+                                                return next;
+                                              });
+                                            }
+
+                                            setPreviewDialogue(
+                                              item.useMessage ||
+                                                `You used ${item.name}.`,
+                                            );
+                                            setTimeout(
+                                              () => setPreviewDialogue(null),
+                                              4000,
+                                            );
+                                          }}
+                                        >
+                                          USE ITEM
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* Crafting Modal */}
+                  {isCraftingOpen && (
+                    <div
+                      className="absolute inset-0 bg-black/60 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+                      onClick={() => setIsCraftingOpen(false)}
+                    >
+                      <div
+                        className="max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          backgroundColor: `${uiBg}ee`,
+                          borderColor: `${uiPrimary}80`,
+                          fontFamily: uiFont,
+                        }}
+                      >
+                        <div
+                          className="flex justify-between items-center p-4 border-b"
+                          style={{
+                            backgroundColor: "rgba(0,0,0,0.3)",
+                            borderBottomColor: `${uiPrimary}50`,
+                          }}
+                        >
+                          <h2
+                            className="text-xl font-bold flex items-center gap-2"
+                            style={{ color: uiPrimary }}
+                          >
+                            <Backpack size={24} />
+                            Crafting Station
+                          </h2>
+                          <button
+                            onClick={() => setIsCraftingOpen(false)}
+                            style={{ color: uiPrimary }}
+                            className="opacity-70 hover:opacity-100 transition-opacity"
+                          >
+                            <X size={24} />
+                          </button>
+                        </div>
+                        <div className="p-6">
+                          <p className="text-white/70 mb-4 text-center">
+                            Select two items from your inventory to forge a new
+                            item.
+                          </p>
+                          <div className="flex justify-center items-center gap-4 mb-6">
+                            <div
+                              className="w-24 h-24 border-2 rounded-lg flex flex-col items-center justify-center gap-2 relative bg-black/30"
+                              style={{ borderColor: `${uiPrimary}40` }}
+                            >
+                              {craftSlot1 ? (
+                                <>
+                                  <img
+                                    src={
+                                      project.assets.find(
+                                        (a) =>
+                                          a.id ===
+                                          project.inventoryItems.find(
+                                            (i) => i.id === craftSlot1,
+                                          )?.iconAssetId,
+                                      )?.src
+                                    }
+                                    alt="Slot 1"
+                                    className="w-10 h-10 object-contain"
+                                  />
+                                  <button
+                                    onClick={() => setCraftSlot1(null)}
+                                    className="absolute -top-2 -right-2 bg-red-500 rounded-full w-5 h-5 flex items-center justify-center text-white shadow"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                  <div className="text-[10px] w-full text-center truncate px-1">
+                                    {
+                                      project.inventoryItems.find(
+                                        (i) => i.id === craftSlot1,
+                                      )?.name
+                                    }
+                                  </div>
+                                </>
+                              ) : (
+                                <select
+                                  className="absolute inset-0 opacity-0 cursor-pointer"
+                                  value=""
+                                  onChange={(e) =>
+                                    setCraftSlot1(e.target.value)
+                                  }
+                                >
+                                  <option value="" disabled>
+                                    Select Item...
+                                  </option>
+                                  {playerInventory.map((itemId, idx) => {
+                                    const item = project.inventoryItems.find(
+                                      (i) => i.id === itemId,
+                                    );
+                                    if (!item || itemId === craftSlot2)
+                                      return null;
+                                    return (
+                                      <option
+                                        key={`${itemId}-${idx}`}
+                                        value={itemId}
+                                      >
+                                        {item.name}
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                              )}
+                              {!craftSlot1 && (
+                                <div className="text-[10px] text-white/50 text-center pointer-events-none">
+                                  Click to
+                                  <br />
+                                  Select Item
+                                </div>
+                              )}
+                            </div>
+                            <div
+                              className="text-2xl opacity-50"
+                              style={{ color: uiPrimary }}
+                            >
+                              +
+                            </div>
+                            <div
+                              className="w-24 h-24 border-2 rounded-lg flex flex-col items-center justify-center gap-2 relative bg-black/30"
+                              style={{ borderColor: `${uiPrimary}40` }}
+                            >
+                              {craftSlot2 ? (
+                                <>
+                                  <img
+                                    src={
+                                      project.assets.find(
+                                        (a) =>
+                                          a.id ===
+                                          project.inventoryItems.find(
+                                            (i) => i.id === craftSlot2,
+                                          )?.iconAssetId,
+                                      )?.src
+                                    }
+                                    alt="Slot 2"
+                                    className="w-10 h-10 object-contain"
+                                  />
+                                  <button
+                                    onClick={() => setCraftSlot2(null)}
+                                    className="absolute -top-2 -right-2 bg-red-500 rounded-full w-5 h-5 flex items-center justify-center text-white shadow"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                  <div className="text-[10px] w-full text-center truncate px-1">
+                                    {
+                                      project.inventoryItems.find(
+                                        (i) => i.id === craftSlot2,
+                                      )?.name
+                                    }
+                                  </div>
+                                </>
+                              ) : (
+                                <select
+                                  className="absolute inset-0 opacity-0 cursor-pointer"
+                                  value=""
+                                  onChange={(e) =>
+                                    setCraftSlot2(e.target.value)
+                                  }
+                                >
+                                  <option value="" disabled>
+                                    Select Item...
+                                  </option>
+                                  {playerInventory.map((itemId, idx) => {
+                                    const item = project.inventoryItems.find(
+                                      (i) => i.id === itemId,
+                                    );
+                                    if (!item || itemId === craftSlot1)
+                                      return null;
+                                    return (
+                                      <option
+                                        key={`${itemId}-${idx}`}
+                                        value={itemId}
+                                      >
+                                        {item.name}
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                              )}
+                              {!craftSlot2 && (
+                                <div className="text-[10px] text-white/50 text-center pointer-events-none">
+                                  Click to
+                                  <br />
+                                  Select Item
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex justify-center flex-col items-center gap-3">
+                            <button
+                              className="px-8 py-3 rounded-lg font-bold transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-lg"
+                              style={{
+                                backgroundColor: uiPrimary,
+                                color: uiBg,
+                              }}
+                              disabled={!craftSlot1 || !craftSlot2}
+                              onClick={() => {
+                                const sourceItem = project.inventoryItems.find(
+                                  (i) => i.id === craftSlot1,
+                                );
+                                const targetItem = project.inventoryItems.find(
+                                  (i) => i.id === craftSlot2,
+                                );
+                                const combinationFromSource =
+                                  sourceItem?.combinations?.find(
+                                    (c) => c.withItemId === craftSlot2,
+                                  );
+                                const combinationFromTarget =
+                                  targetItem?.combinations?.find(
+                                    (c) => c.withItemId === craftSlot1,
+                                  );
+                                const combination =
+                                  combinationFromSource ||
+                                  combinationFromTarget;
+
+                                if (combination) {
+                                  setPlayerInventory((prev) => {
+                                    const next = [...prev];
+                                    if (combination.destroySelf && sourceItem) {
+                                      const idx = next.indexOf(sourceItem.id);
+                                      if (idx !== -1) next.splice(idx, 1);
+                                    }
+                                    if (
+                                      combination.destroyTarget &&
+                                      targetItem
+                                    ) {
+                                      const idx = next.indexOf(targetItem.id);
+                                      if (idx !== -1) next.splice(idx, 1);
+                                    }
+                                    if (combination.resultItemId) {
+                                      next.push(combination.resultItemId);
+                                    }
+                                    return next;
+                                  });
+                                  setCraftSlot1(null);
+                                  setCraftSlot2(null);
+                                  setPreviewDialogue(
+                                    combination.successMessage ||
+                                      "Crafting successful!",
+                                  );
+                                  setTimeout(
+                                    () => setPreviewDialogue(null),
+                                    4000,
+                                  );
+                                  setIsCraftingOpen(false);
+                                } else {
+                                  setPreviewDialogue(
+                                    "Nothing happens... These items can't be combined.",
+                                  );
+                                  setTimeout(
+                                    () => setPreviewDialogue(null),
+                                    4000,
+                                  );
+                                }
+                              }}
+                            >
+                              CRAFT
+                            </button>
+                            <button
+                              onClick={() => {
+                                setIsCraftingOpen(false);
+                                setIsInventoryOpen(true);
+                              }}
+                              className="text-xs text-white/50 hover:text-white transition-colors underline"
+                            >
+                              Open Backpack Instead
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Quest Log Modal */}
+                  {isQuestLogOpen && (
+                    <div
+                      className="absolute inset-0 bg-black/60 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+                      onClick={() => setIsQuestLogOpen(false)}
+                    >
+                      <div
+                        className="max-w-3xl w-full max-h-[80%] flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          backgroundColor: `${uiBg}ee`,
+                          borderColor: `${uiPrimary}80`,
+                          fontFamily: uiFont,
+                        }}
+                      >
+                        <div
+                          className="flex justify-between items-center p-4 border-b"
+                          style={{
+                            backgroundColor: "rgba(0,0,0,0.3)",
+                            borderBottomColor: `${uiPrimary}50`,
+                          }}
+                        >
+                          <h2
+                            className="text-xl font-bold flex items-center gap-2"
+                            style={{ color: uiPrimary }}
+                          >
+                            <Book size={24} />
+                            Quest Log
+                          </h2>
+                          <button
+                            onClick={() => setIsQuestLogOpen(false)}
+                            style={{ color: uiPrimary }}
+                            className="opacity-70 hover:opacity-100 transition-opacity"
+                          >
+                            <X size={24} />
+                          </button>
+                        </div>
+                        <div
+                          className="flex-1 overflow-y-auto p-4 space-y-4 shadow-inner"
+                          style={{ backgroundColor: "rgba(0,0,0,0.2)" }}
+                        >
+                          {(project.quests || []).length === 0 ? (
+                            <div
+                              className="text-center py-10 opacity-50 font-medium"
+                              style={{ color: uiSecondary }}
+                            >
+                              Your journal is empty.
+                            </div>
+                          ) : (
+                            (project.quests || []).map((quest) => {
+                              let completedObjs = 0;
+                              let totalObjs = (quest.objectives || []).length;
+                              (quest.objectives || []).forEach((obj) => {
+                                if (
+                                  obj.type === "custom_flag" &&
+                                  playerFlags.includes(obj.targetId)
+                                )
+                                  completedObjs++;
+                                if (
+                                  obj.type === "collect_item" &&
+                                  playerInventory.includes(obj.targetId)
+                                )
+                                  completedObjs++;
+                                if (
+                                  obj.type === "reach_scene" &&
+                                  project.currentSceneId === obj.targetId
+                                )
+                                  completedObjs++;
+                              });
+                              const isCompleted =
+                                totalObjs > 0 && completedObjs >= totalObjs;
+
+                              return (
+                                <div
+                                  key={quest.id}
+                                  className="p-4 rounded-lg border-2 shadow-sm"
+                                  style={{
+                                    backgroundColor: uiBg,
+                                    borderColor: isCompleted
+                                      ? uiPrimary
+                                      : `${uiPrimary}40`,
+                                  }}
+                                >
+                                  <h3
+                                    className="font-bold text-lg mb-1"
+                                    style={{
+                                      color: isCompleted
+                                        ? uiPrimary
+                                        : "#ffffff",
+                                    }}
+                                  >
+                                    {quest.name} {isCompleted && "✓"}
+                                  </h3>
+                                  <p
+                                    className="text-sm mb-4 opacity-80"
+                                    style={{ color: uiSecondary }}
+                                  >
+                                    {quest.description}
+                                  </p>
+                                  {totalObjs > 0 && (
+                                    <div className="space-y-2">
+                                      <div
+                                        className="text-xs font-bold uppercase tracking-wider mb-2"
+                                        style={{ color: uiPrimary }}
+                                      >
+                                        Objectives
+                                      </div>
+                                      {quest.objectives.map((obj) => {
+                                        let isObjDone = false;
+                                        if (
+                                          obj.type === "custom_flag" &&
+                                          playerFlags.includes(obj.targetId)
+                                        )
+                                          isObjDone = true;
+                                        if (
+                                          obj.type === "collect_item" &&
+                                          playerInventory.includes(obj.targetId)
+                                        )
+                                          isObjDone = true;
+                                        if (
+                                          obj.type === "reach_scene" &&
+                                          project.currentSceneId ===
+                                            obj.targetId
+                                        )
+                                          isObjDone = true;
+                                        return (
+                                          <div
+                                            key={obj.id}
+                                            className="flex items-center gap-2 text-sm"
+                                          >
+                                            <div
+                                              className="w-4 h-4 rounded-full border-2 flex items-center justify-center"
+                                              style={{
+                                                borderColor: uiPrimary,
+                                                backgroundColor: isObjDone
+                                                  ? uiPrimary
+                                                  : "transparent",
+                                              }}
+                                            >
+                                              {isObjDone && (
+                                                <CheckCircle2
+                                                  size={10}
+                                                  color={uiBg}
+                                                />
+                                              )}
+                                            </div>
+                                            <span
+                                              style={{
+                                                textDecoration: isObjDone
+                                                  ? "line-through"
+                                                  : "none",
+                                                color: isObjDone
+                                                  ? uiPrimary
+                                                  : uiSecondary,
+                                                opacity: isObjDone ? 0.8 : 1,
+                                              }}
+                                            >
+                                              {obj.description}
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Global styles for animations injected by Tailwind or custom */}
+              <style>{`
+            @keyframes wiggle {
+              0%, 100% { transform: rotate(-5deg); }
+              50% { transform: rotate(5deg); }
+            }
+            @keyframes float {
+              0%, 100% { transform: translateY(0); }
+              50% { transform: translateY(-10px); }
+            }
+            @keyframes pulse {
+              0%, 100% { opacity: 1; transform: scale(1); }
+              50% { opacity: 0.8; transform: scale(1.05); }
+            }
+            @keyframes spin {
+              from { transform: rotate(0deg); }
+              to { transform: rotate(360deg); }
+            }
+            @keyframes shake {
+              0%, 100% { transform: translateX(0); }
+              20%, 60% { transform: translateX(-5px); }
+              40%, 80% { transform: translateX(5px); }
+            }
+            @keyframes bounce {
+              0%, 100% { transform: translateY(0); }
+              50% { transform: translateY(-20px); }
+            }
+            @keyframes fadeTransition {
+              0% { opacity: 0; }
+              50% { opacity: 1; }
+              100% { opacity: 0; }
+            }
+            
+            /* Custom User CSS */
+            ${isPlaying ? project.globalSettings.customCss || "" : ""}
+          `}</style>
+            </main>
+
+            {/* Right Sidebar - Properties/Layers */}
+            <aside
+              className="flex-shrink-0 bg-neutral-900 border-l border-neutral-800 flex flex-col z-20 relative"
+              style={{ width: rightSidebarWidth }}
+            >
+              <div
+                className="absolute top-0 bottom-0 -left-[3px] w-[6px] cursor-col-resize z-[100] hover:bg-emerald-500/50"
+                onPointerDown={() =>
+                  document.body.classList.add("resizing-sidebar")
+                }
+              />
+              <div className="flex border-b border-neutral-800 bg-neutral-950">
+                <button
+                  onClick={() => setRightSidebarTab("properties")}
+                  className={`flex-1 p-2 text-xs font-medium flex items-center justify-center gap-1 transition-colors ${rightSidebarTab === "properties" ? "text-emerald-400 border-b-2 border-emerald-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
+                >
+                  <Settings size={14} /> Props
+                </button>
+                <button
+                  onClick={() => setRightSidebarTab("layers")}
+                  className={`flex-1 p-2 text-xs font-medium flex items-center justify-center gap-1 transition-colors ${rightSidebarTab === "layers" ? "text-emerald-400 border-b-2 border-emerald-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
+                >
+                  <Layers size={14} /> Layers
+                </button>
+              </div>
+
+              <div className="flex-1 flex flex-col overflow-y-auto p-4 space-y-6">
+                {rightSidebarTab === "layers" && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex justify-between items-center mb-2">
+                      <div className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                        {editorMode === "ui_stage"
+                          ? "UI Elements"
+                          : "Stage Objects"}
+                      </div>
+                      <span className="text-xs text-neutral-500">
+                        {currentScene.objects.length}
+                      </span>
+                    </div>
+                    {[...currentScene.objects]
+                      .sort((a, b) => b.zIndex - a.zIndex)
+                      .map((obj) => {
+                        const asset = project.assets.find(
+                          (a) => a.src === obj.src,
+                        );
+                        let icon = (
+                          <Square size={14} className="text-neutral-500" />
+                        );
+                        if (obj.isHitbox)
+                          icon = <Square size={14} className="text-red-400" />;
+                        else if (obj.isScript)
+                          icon = (
+                            <FileCode size={14} className="text-blue-400" />
+                          );
+                        else if (obj.isText)
+                          icon = <Type size={14} className="text-indigo-400" />;
+                        else if (asset?.type === "audio")
+                          icon = (
+                            <Music size={14} className="text-emerald-400" />
+                          );
+                        else if (asset?.type === "video")
+                          icon = <Play size={14} className="text-purple-400" />;
+                        else if (asset?.type === "image")
+                          icon = (
+                            <ImageIcon size={14} className="text-neutral-400" />
+                          );
+
+                        return (
+                          <div
+                            key={obj.id}
+                            onClick={() =>
+                              !isPlaying && setSelectedObjectId(obj.id)
+                            }
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData("layerId", obj.id);
+                            }}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              const draggedLayerId =
+                                e.dataTransfer.getData("layerId");
+                              if (!draggedLayerId || draggedLayerId === obj.id)
+                                return;
+
+                              // We need to re-assign z-indices to cleanly insert the layer.
+                              // Current array is reverse sorted (highest z-index first).
+                              const sortedObjects = [
+                                ...currentScene.objects,
+                              ].sort((a, b) => b.zIndex - a.zIndex);
+                              const fromIndex = sortedObjects.findIndex(
+                                (o) => o.id === draggedLayerId,
+                              );
+                              const toIndex = sortedObjects.findIndex(
+                                (o) => o.id === obj.id,
+                              );
+                              if (fromIndex === -1 || toIndex === -1) return;
+
+                              // Reorder the array
+                              const [movedItem] = sortedObjects.splice(
+                                fromIndex,
+                                1,
+                              );
+                              sortedObjects.splice(toIndex, 0, movedItem);
+
+                              // Re-assign z-indices cleanly, starting from highest
+                              const total = sortedObjects.length;
+                              const isUI = editorMode === "ui_stage";
+                              const newProject = {
+                                ...project,
+                                [isUI ? "uiMenus" : "scenes"]: (
+                                  project[isUI ? "uiMenus" : "scenes"] || []
+                                ).map((s) =>
+                                  s.id === currentScene.id
+                                    ? {
+                                        ...s,
+                                        objects: s.objects.map((o) => {
+                                          const newIndex =
+                                            sortedObjects.findIndex(
+                                              (so) => so.id === o.id,
+                                            );
+                                          return {
+                                            ...o,
+                                            zIndex: (total - newIndex) * 10,
+                                          };
+                                        }),
+                                      }
+                                    : s,
+                                ),
+                              };
+                              pushHistory(newProject);
+                            }}
+                            className={`flex flex-col gap-2 p-2 rounded cursor-pointer border transition-colors ${selectedObject?.id === obj.id ? "bg-emerald-500/10 border-emerald-500/50" : "bg-neutral-800 border-neutral-700/50 hover:bg-neutral-700"}`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="shrink-0 cursor-pointer text-neutral-400 hover:text-neutral-200"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateObject(obj.id, {
+                                    opacity: obj.opacity === 0 ? 1 : 0,
+                                  });
+                                }}
+                              >
+                                {obj.opacity === 0 ? (
+                                  <EyeOff size={14} />
+                                ) : (
+                                  <Eye size={14} />
+                                )}
+                              </div>
+                              <div
+                                className="shrink-0 cursor-pointer text-neutral-400 hover:text-neutral-200"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateObject(obj.id, { locked: !obj.locked });
+                                }}
+                              >
+                                {obj.locked ? (
+                                  <Lock size={14} className="text-red-400" />
+                                ) : (
+                                  <Unlock size={14} />
+                                )}
+                              </div>
+                              <div className="shrink-0">{icon}</div>
+                              <div className="flex-1 min-w-0 text-sm truncate">
+                                {obj.name}
+                              </div>
+                            </div>
+
+                            {selectedObject?.id === obj.id && (
+                              <div className="flex justify-between items-center bg-neutral-900/50 p-1.5 rounded-lg border border-neutral-700/50 mt-1">
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const maxZ = Math.max(
+                                        ...currentScene.objects.map(
+                                          (o) => o.zIndex,
+                                        ),
+                                      );
+                                      updateObject(obj.id, {
+                                        zIndex: maxZ + 1,
+                                      });
+                                    }}
+                                    className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white transition-colors"
+                                    title="Bring to Front"
+                                  >
+                                    <ArrowUpToLine size={14} />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      updateObject(obj.id, {
+                                        zIndex: obj.zIndex + 1,
+                                      });
+                                    }}
+                                    className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white transition-colors"
+                                    title="Move Up"
+                                  >
+                                    <MoveUp size={14} />
+                                  </button>
+                                </div>
+
+                                <div className="text-[10px] uppercase text-neutral-500 font-bold bg-neutral-950 px-2 py-0.5 rounded border border-neutral-800">
+                                  Layer {obj.zIndex}
+                                </div>
+
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      updateObject(obj.id, {
+                                        zIndex: obj.zIndex - 1,
+                                      });
+                                    }}
+                                    className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white transition-colors"
+                                    title="Move Down"
+                                  >
+                                    <MoveDown size={14} />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const minZ = Math.min(
+                                        ...currentScene.objects.map(
+                                          (o) => o.zIndex,
+                                        ),
+                                      );
+                                      updateObject(obj.id, {
+                                        zIndex: minZ - 1,
+                                      });
+                                    }}
+                                    className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white transition-colors"
+                                    title="Send to Back"
+                                  >
+                                    <ArrowDownToLine size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    {currentScene.objects.length === 0 && (
+                      <div className="text-sm text-neutral-500 text-center py-4 bg-neutral-800/50 rounded border border-neutral-800/50">
+                        No objects in scene yet.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {rightSidebarTab === "prefabs" && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex justify-between items-center mb-2">
+                      <div className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                        Smart Prefabs
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => {
+                          const itemType = "Gold Coin";
+                          const objId = uuidv4();
+                          let newItems = [...(project.inventoryItems || [])];
+                          let item = newItems.find((i) => i.name === itemType);
+                          if (!item) {
+                            item = {
+                              id: uuidv4(),
+                              name: itemType,
+                              type: "weapon",
+                              description: "Found in chest",
+                              icon: "bag",
+                            };
+                            newItems.push(item);
+                          }
+                          const newObj: SceneObject = {
+                            id: objId,
+                            name: "Loot Chest",
+                            src: "https://images.unsplash.com/photo-1605806616949-1e87b487cb2a?w=128&q=80",
+                            x:
+                              (project.globalSettings.stageWidth ?? 800) / 2 -
+                              32,
+                            y:
+                              (project.globalSettings.stageHeight ?? 600) / 2 -
+                              32,
+                            width: 64,
+                            height: 64,
+                            zIndex: 100,
+                            rotation: 0,
+                            opacity: 1,
+                            locked: false,
+                            cursor: "pointer",
+                            animation: "none",
+                            interaction: "give-item",
+                            giveItemId: item.id,
+                            hasPhysics: false,
+                            blendMode: "normal",
+                            parallaxSpeed: 1,
+                            triggerOnce: true,
+                          };
+                          setProject((p) => ({
+                            ...p,
+                            inventoryItems: newItems,
+                            scenes: p.scenes.map((s) =>
+                              s.id === currentScene.id
+                                ? { ...s, objects: [...s.objects, newObj] }
+                                : s,
+                            ),
+                          }));
+                          showError(
+                            "Chest added! It will give " +
+                              itemType +
+                              " once to the player.",
+                          );
+                        }}
+                        className="bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 p-3 rounded flex flex-col items-center gap-2 text-sm text-neutral-300"
+                      >
+                        <Package size={24} className="text-amber-400" />
+                        <span>Loot Chest</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const sceneName =
+                            "New Scene " + Math.floor(Math.random() * 100);
+                          const sceneId = uuidv4();
+                          const newScene = {
+                            id: sceneId,
+                            name: sceneName,
+                            objects: [],
+                            backgroundColor: "#222",
+                          };
+                          const newObj: SceneObject = {
+                            id: uuidv4(),
+                            name: "Door to " + sceneName,
+                            src: "https://images.unsplash.com/photo-1510411624830-4e5a9cefa883?w=128&q=80",
+                            x:
+                              (project.globalSettings.stageWidth ?? 800) / 2 -
+                              32,
+                            y:
+                              (project.globalSettings.stageHeight ?? 600) / 2 -
+                              64,
+                            width: 64,
+                            height: 128,
+                            zIndex: 100,
+                            rotation: 0,
+                            opacity: 1,
+                            locked: false,
+                            cursor: "pointer",
+                            animation: "none",
+                            interaction: "scene_change",
+                            interactionData: sceneId,
+                            hasPhysics: false,
+                            blendMode: "normal",
+                            parallaxSpeed: 1,
+                          };
+                          setProject((p) => ({
+                            ...p,
+                            scenes: [
+                              ...p.scenes.map((s) =>
+                                s.id === currentScene.id
+                                  ? { ...s, objects: [...s.objects, newObj] }
+                                  : s,
+                              ),
+                              newScene,
+                            ],
+                          }));
+                          showError(
+                            "Door added! It leads to a new scene: " + sceneName,
+                          );
+                        }}
+                        className="bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 p-3 rounded flex flex-col items-center gap-2 text-sm text-neutral-300"
+                      >
+                        <LogIn size={24} className="text-emerald-400" />
+                        <span>Door/Portal</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const npcName = "Villager";
+                          const txt = "Hello there!";
+                          const newObj: SceneObject = {
+                            id: uuidv4(),
+                            name: npcName,
+                            src: "https://images.unsplash.com/photo-1544212952-47525f2316e1?w=128&q=80",
+                            x:
+                              (project.globalSettings.stageWidth ?? 800) / 2 -
+                              32,
+                            y:
+                              (project.globalSettings.stageHeight ?? 600) / 2 -
+                              32,
+                            width: 64,
+                            height: 64,
+                            zIndex: 100,
+                            rotation: 0,
+                            opacity: 1,
+                            locked: false,
+                            cursor: "pointer",
+                            animation: "none",
+                            interaction: "dialogue",
+                            flavorText: txt,
+                            hasPhysics: false,
+                            blendMode: "normal",
+                            parallaxSpeed: 1,
+                          };
+                          setProject((p) => ({
+                            ...p,
+                            scenes: p.scenes.map((s) =>
+                              s.id === currentScene.id
+                                ? { ...s, objects: [...s.objects, newObj] }
+                                : s,
+                            ),
+                          }));
+                        }}
+                        className="bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 p-3 rounded flex flex-col items-center gap-2 text-sm text-neutral-300"
+                      >
+                        <MessageSquare size={24} className="text-blue-400" />
+                        <span>Basic NPC</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const txt = "Beware of dog";
+                          const newObj: SceneObject = {
+                            id: uuidv4(),
+                            name: "Wooden Sign",
+                            src: "",
+                            isText: true,
+                            textContent: txt,
+                            textStyle: "sign",
+                            x:
+                              (project.globalSettings.stageWidth ?? 800) / 2 -
+                              50,
+                            y:
+                              (project.globalSettings.stageHeight ?? 600) / 2 -
+                              20,
+                            width: 100,
+                            height: 40,
+                            zIndex: 100,
+                            rotation: 0,
+                            opacity: 1,
+                            locked: false,
+                            cursor: "default",
+                            animation: "none",
+                            interaction: "none",
+                            hasPhysics: false,
+                            blendMode: "normal",
+                            parallaxSpeed: 1,
+                          };
+                          setProject((p) => ({
+                            ...p,
+                            scenes: p.scenes.map((s) =>
+                              s.id === currentScene.id
+                                ? { ...s, objects: [...s.objects, newObj] }
+                                : s,
+                            ),
+                          }));
+                        }}
+                        className="bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 p-3 rounded flex flex-col items-center gap-2 text-sm text-neutral-300"
+                      >
+                        <HelpCircle size={24} className="text-amber-500" />
+                        <span>Signpost</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {rightSidebarTab === "properties" &&
+                  (!selectedObject ? (
+                    <div className="space-y-6">
+                      <div className="space-y-3">
+                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                          Stage Settings
+                        </h3>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <LabelWithHelp
+                              label="Game Screen Width"
+                              helpText="The total width of your game screen in pixels."
+                            />
+                            <input
+                              type="number"
+                              value={project.globalSettings.stageWidth || 800}
+                              onChange={(e) =>
+                                setProject((p) => ({
+                                  ...p,
+                                  globalSettings: {
+                                    ...p.globalSettings,
+                                    stageWidth: Number(e.target.value),
+                                  },
+                                }))
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1"
+                            />
+                          </div>
+                          <div>
+                            <LabelWithHelp
+                              label="Game Screen Height"
+                              helpText="The total height of your game screen in pixels."
+                            />
+                            <input
+                              type="number"
+                              value={project.globalSettings.stageHeight || 600}
+                              onChange={(e) =>
+                                setProject((p) => ({
+                                  ...p,
+                                  globalSettings: {
+                                    ...p.globalSettings,
+                                    stageHeight: Number(e.target.value),
+                                  },
+                                }))
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <LabelWithHelp
+                            label="Custom Global Cursor"
+                            helpText="Replace the default mouse pointer for your entire game."
+                          />
+                          <div className="flex items-center gap-2 mt-1">
+                            {project.globalSettings.customCursorAssetId ? (
+                              <div className="relative w-10 h-10 bg-neutral-800 border border-neutral-700 rounded">
+                                <img
+                                  src={project.assets.find(a => a.id === project.globalSettings.customCursorAssetId)?.src || ''}
+                                  className="w-full h-full object-contain p-1"
+                                />
+                                <button className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5" onClick={() => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, customCursorAssetId: undefined }}))}><X size={10} /></button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setAssetPickerCb({ 
+                                  onSelect: (id) => {
+                                    pushHistory({ ...project, globalSettings: { ...project.globalSettings, customCursorAssetId: id } });
+                                    setAssetPickerCb(null);
+                                  },
+                                  filterType: "image"
+                                })}
+                                className="px-3 py-1 bg-neutral-800 border border-neutral-700 text-neutral-300 text-xs rounded hover:bg-neutral-700"
+                              >
+                                Select Image
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                          UI Theme Settings
+                        </h3>
+
+                        <div>
+                          <LabelWithHelp
+                            label="Preset Theme"
+                            helpText="Choose a pre-made look for your game's UI. This changes colors, fonts, and borders automatically."
+                            className="mb-1"
+                          />
+                          <select
+                            value={project.globalSettings.uiTheme || "default"}
+                            onChange={(e) => {
+                              const theme = e.target.value as any;
+                              const presets: Record<string, any> = {
+                                default: {
+                                  primary: "#00ffff",
+                                  bg: "#1a0033",
+                                  radius: 0,
+                                  font: '"VT323", monospace',
+                                },
+                                minimalist: {
+                                  primary: "#000000",
+                                  bg: "rgba(255,255,255,0.95)",
+                                  radius: 0,
+                                  font: "Helvetica, Arial, sans-serif",
+                                },
+                                barbie: {
+                                  primary: "#ec4899",
+                                  bg: "rgba(253, 230, 238, 0.9)",
+                                  radius: 20,
+                                  font: '"Comic Sans MS", "Chalkboard SE", sans-serif',
+                                },
+                                terminal: {
+                                  primary: "#4ade80",
+                                  bg: "rgba(0, 0, 0, 0.95)",
+                                  radius: 0,
+                                  font: "monospace",
+                                },
+                                cyberpunk: {
+                                  primary: "#eab308",
+                                  bg: "rgba(20, 0, 20, 0.9)",
+                                  radius: 4,
+                                  font: '"Courier New", Courier, monospace',
+                                },
+                                fantasy: {
+                                  primary: "#b45309",
+                                  bg: "rgba(30, 20, 10, 0.9)",
+                                  radius: 12,
+                                  font: "Georgia, serif",
+                                },
+                                retro: {
+                                  primary: "#ec4899",
+                                  bg: "rgba(40, 40, 80, 0.9)",
+                                  radius: 4,
+                                  font: '"Press Start 2P", monospace',
+                                },
+                              };
+                              const s = presets[theme];
+                              setProject((p) => ({
+                                ...p,
+                                globalSettings: {
+                                  ...p.globalSettings,
+                                  uiTheme: theme,
+                                  uiColorPrimary: s.primary,
+                                  uiColorBackground: s.bg,
+                                  uiBorderRadius: s.radius,
+                                  uiFontFamily: s.font,
+                                },
+                              }));
+                            }}
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+                          >
+                            <option value="default">Default Dark</option>
+                            <option value="minimalist">Minimalist Light</option>
+                            <option value="barbie">Barbie Core / Y2K</option>
+                            <option value="terminal">Hacker Terminal</option>
+                            <option value="cyberpunk">Cyberpunk Neon</option>
+                            <option value="fantasy">Ancient / Fantasy</option>
+                            <option value="retro">Retro 8-bit</option>
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          <div>
+                            <LabelWithHelp
+                              label="Accent Color"
+                              className="mb-1 block"
+                              helpText="The primary highlight color for buttons and progress bars."
+                            />
+                            <div className="flex gap-2">
+                              <input
+                                type="color"
+                                value={
+                                  project.globalSettings.uiColorPrimary ||
+                                  "#10b981"
+                                }
+                                onChange={(e) =>
+                                  setProject((p) => ({
+                                    ...p,
+                                    globalSettings: {
+                                      ...p.globalSettings,
+                                      uiColorPrimary: e.target.value,
+                                    },
+                                  }))
+                                }
+                                className="bg-neutral-800 border-none rounded cursor-pointer w-6 h-6 p-0"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <LabelWithHelp
+                              label="Background Color"
+                              className="mb-1 block"
+                              helpText="The main dark or light background color for UI panels."
+                            />
+                            <div className="flex gap-2">
+                              <input
+                                type="color"
+                                value={
+                                  project.globalSettings.uiColorBackground ||
+                                  "#171717"
+                                }
+                                onChange={(e) =>
+                                  setProject((p) => ({
+                                    ...p,
+                                    globalSettings: {
+                                      ...p.globalSettings,
+                                      uiColorBackground: e.target.value,
+                                    },
+                                  }))
+                                }
+                                className="bg-neutral-800 border-none rounded cursor-pointer w-6 h-6 p-0"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <LabelWithHelp
+                            label="UI Font Family"
+                            className="mb-1 mt-2 block"
+                            helpText="The font used for all UI text and dialogue."
+                          />
+                          <select
+                            value={
+                              project.globalSettings.uiFontFamily ||
+                              "sans-serif"
+                            }
+                            onChange={(e) =>
+                              setProject((p) => ({
+                                ...p,
+                                globalSettings: {
+                                  ...p.globalSettings,
+                                  uiFontFamily: e.target.value,
+                                },
+                              }))
+                            }
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+                          >
+                            <option value="sans-serif">System Sans</option>
+                            <option value="serif">System Serif</option>
+                            <option value="'Courier New', monospace">
+                              Terminal (Courier)
+                            </option>
+                            <option value="'Comic Sans MS', cursive">
+                              Bubbly (Comic Sans)
+                            </option>
+                            <option value="'Press Start 2P', monospace">
+                              Retro 8-bit
+                            </option>
+                            <option value="Papyrus, fantasy">
+                              Ancient (Papyrus)
+                            </option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <LabelWithHelp
+                            label="Hide Built-in Inventory Button"
+                            className="mb-1 mt-2 block"
+                            helpText="Check this if you want to use a Custom UI Button with 'Toggle Inventory' action instead of the default floating button."
+                          />
+                          <label className="flex items-center gap-2 cursor-pointer mt-1">
+                            <input
+                              type="checkbox"
+                              checked={
+                                !!project.globalSettings.hideDefaultInventoryBtn
+                              }
+                              onChange={(e) =>
+                                setProject((p) => ({
+                                  ...p,
+                                  globalSettings: {
+                                    ...p.globalSettings,
+                                    hideDefaultInventoryBtn: e.target.checked,
+                                  },
+                                }))
+                              }
+                              className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                            />
+                            <span className="text-sm font-medium text-neutral-300">
+                              Hide Default Button
+                            </span>
+                          </label>
+                        </div>
+
+                        <div>
+                          <LabelWithHelp
+                            label="UI Border Radius (px)"
+                            className="mb-1 mt-2 block"
+                            helpText="How rounded the corners of menus and buttons are."
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            max="40"
+                            value={project.globalSettings.uiBorderRadius ?? 8}
+                            onChange={(e) =>
+                              setProject((p) => ({
+                                ...p,
+                                globalSettings: {
+                                  ...p.globalSettings,
+                                  uiBorderRadius: Number(e.target.value),
+                                },
+                              }))
+                            }
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm"
+                          />
+                        </div>
+
+                        <details className="mt-4">
+                          <summary className="text-xs font-bold text-neutral-400 uppercase tracking-wider cursor-pointer hover:text-emerald-400 transition-colors">
+                            Advanced CSS Override
+                          </summary>
+                          <textarea
+                            value={project.globalSettings.customCss || ""}
+                            onChange={(e) =>
+                              setProject((p) => ({
+                                ...p,
+                                globalSettings: {
+                                  ...p.globalSettings,
+                                  customCss: e.target.value,
+                                },
+                              }))
+                            }
+                            className="w-full h-48 bg-neutral-900 border border-neutral-700 rounded p-2 mt-2 text-xs font-mono text-neutral-300 focus:border-emerald-500 focus:outline-none custom-scrollbar whitespace-pre"
+                            placeholder={`/* Your custom CSS classes run in Preview/Export */\n.dialogue-box {\n  ...\n}`}
+                          />
+                        </details>
+                      </div>
+
+                      <div className="space-y-3 mt-6">
+                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                          Gameplay Settings
+                        </h3>
+
+                        <div>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={
+                                !!project.globalSettings.useDayNightCycle
+                              }
+                              onChange={(e) =>
+                                setProject((p) => ({
+                                  ...p,
+                                  globalSettings: {
+                                    ...p.globalSettings,
+                                    useDayNightCycle: e.target.checked,
+                                  },
+                                }))
+                              }
+                              className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                            />
+                            <span className="text-sm font-medium text-neutral-300">
+                              Enable Day/Night Cycle
+                            </span>
+                          </label>
+                          <p className="text-[10px] text-neutral-500 mt-1">
+                            Applies global lighting filters based on in-game
+                            time.
+                          </p>
+                        </div>
+                        <div>
+                          <label className="flex items-center gap-2 cursor-pointer mt-3">
+                            <input
+                              type="checkbox"
+                              checked={!!project.globalSettings.enableNeeds}
+                              onChange={(e) =>
+                                setProject((p) => ({
+                                  ...p,
+                                  globalSettings: {
+                                    ...p.globalSettings,
+                                    enableNeeds: e.target.checked,
+                                  },
+                                }))
+                              }
+                              className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                            />
+                            <span className="text-sm font-medium text-neutral-300">
+                              Enable "Sim" Needs System
+                            </span>
+                          </label>
+                          <p className="text-[10px] text-neutral-500 mt-1">
+                            Shows a HUD tracking hunger, energy, etc.
+                          </p>
+                        </div>
+                        <div>
+                          <label className="flex items-center gap-2 cursor-pointer mt-3">
+                            <input
+                              type="checkbox"
+                              checked={
+                                !!project.globalSettings.enableTTRPGStats
+                              }
+                              onChange={(e) =>
+                                setProject((p) => ({
+                                  ...p,
+                                  globalSettings: {
+                                    ...p.globalSettings,
+                                    enableTTRPGStats: e.target.checked,
+                                  },
+                                }))
+                              }
+                              className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                            />
+                            <span className="text-sm font-medium text-neutral-300">
+                              Enable TTRPG Stats/Skills
+                            </span>
+                          </label>
+                          <p className="text-[10px] text-neutral-500 mt-1">
+                            Enables rolling dice for interactions based on
+                            skills.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {selectedObject.isUiElement && (
+                        <>
+                          <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">
+                            HUD / UI Properties
+                          </h3>
+
+                          <div className="space-y-3 mb-4">
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <LabelWithHelp
+                                  label="Primary Color"
+                                  helpText="The main color of this UI element (like the fill of a health bar, or outline of a panel)."
+                                />
+                                <div className="flex gap-2 items-center">
+                                  <input
+                                    type="color"
+                                    value={
+                                      selectedObject.uiColorPrimary || "#10b981"
+                                    }
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        uiColorPrimary: e.target.value,
+                                      })
+                                    }
+                                    className="w-6 h-6 rounded bg-transparent cursor-pointer p-0 border-none"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={
+                                      selectedObject.uiColorPrimary || "#10b981"
+                                    }
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        uiColorPrimary: e.target.value,
+                                      })
+                                    }
+                                    className="w-full bg-neutral-800 border-b border-neutral-700 rounded-none px-1 py-0.5 text-xs focus:outline-none"
+                                  />
+                                </div>
+                              </div>
+                              <div>
+                                <LabelWithHelp
+                                  label={
+                                    selectedObject.uiElementType === "tooltip"
+                                      ? "Background"
+                                      : "Secondary Color"
+                                  }
+                                  helpText="The background or empty state color of this UI element."
+                                />
+                                <div className="flex gap-2 items-center">
+                                  <input
+                                    type="color"
+                                    value={
+                                      selectedObject.uiColorSecondary ||
+                                      "#171717"
+                                    }
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        uiColorSecondary: e.target.value,
+                                      })
+                                    }
+                                    className="w-6 h-6 rounded bg-transparent cursor-pointer p-0 border-none"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={
+                                      selectedObject.uiColorSecondary ||
+                                      "#171717"
+                                    }
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        uiColorSecondary: e.target.value,
+                                      })
+                                    }
+                                    className="w-full bg-neutral-800 border-b border-neutral-700 rounded-none px-1 py-0.5 text-xs focus:outline-none"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            {(selectedObject.uiElementType === "panel" ||
+                              selectedObject.uiElementType === "progress" ||
+                              selectedObject.uiElementType === "button") && (
+                              <>
+                                <div>
+                                  <LabelWithHelp
+                                    label="Border Style"
+                                    helpText="The type of border drawn around the element."
+                                  />
+                                  <select
+                                    value={
+                                      selectedObject.uiBorderType || "solid"
+                                    }
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        uiBorderType: e.target.value as any,
+                                      })
+                                    }
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                                  >
+                                    <option value="none">None</option>
+                                    <option value="solid">Solid Line</option>
+                                    <option value="double">Double Line</option>
+                                    <option value="bevel">Beveled (3D)</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+                                    <LabelWithHelp
+                                      label="Border Radius"
+                                      helpText="How rounded the corners are. 0 is a sharp square."
+                                    />
+                                    <span>
+                                      {selectedObject.uiBorderRadius || 0}px
+                                    </span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min="0"
+                                    max="50"
+                                    step="1"
+                                    value={selectedObject.uiBorderRadius || 0}
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        uiBorderRadius: Number(e.target.value),
+                                      })
+                                    }
+                                    className="w-full accent-emerald-500 h-1"
+                                  />
+                                </div>
+                              </>
+                            )}
+
+                            {(selectedObject.uiElementType === "button" ||
+                              selectedObject.uiElementType === "tooltip") && (
+                              <div>
+                                <LabelWithHelp
+                                  label="Text Content"
+                                  helpText="The words shown inside this button or tooltip."
+                                />
+                                <input
+                                  type="text"
+                                  value={selectedObject.textContent || ""}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      textContent: e.target.value,
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                                />
+                              </div>
+                            )}
+
+                            {selectedObject.uiElementType === "icon" && (
+                              <div>
+                                <LabelWithHelp
+                                  label="Icon Type"
+                                  helpText="Which icon image to display."
+                                />
+                                <select
+                                  value={selectedObject.uiIconType || "check"}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      uiIconType: e.target.value as any,
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                                >
+                                  <option value="bag">Bag</option>
+                                  <option value="sword">Sword</option>
+                                  <option value="book">Book</option>
+                                  <option value="gear">Gear</option>
+                                  <option value="potion">Potion</option>
+                                  <option value="key">Key</option>
+                                  <option value="check">Checkmark</option>
+                                  <option value="cancel">Cross (X)</option>
+                                  <option value="arrow-left">Arrow Left</option>
+                                  <option value="arrow-right">
+                                    Arrow Right
+                                  </option>
+                                  <option value="arrow-up">Arrow Up</option>
+                                </select>
+                              </div>
+                            )}
+
+                            {selectedObject.uiElementType === "progress" && (
+                              <div>
+                                <LabelWithHelp
+                                  label="Progress Value (0-100)"
+                                  helpText="How full the bar is (e.g. for Health or Mana)."
+                                />
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="100"
+                                  value={selectedObject.uiValue || 0}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      uiValue: parseInt(e.target.value),
+                                    })
+                                  }
+                                  className="w-full mt-1 accent-emerald-500"
+                                />
+                                <div className="text-right text-xs text-neutral-400">
+                                  {selectedObject.uiValue || 0}%
+                                </div>
+                              </div>
+                            )}
+
+                            {selectedObject.uiElementType === "toggle" && (
+                              <label className="flex items-center gap-2 cursor-pointer mt-2 bg-neutral-900 p-2 rounded">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedObject.uiChecked || false}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      uiChecked: e.target.checked,
+                                    })
+                                  }
+                                  className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                                />
+                                <span className="text-sm font-medium">
+                                  Checked Default State
+                                </span>
+                              </label>
+                            )}
+
+                            <div className="pt-4 border-t border-neutral-800 mt-4 space-y-3">
+                              <LabelWithHelp
+                                label="Make it Smart (Auto-Update)"
+                                helpText="Make this UI element update automatically based on player health, inventory, etc."
+                                className="text-xs font-bold uppercase text-neutral-400"
+                              />
+
+                              <div>
+                                <label className="text-xs text-neutral-500 block mb-1">
+                                  What should this show?
+                                </label>
+                                <select
+                                  value={selectedObject.uiBindingType || "none"}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      uiBindingType: e.target.value as any,
+                                      uiBindingId: "",
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm focus:border-emerald-500"
+                                >
+                                  <option value="none">
+                                    Nothing (I'll set it manually)
+                                  </option>
+                                  {selectedObject.uiElementType ===
+                                    "progress" && (
+                                    <option value="need">
+                                      Player Stat (e.g. Health/Energy)
+                                    </option>
+                                  )}
+                                  {selectedObject.uiElementType === "button" ||
+                                  selectedObject.uiElementType === "tooltip" ? (
+                                    <option value="inventory_count">
+                                      Amount of a specific item
+                                    </option>
+                                  ) : null}
+                                  {selectedObject.uiElementType ===
+                                    "toggle" && (
+                                    <option value="flag">
+                                      Is a Story Event done?
+                                    </option>
+                                  )}
+                                </select>
+                              </div>
+
+                              {selectedObject.uiBindingType === "need" && (
+                                <div>
+                                  <label className="text-xs text-neutral-500 block mb-1">
+                                    Which stat?
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={selectedObject.uiBindingId || ""}
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        uiBindingId: e.target.value,
+                                      })
+                                    }
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm"
+                                    placeholder="e.g. hunger, health"
+                                  />
+                                </div>
+                              )}
+                              {selectedObject.uiBindingType ===
+                                "inventory_count" && (
+                                <div>
+                                  <label className="text-xs text-neutral-500 block mb-1">
+                                    Which Item?
+                                  </label>
+                                  <select
+                                    value={selectedObject.uiBindingId || ""}
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        uiBindingId: e.target.value,
+                                      })
+                                    }
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm"
+                                  >
+                                    <option value="">Select an Item...</option>
+                                    {project.inventoryItems.map((i) => (
+                                      <option key={i.id} value={i.id}>
+                                        {i.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                              {selectedObject.uiBindingType === "flag" && (
+                                <div>
+                                  <label className="text-xs text-neutral-500 block mb-1">
+                                    Which Story Event?
+                                  </label>
+                                  <select
+                                    value={selectedObject.uiBindingId || ""}
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        uiBindingId: e.target.value,
+                                      })
+                                    }
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm"
+                                  >
+                                    <option value="">Select an Event...</option>
+                                    {(project.gameFlags || []).map((f) => (
+                                      <option key={f} value={f}>
+                                        {f}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      
+                      <>
+                        {/* Transform Standard */}
+                          <div className="space-y-3">
+                            <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                              Transform
+                            </h3>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <LabelWithHelp
+                                  label="X"
+                                  helpText="Horizontal position on the screen. Left is 0."
+                                />
+                                <input
+                                  type="number"
+                                  value={Math.round(selectedObject.x)}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      x: Number(e.target.value),
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
+                                />
+                              </div>
+                              <div>
+                                <LabelWithHelp
+                                  label="Y"
+                                  helpText="Vertical position on the screen. Top is 0."
+                                />
+                                <input
+                                  type="number"
+                                  value={Math.round(selectedObject.y)}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      y: Number(e.target.value),
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
+                                />
+                              </div>
+                              <div>
+                                <LabelWithHelp
+                                  label="Width"
+                                  helpText="How wide the element is in pixels."
+                                />
+                                <input
+                                  type="number"
+                                  value={Math.round(selectedObject.width)}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      width: Number(e.target.value),
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
+                                />
+                              </div>
+                              <div>
+                                <LabelWithHelp
+                                  label="Height"
+                                  helpText="How tall the element is in pixels."
+                                />
+                                <input
+                                  type="number"
+                                  value={Math.round(selectedObject.height)}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      height: Number(e.target.value),
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
+                                />
+                              </div>
+                              <div>
+                                <LabelWithHelp
+                                  label="Rotation (°)"
+                                  helpText="Rotate the element around its center (0-360 degrees)."
+                                />
+                                <input
+                                  type="number"
+                                  value={Math.round(
+                                    selectedObject.rotation || 0,
+                                  )}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      rotation: Number(e.target.value),
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
+                                />
+                              </div>
+                              <div className="flex items-end gap-2 pb-1">
+                                <label className="flex items-center gap-1 text-xs text-neutral-300 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!selectedObject.flipX}
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        flipX: e.target.checked,
+                                      })
+                                    }
+                                    className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                                  />
+                                  Flip X
+                                </label>
+                                <label className="flex items-center gap-1 text-xs text-neutral-300 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!selectedObject.flipY}
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        flipY: e.target.checked,
+                                      })
+                                    }
+                                    className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                                  />
+                                  Flip Y
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+
+                      {selectedObject.isText && !selectedObject.isUiElement && (
+                        <div className="space-y-3 pt-4 border-t border-neutral-800">
+                          <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                            Text Styling
+                          </h3>
+
+                          <div>
+                            <LabelWithHelp
+                              label="Content"
+                              helpText="The text displayed on the screen. (You can also type plain text here to make signs or dialogue if not using nodes)."
+                            />
+                            <textarea
+                              value={selectedObject.textContent || ""}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  textContent: e.target.value,
+                                })
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none min-h-[60px]"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <LabelWithHelp
+                                label="Color"
+                                helpText="The color of the text."
+                              />
+                              <div className="flex gap-2 items-center mt-1">
+                                <input
+                                  type="color"
+                                  value={selectedObject.textColor || "#ffffff"}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      textColor: e.target.value,
+                                    })
+                                  }
+                                  className="bg-neutral-800 border-none rounded cursor-pointer w-8 h-8 p-0"
+                                />
+                                <input
+                                  type="text"
+                                  value={selectedObject.textColor || "#ffffff"}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      textColor: e.target.value,
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <LabelWithHelp
+                                label="Font Size (px)"
+                                helpText="How large the text is."
+                              />
+                              <input
+                                type="number"
+                                min="8"
+                                max="250"
+                                value={selectedObject.textFontSize || 24}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    textFontSize: Number(e.target.value),
+                                  })
+                                }
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <LabelWithHelp
+                                label="Font Family"
+                                helpText="The style of the text."
+                              />
+                              <select
+                                value={
+                                  selectedObject.textFontFamily || "sans-serif"
+                                }
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    textFontFamily: e.target.value,
+                                  })
+                                }
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                              >
+                                <option value="sans-serif">Sans Serif</option>
+                                <option value="serif">Serif</option>
+                                <option value="monospace">Monospace</option>
+                                <option value="'Courier New', Courier, monospace">
+                                  Courier New
+                                </option>
+                                <option value="'Comic Sans MS', 'Comic Sans', cursive">
+                                  Comic Sans
+                                </option>
+                                <option value="'Impact', sans-serif">
+                                  Impact
+                                </option>
+                                <option value="system-ui">
+                                  System Default
+                                </option>
+                              </select>
+                            </div>
+                            <div>
+                              <LabelWithHelp
+                                label="Font Weight"
+                                helpText="How thick the text is."
+                              />
+                              <select
+                                value={selectedObject.textWeight || "normal"}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    textWeight: e.target.value as any,
+                                  })
+                                }
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                              >
+                                <option value="normal">Normal</option>
+                                <option value="bold">Bold</option>
+                                <option value="100">Thin (100)</option>
+                                <option value="300">Light (300)</option>
+                                <option value="500">Medium (500)</option>
+                                <option value="700">Bold (700)</option>
+                                <option value="900">Black (900)</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <LabelWithHelp
+                                label="Line Height"
+                                helpText="Spacing between lines of text."
+                              />
+                              <input
+                                type="number"
+                                step="0.1"
+                                min="0.5"
+                                max="3"
+                                value={selectedObject.textLineHeight || 1.2}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    textLineHeight: Number(e.target.value),
+                                  })
+                                }
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                              />
+                            </div>
+                            <div>
+                              <LabelWithHelp
+                                label="Letter Spacing (px)"
+                                helpText="Spacing between letters."
+                              />
+                              <input
+                                type="number"
+                                step="0.5"
+                                min="-10"
+                                max="50"
+                                value={selectedObject.textLetterSpacing || 0}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    textLetterSpacing: Number(e.target.value),
+                                  })
+                                }
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <LabelWithHelp
+                                label="Alignment"
+                                helpText="Align text to the left, center, or right of the box."
+                              />
+                              <select
+                                value={selectedObject.textAlign || "left"}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    textAlign: e.target.value as any,
+                                  })
+                                }
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                              >
+                                <option value="left">Left</option>
+                                <option value="center">Center</option>
+                                <option value="right">Right</option>
+                              </select>
+                            </div>
+                            <div>
+                              <LabelWithHelp
+                                label="Text Shadow"
+                                helpText="CSS string for text shadow."
+                              />
+                              <input
+                                type="text"
+                                value={selectedObject.textShadow || ""}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    textShadow: e.target.value,
+                                  })
+                                }
+                                placeholder="2px 2px 4px #000"
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <LabelWithHelp
+                              label="Box Style"
+                              helpText="Add a decorative background behind the text."
+                            />
+                            <select
+                              value={selectedObject.textStyle || "plain"}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  textStyle: e.target.value as any,
+                                })
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                            >
+                              <option value="plain">Plain Text</option>
+                              <option value="narrative">
+                                Narrative Box (Dark)
+                              </option>
+                              <option value="speech">
+                                Speech Bubble (Light)
+                              </option>
+                              <option value="thought">Thought Bubble</option>
+                              <option value="sign">Wooden Sign</option>
+                            </select>
+                          </div>
+
+                          <div className="flex flex-col gap-2 border-t border-neutral-800 pt-3 mt-3">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={selectedObject.textOutline || false}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    textOutline: e.target.checked,
+                                  })
+                                }
+                                className="bg-neutral-900 border-neutral-700 text-emerald-500 rounded focus:ring-emerald-500"
+                              />
+                              <span className="text-xs text-neutral-400 font-medium">
+                                Text Outline Stroke
+                              </span>
+                            </label>
+
+                            {selectedObject.textOutline && (
+                              <div>
+                                <label className="text-[10px] text-neutral-500 block mb-1">
+                                  Outline Color
+                                </label>
+                                <div className="flex gap-2 items-center">
+                                  <input
+                                    type="color"
+                                    value={
+                                      selectedObject.textOutlineColor ||
+                                      "#000000"
+                                    }
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        textOutlineColor: e.target.value,
+                                      })
+                                    }
+                                    className="bg-neutral-800 border-none rounded cursor-pointer w-8 h-8 p-0"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={
+                                      selectedObject.textOutlineColor ||
+                                      "#000000"
+                                    }
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        textOutlineColor: e.target.value,
+                                      })
+                                    }
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Layering */}
+                      <div className="space-y-3">
+                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                          Layering
+                        </h3>
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm flex items-center gap-1">
+                            <LabelWithHelp
+                              label="Layer Order"
+                              helpText="Determines which objects appear in front. Higher numbers are closer to the camera."
+                            />
+                            : {selectedObject.zIndex}
+                          </span>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => {
+                                const minZ = Math.min(
+                                  ...currentScene.objects.map((o) => o.zIndex),
+                                );
+                                updateObject(selectedObject.id, {
+                                  zIndex: minZ - 1,
+                                });
+                              }}
+                              className="p-1 bg-neutral-800 hover:bg-neutral-700 rounded"
+                              title="Send to Back"
+                            >
+                              <ArrowDownToLine size={14} />
+                            </button>
+                            <button
+                              onClick={() => moveZIndex(selectedObject.id, -1)}
+                              className="p-1 bg-neutral-800 hover:bg-neutral-700 rounded"
+                              title="Move Down"
+                            >
+                              <MoveDown size={14} />
+                            </button>
+                            <button
+                              onClick={() => moveZIndex(selectedObject.id, 1)}
+                              className="p-1 bg-neutral-800 hover:bg-neutral-700 rounded"
+                              title="Move Up"
+                            >
+                              <MoveUp size={14} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                const maxZ = Math.max(
+                                  ...currentScene.objects.map((o) => o.zIndex),
+                                );
+                                updateObject(selectedObject.id, {
+                                  zIndex: maxZ + 1,
+                                });
+                              }}
+                              className="p-1 bg-neutral-800 hover:bg-neutral-700 rounded"
+                              title="Bring to Front"
+                            >
+                              <ArrowUpToLine size={14} />
+                            </button>
+                          </div>
+                        </div>
+                        <div>
+                          <div className="flex justify-between items-center">
+                            <LabelWithHelp
+                              label="Opacity"
+                              helpText="How transparent the object is. 100% is fully visible, 0% is invisible."
+                            />
+                            <span className="text-xs text-neutral-500">
+                              {Math.round(selectedObject.opacity * 100)}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.1"
+                            value={selectedObject.opacity}
+                            onChange={(e) =>
+                              updateObject(selectedObject.id, {
+                                opacity: Number(e.target.value),
+                              })
+                            }
+                            className="w-full accent-emerald-500"
+                          />
+                        </div>
+                        <div>
+                          <div className="flex justify-between items-center">
+                            <LabelWithHelp
+                              label="Parallax"
+                              helpText="Scroll speed. 1 is normal, <1 is background, >1 is foreground."
+                            />
+                            <span className="text-xs text-neutral-500">
+                              {selectedObject.parallaxSpeed !== undefined
+                                ? selectedObject.parallaxSpeed.toFixed(1)
+                                : "1.0"}
+                              x
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="3"
+                            step="0.1"
+                            value={
+                              selectedObject.parallaxSpeed !== undefined
+                                ? selectedObject.parallaxSpeed
+                                : 1
+                            }
+                            onChange={(e) =>
+                              updateObject(selectedObject.id, {
+                                parallaxSpeed: Number(e.target.value),
+                              })
+                            }
+                            className="w-full accent-emerald-500"
+                          />
+                        </div>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedObject.locked}
+                            onChange={(e) =>
+                              updateObject(selectedObject.id, {
+                                locked: e.target.checked,
+                              })
+                            }
+                            className="rounded border-neutral-700 text-emerald-500 focus:ring-emerald-500 bg-neutral-800"
+                          />
+                          Lock Position
+                        </label>
+                        <div>
+                          <LabelWithHelp
+                            label="Custom CSS Classes"
+                            helpText="Add any Tailwind classes here to customize the element (e.g. 'rounded-full border-4 border-red-500')."
+                          />
+                          <input
+                            type="text"
+                            value={selectedObject.customCssClasses || ""}
+                            onChange={(e) =>
+                              updateObject(selectedObject.id, {
+                                customCssClasses: e.target.value,
+                              })
+                            }
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+                            placeholder="e.g. animate-bounce hover:scale-110"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Appearance & Filters */}
+                      {!selectedObject.isUiElement && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                              Appearance
+                            </h3>
+                            {!selectedObject.isHitbox &&
+                              !selectedObject.isText &&
+                              !selectedObject.isScript && (
+                                <button
+                                  onClick={() =>
+                                    setEditingAssetId(
+                                      project.assets.find(
+                                        (a) => a.src === selectedObject.src,
+                                      )?.id || null,
+                                    )
+                                  }
+                                  className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded hover:bg-emerald-500/30 flex items-center gap-1 font-bold"
+                                  title="Open Image Editor to remove background, crop, or recolor"
+                                >
+                                  <Wand2 size={10} /> Edit Image
+                                </button>
+                              )}
+                          </div>
+                          <div>
+                            <LabelWithHelp
+                              label="Blend Mode"
+                              helpText="How the object's colors blend with objects behind it."
+                            />
+                            <select
+                              value={selectedObject.blendMode || "normal"}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  blendMode: e.target.value as BlendMode,
+                                })
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                            >
+                              <option value="normal">Normal</option>
+                              <option value="multiply">Multiply</option>
+                              <option value="screen">Screen</option>
+                              <option value="overlay">Overlay</option>
+                              <option value="color-dodge">Color Dodge</option>
+                              <option value="difference">Difference</option>
+                              <option value="luminosity">Luminosity</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-2 pt-2 border-t border-neutral-800">
+                            <div>
+                              <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+                                <span>Brightness</span>
+                                <span>
+                                  {Math.round(
+                                    (selectedObject.filters?.brightness ?? 1) *
+                                      100,
+                                  )}
+                                  %
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="3"
+                                step="0.1"
+                                value={selectedObject.filters?.brightness ?? 1}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    filters: {
+                                      ...selectedObject.filters,
+                                      brightness: Number(e.target.value),
+                                    },
+                                  })
+                                }
+                                className="w-full accent-emerald-500 h-1"
+                              />
+                            </div>
+                            <div>
+                              <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+                                <span>Contrast</span>
+                                <span>
+                                  {Math.round(
+                                    (selectedObject.filters?.contrast ?? 1) *
+                                      100,
+                                  )}
+                                  %
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="3"
+                                step="0.1"
+                                value={selectedObject.filters?.contrast ?? 1}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    filters: {
+                                      ...selectedObject.filters,
+                                      contrast: Number(e.target.value),
+                                    },
+                                  })
+                                }
+                                className="w-full accent-emerald-500 h-1"
+                              />
+                            </div>
+                            <div>
+                              <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+                                <span>Saturation</span>
+                                <span>
+                                  {Math.round(
+                                    (selectedObject.filters?.saturate ?? 1) *
+                                      100,
+                                  )}
+                                  %
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="3"
+                                step="0.1"
+                                value={selectedObject.filters?.saturate ?? 1}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    filters: {
+                                      ...selectedObject.filters,
+                                      saturate: Number(e.target.value),
+                                    },
+                                  })
+                                }
+                                className="w-full accent-emerald-500 h-1"
+                              />
+                            </div>
+                            <div>
+                              <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+                                <span>Hue Shift</span>
+                                <span>
+                                  {selectedObject.filters?.hueRotate ?? 0}°
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min="-180"
+                                max="180"
+                                step="1"
+                                value={selectedObject.filters?.hueRotate ?? 0}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    filters: {
+                                      ...selectedObject.filters,
+                                      hueRotate: Number(e.target.value),
+                                    },
+                                  })
+                                }
+                                className="w-full accent-emerald-500 h-1"
+                              />
+                            </div>
+                            <div>
+                              <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+                                <span>Blur</span>
+                                <span>
+                                  {selectedObject.filters?.blur ?? 0}px
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="20"
+                                step="0.5"
+                                value={selectedObject.filters?.blur ?? 0}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    filters: {
+                                      ...selectedObject.filters,
+                                      blur: Number(e.target.value),
+                                    },
+                                  })
+                                }
+                                className="w-full accent-emerald-500 h-1"
+                              />
+                            </div>
+
+                            <div className="flex items-center gap-4 pt-2">
+                              <label className="flex items-center gap-1 text-xs text-neutral-300 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    (selectedObject.filters?.sepia ?? 0) > 0
+                                  }
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      filters: {
+                                        ...selectedObject.filters,
+                                        sepia: e.target.checked ? 1 : 0,
+                                      },
+                                    })
+                                  }
+                                  className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                                />
+                                Sepia
+                              </label>
+                              <label className="flex items-center gap-1 text-xs text-neutral-300 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    (selectedObject.filters?.invert ?? 0) > 0
+                                  }
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      filters: {
+                                        ...selectedObject.filters,
+                                        invert: e.target.checked ? 1 : 0,
+                                      },
+                                    })
+                                  }
+                                  className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                                />
+                                Invert
+                              </label>
+
+                              <button
+                                onClick={() =>
+                                  updateObject(selectedObject.id, {
+                                    filters: undefined,
+                                  })
+                                }
+                                className="ml-auto text-[10px] text-red-400 hover:text-red-300 px-2 py-0.5 border border-red-500/30 rounded bg-red-500/10"
+                                title="Reset Filters"
+                              >
+                                Reset
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Physics */}
+                      {!selectedObject.isUiElement &&
+                        !selectedObject.isText && (
+                          <div className="space-y-3 pt-3 border-t border-neutral-800">
+                            <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                              Physics
+                            </h3>
+                            <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-white">
+                              <input
+                                type="checkbox"
+                                checked={!!selectedObject.hasPhysics}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    hasPhysics: e.target.checked,
+                                  })
+                                }
+                                className="rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500"
+                              />
+                              Enable Physics
+                            </label>
+                            {selectedObject.hasPhysics && (
+                              <p className="text-[10px] text-neutral-500 leading-snug">
+                                Objects with physics will fall to the ground and
+                                can be dragged around with the mouse while the
+                                game is playing.
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                      {/* Interaction */}
+                      <div className="space-y-3">
+                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                          Action On Click
+                        </h3>
+                        <div>
+                          <LabelWithHelp
+                            label="Cursor on Hover"
+                            helpText="The mouse pointer style when hovering over this object."
+                          />
+                          <select
+                            value={selectedObject.cursor}
+                            onChange={(e) =>
+                              updateObject(selectedObject.id, {
+                                cursor: e.target.value as CursorType,
+                              })
+                            }
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                          >
+                            <option value="default">Default</option>
+                            <option value="pointer">Pointer (Hand)</option>
+                            <option value="help">Help (Question)</option>
+                            <option value="text">Dialogue (Text)</option>
+                            <option value="crosshair">Crosshair</option>
+                            <option value="zoom-in">Eye (Look)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <LabelWithHelp
+                            label="Animation"
+                            helpText="A continuous visual effect applied to the object."
+                          />
+                          <select
+                            value={selectedObject.animation}
+                            onChange={(e) =>
+                              updateObject(selectedObject.id, {
+                                animation: e.target.value as AnimationType,
+                              })
+                            }
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 mb-2"
+                          >
+                            <option value="none">None</option>
+                            <option value="wiggle">Wiggle</option>
+                            <option value="pulse">Pulse</option>
+                            <option value="glow">Glow</option>
+                            <option value="float">Float</option>
+                            <option value="spin">Spin</option>
+                            <option value="shake">Shake</option>
+                            <option value="bounce">Bounce</option>
+                            <option value="fade">Fade</option>
+                            <option value="slide-in">Slide In (Left)</option>
+                            <option value="slide-up">Slide Up</option>
+                            <option value="slide-down">Slide Down</option>
+                            <option value="zoom">Zoom</option>
+                          </select>
+
+                          {selectedObject.animation !== "none" &&
+                            selectedObject.animation !== "glow" && (
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="text-[10px] text-neutral-500 uppercase tracking-wider">
+                                    Duration (s)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0.1"
+                                    value={
+                                      selectedObject.animationDuration ||
+                                      (selectedObject.animation === "pulse"
+                                        ? 2
+                                        : selectedObject.animation === "float"
+                                          ? 3
+                                          : 0.5)
+                                    }
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        animationDuration: parseFloat(
+                                          e.target.value,
+                                        ),
+                                      })
+                                    }
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] text-neutral-500 uppercase tracking-wider">
+                                    Easing
+                                  </label>
+                                  <select
+                                    value={
+                                      selectedObject.animationEasing ||
+                                      "ease-in-out"
+                                    }
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        animationEasing: e.target.value as any,
+                                      })
+                                    }
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                                  >
+                                    <option value="linear">Linear</option>
+                                    <option value="ease">Ease</option>
+                                    <option value="ease-in">Ease In</option>
+                                    <option value="ease-out">Ease Out</option>
+                                    <option value="ease-in-out">
+                                      Ease In-Out
+                                    </option>
+                                  </select>
+                                </div>
+                              </div>
+                            )}
+                        </div>
+
+                        <div>
+                          <LabelWithHelp
+                            label="On Click SFX"
+                            helpText="Optional sound to play whenever this object is clicked, regardless of its interaction type."
+                          />
+                          <select
+                            value={selectedObject.audioSrc || ""}
+                            onChange={(e) =>
+                              updateObject(selectedObject.id, {
+                                audioSrc: e.target.value,
+                              })
+                            }
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 mb-3 focus:border-emerald-500 focus:outline-none"
+                          >
+                            <option value="">None</option>
+                            {project.assets
+                              .filter((a) => a.type === "audio")
+                              .map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.name}
+                                </option>
+                              ))}
+                          </select>
+
+                          <LabelWithHelp
+                            label="On Click Action"
+                            helpText="What happens when the player clicks this object."
+                          />
+                          <select
+                            value={selectedObject.interaction}
+                            onChange={(e) =>
+                              updateObject(selectedObject.id, {
+                                interaction: e.target.value as InteractionType,
+                              })
+                            }
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                          >
+                            <option value="none">None</option>
+                            <option value="dialogue">Show Dialogue</option>
+                            <option value="start-dialogue">
+                              Start Dialogue Tree
+                            </option>
+                            <option value="give-item">
+                              Give Item (Keep Object)
+                            </option>
+                            <option value="collect">
+                              Collect Item (Hide Object)
+                            </option>
+                            <option value="scene_change">
+                              Change Scene / Map Trigger
+                            </option>
+                            <option value="open_ui">
+                              Open Custom UI (Map, Journal, etc)
+                            </option>
+                            <option value="close_ui">Close UI Menu</option>
+                            <option value="modify_number">
+                              Modify Number (Progress/Text)
+                            </option>
+                            <option value="set_flag">
+                              Trigger Story Event
+                            </option>
+                            <option value="open_crafting">
+                              Open Crafting System
+                            </option>
+                            <option value="open_quest_log">
+                              Open Quest Log
+                            </option>
+                            <option value="sound">Play SFX</option>
+                            <option value="play_cutscene">Play Fullscreen Video (Cutscene)</option>
+                            <option value="link">Open URL</option>
+                            <option value="skill_check">
+                              Skill Check (RPG)
+                            </option>
+                            <option value="run_script">Run Script</option>
+                            <option value="save_game">Save Game (Local)</option>
+                            <option value="load_game">Load Game (Local)</option>
+                            <option value="toggle_inventory">
+                              Toggle Inventory
+                            </option>
+                          </select>
+
+                          {selectedObject.interaction !== "none" && (
+                            <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-neutral-800">
+                              <label className="flex items-center gap-2 text-xs text-neutral-400 cursor-pointer hover:text-white">
+                                <input
+                                  type="checkbox"
+                                  checked={!!selectedObject.triggerOnEnter}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      triggerOnEnter: e.target.checked,
+                                    })
+                                  }
+                                  className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                                />
+                                <span>
+                                  Trigger on Mouse Enter (Hover / Map Trigger)
+                                </span>
+                              </label>
+                              <label className="flex items-center gap-2 text-xs text-neutral-400 cursor-pointer hover:text-white">
+                                <input
+                                  type="checkbox"
+                                  checked={!!selectedObject.triggerOnce}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      triggerOnce: e.target.checked,
+                                    })
+                                  }
+                                  className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                                />
+                                <span>Fire only once per Play session</span>
+                              </label>
+                            </div>
+                          )}
+                        </div>
+
+                        {selectedObject.interaction === "sound" && (
+                          <div>
+                            <label className="text-xs text-neutral-500">
+                              Audio Asset
+                            </label>
+                            <select
+                              value={selectedObject.interactionData || ""}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  interactionData: e.target.value,
+                                })
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+                            >
+                              <option value="">Select an audio clip...</option>
+                              {project.assets
+                                .filter((a) => a.type === "audio")
+                                .map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {selectedObject.interaction === "play_cutscene" && (
+                          <div className="space-y-3">
+                            <div>
+                              <label className="text-xs text-neutral-500">
+                                Video Asset
+                              </label>
+                              <select
+                                value={selectedObject.interactionData || ""}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    interactionData: e.target.value,
+                                  })
+                                }
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+                              >
+                                <option value="">Select a video...</option>
+                                {project.assets
+                                  .filter((a) => a.type === "video")
+                                  .map((a) => (
+                                    <option key={a.id} value={a.id}>
+                                      {a.name}
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
+                            <div>
+                                <label className="text-xs text-neutral-500">
+                                  Jump to Scene after video (Optional)
+                                </label>
+                                <select
+                                  value={selectedObject.scriptAssetId || ""}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      scriptAssetId: e.target.value,
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+                                >
+                                  <option value="">None / Stay on current scene</option>
+                                  {(project.scenes || []).map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                      {s.name}
+                                    </option>
+                                  ))}
+                                </select>
+                            </div>
+                          </div>
+                        )}
+
+                        {selectedObject.interaction === "set_flag" && (
+                          <div>
+                            <label className="text-xs text-neutral-500">
+                              Select Story Event
+                            </label>
+                            <select
+                              value={selectedObject.interactionData || ""}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  interactionData: e.target.value,
+                                })
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+                            >
+                              <option value="">Select an event...</option>
+                              {(project.gameFlags || []).map((f) => (
+                                <option key={f} value={f}>
+                                  {f}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {selectedObject.interaction === "start-dialogue" && (
+                          <div>
+                            <label className="text-xs text-neutral-500">
+                              Dialogue Tree
+                            </label>
+                            <select
+                              value={selectedObject.dialogueTreeId || ""}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  dialogueTreeId: e.target.value,
+                                })
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                            >
+                              <option value="">Select a tree...</option>
+                              {(project.dialogueTrees || []).map((t) => (
+                                <option key={t.id} value={t.id}>
+                                  {t.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        <div className="pt-4 border-t border-neutral-800">
+                          <h4 className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-3 flex items-center gap-2">
+                            <Eye size={12} />
+                            Visibility Conditions
+                          </h4>
+                          <div className="space-y-3">
+                            <div>
+                                <LabelWithHelp
+                                  label="Show Only If Event Happened"
+                                  helpText="This object will be completely invisible until this story event occurs."
+                                />
+                                <select
+                                  value={selectedObject.showIfFlag || ""}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      showIfFlag: e.target.value || undefined,
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500"
+                                >
+                                  <option value="">None / Always Show</option>
+                                  {(project.gameFlags || []).map((f) => (
+                                    <option key={f} value={f}>
+                                      {f}
+                                    </option>
+                                  ))}
+                                </select>
+                            </div>
+                            <div>
+                                <LabelWithHelp
+                                  label="Hide If Event Happened"
+                                  helpText="This object will disappear permanently once this story event occurs."
+                                />
+                                <select
+                                  value={selectedObject.hideIfFlag || ""}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      hideIfFlag: e.target.value || undefined,
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500"
+                                >
+                                  <option value="">None / Never Hide</option>
+                                  {(project.gameFlags || []).map((f) => (
+                                    <option key={f} value={f}>
+                                      {f}
+                                    </option>
+                                  ))}
+                                </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-4 border-t border-neutral-800">
+                          <h4 className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-3 flex items-center gap-2">
+                            <Backpack size={12} />
+                            Inventory Requirements
+                          </h4>
+
+                          <div className="space-y-3">
+                            <div>
+                              <div className="flex justify-between items-center mb-1">
+                                <LabelWithHelp
+                                  label="Required Item to Click"
+                                  helpText="If set, the player must have this item in their inventory to interact with this object."
+                                />
+                                <button
+                                  onClick={() => {
+                                    if (!currentScene) return;
+                                    const newItem = {
+                                      id: uuidv4(),
+                                      name: "New Required Item",
+                                      description: "",
+                                      iconAssetId: null,
+                                    };
+                                    const newProject = {
+                                      ...project,
+                                      inventoryItems: [
+                                        ...project.inventoryItems,
+                                        newItem,
+                                      ],
+                                      scenes: project.scenes.map((s) =>
+                                        s.id === currentScene.id
+                                          ? {
+                                              ...s,
+                                              objects: s.objects.map((o) =>
+                                                o.id === selectedObject.id
+                                                  ? {
+                                                      ...o,
+                                                      requireItemId: newItem.id,
+                                                    }
+                                                  : o,
+                                              ),
+                                            }
+                                          : s,
+                                      ),
+                                    };
+                                    pushHistory(newProject);
+                                  }}
+                                  className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded hover:bg-emerald-500/30 line-clamp-1 truncate"
+                                >
+                                  + Add New
+                                </button>
+                              </div>
+                              <select
+                                value={selectedObject.requireItemId || ""}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    requireItemId: e.target.value || undefined,
+                                  })
+                                }
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+                              >
+                                <option value="">
+                                  None (Always Interactable)
+                                </option>
+                                {project.inventoryItems.map((i) => (
+                                  <option key={i.id} value={i.id}>
+                                    {i.name}
+                                  </option>
+                                ))}
+                              </select>
+                              {selectedObject.requireItemId && (
+                                <label className="flex items-center gap-2 mt-2 text-xs text-neutral-400 cursor-pointer hover:text-white">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      !!selectedObject.consumeRequiredItem
+                                    }
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        consumeRequiredItem: e.target.checked,
+                                      })
+                                    }
+                                    className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                                  />
+                                  Consume item on use?
+                                </label>
+                              )}
+                            </div>
+
+                            {(selectedObject.interaction === "give-item" ||
+                              selectedObject.interaction === "collect") && (
+                              <div className="space-y-3">
+                                <div>
+                                  <div className="flex justify-between items-center">
+                                    <label className="text-xs text-neutral-500">
+                                      Item to Give
+                                    </label>
+                                    <button
+                                      onClick={() => {
+                                        if (!currentScene) return;
+                                        const newItem = {
+                                          id: uuidv4(),
+                                          name:
+                                            selectedObject.name || "New Item",
+                                          description: "",
+                                          iconAssetId: selectedObject.src
+                                            ? project.assets.find(
+                                                (a) =>
+                                                  a.src === selectedObject.src,
+                                              )?.id || null
+                                            : null,
+                                        };
+                                        const newProject = {
+                                          ...project,
+                                          inventoryItems: [
+                                            ...project.inventoryItems,
+                                            newItem,
+                                          ],
+                                          scenes: project.scenes.map((s) =>
+                                            s.id === currentScene.id
+                                              ? {
+                                                  ...s,
+                                                  objects: s.objects.map((o) =>
+                                                    o.id === selectedObject.id
+                                                      ? {
+                                                          ...o,
+                                                          giveItemId:
+                                                            newItem.id,
+                                                        }
+                                                      : o,
+                                                  ),
+                                                }
+                                              : s,
+                                          ),
+                                        };
+                                        pushHistory(newProject);
+                                      }}
+                                      className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded hover:bg-emerald-500/30"
+                                    >
+                                      + Quick Create
+                                    </button>
+                                  </div>
+                                  <select
+                                    value={selectedObject.giveItemId || ""}
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        giveItemId: e.target.value,
+                                      })
+                                    }
+                                    className={`w-full bg-neutral-800 border ${!selectedObject.giveItemId ? "border-amber-500/50 ring-1 ring-amber-500/20" : "border-neutral-700"} rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none`}
+                                  >
+                                    <option value="">Select an item...</option>
+                                    {project.inventoryItems.map((i) => (
+                                      <option key={i.id} value={i.id}>
+                                        {i.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {!selectedObject.giveItemId && (
+                                    <p className="text-[10px] text-amber-500 mt-1">
+                                      ⚠️ You must select an item for it to
+                                      appear in the inventory block.
+                                    </p>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="text-xs text-neutral-500">
+                                    Collection Message
+                                  </label>
+                                  <textarea
+                                    value={selectedObject.interactionData || ""}
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        interactionData: e.target.value,
+                                      })
+                                    }
+                                    placeholder="e.g. You found a rusty key!"
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 min-h-[60px]"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {selectedObject.interaction === "run_script" && (
+                          <div>
+                            <label className="text-xs text-neutral-500">
+                              Script Asset
+                            </label>
+                            <select
+                              value={selectedObject.scriptAssetId || ""}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  scriptAssetId: e.target.value,
+                                })
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                            >
+                              <option value="">Select a script...</option>
+                              {project.assets
+                                .filter((a) => a.type === "script")
+                                .map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.name}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {["dialogue", "link", "skill_check"].includes(
+                          selectedObject.interaction,
+                        ) && (
+                          <div>
+                            <label className="text-xs text-neutral-500">
+                              {selectedObject.interaction === "skill_check"
+                                ? "Success Dialogue"
+                                : "Action Data"}
+                            </label>
+                            <textarea
+                              value={selectedObject.interactionData || ""}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  interactionData: e.target.value,
+                                })
+                              }
+                              placeholder={
+                                selectedObject.interaction === "dialogue"
+                                  ? "Enter dialogue text..."
+                                  : selectedObject.interaction === "link"
+                                    ? "https://..."
+                                    : "Text shown on success..."
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 min-h-[60px]"
+                            />
+                          </div>
+                        )}
+
+                        {selectedObject.interaction === "scene_change" && (
+                          <div>
+                            <label className="text-xs text-neutral-500">
+                              Target Scene
+                            </label>
+                            <select
+                              value={selectedObject.interactionData || ""}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  interactionData: e.target.value,
+                                })
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+                            >
+                              <option value="">Select a scene...</option>
+                              {project.scenes.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.name}{" "}
+                                  {s.id === project.currentSceneId
+                                    ? "(Current)"
+                                    : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {(selectedObject.interaction === "open_ui" ||
+                          selectedObject.interaction === "close_ui") && (
+                          <div>
+                            <label className="text-xs text-neutral-500">
+                              {selectedObject.interaction === "open_ui"
+                                ? "Target UI Menu"
+                                : "Menu to Close (Optional)"}
+                            </label>
+                            <select
+                              value={selectedObject.targetUiId || ""}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  targetUiId: e.target.value,
+                                })
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+                            >
+                              <option value="">
+                                {selectedObject.interaction === "open_ui"
+                                  ? "Select a UI menu..."
+                                  : "Currently Active Menu"}
+                              </option>
+                              {(project.uiMenus || []).map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {selectedObject.interaction === "modify_number" && (
+                          <div className="space-y-2">
+                            <div>
+                              <LabelWithHelp
+                                label="Target Object"
+                                helpText="The progress bar or text object to modify"
+                              />
+                              <select
+                                value={selectedObject.targetUiId || ""}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    targetUiId: e.target.value,
+                                  })
+                                }
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+                              >
+                                <option value="">Select an object...</option>
+                                {currentScene?.objects
+                                  .filter((o) => o.isUiElement || o.isText)
+                                  .map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.name}
+                                    </option>
+                                  ))}
+                                {(project.uiMenus || []).flatMap((menu) =>
+                                  menu.objects
+                                    .filter((o) => o.isUiElement || o.isText)
+                                    .map((o) => (
+                                      <option key={o.id} value={o.id}>
+                                        {menu.name} - {o.name}
+                                      </option>
+                                    )),
+                                )}
+                              </select>
+                            </div>
+                            <div>
+                              <LabelWithHelp
+                                label="Amount"
+                                helpText="Positive to add, negative to subtract"
+                              />
+                              <input
+                                type="number"
+                                value={selectedObject.interactionData || 0}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    interactionData: e.target.value,
+                                  })
+                                }
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* RPG / Sim Elements */}
+                      {!selectedObject.isUiElement && (
+                        <div className="space-y-3">
+                          <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                            RPG & Sim Logic
+                          </h3>
+                          <div>
+                            <LabelWithHelp
+                              label="Flavor Text (Hover)"
+                              helpText="Text shown briefly when the player hovers over the object."
+                            />
+                            <input
+                              type="text"
+                              value={selectedObject.flavorText || ""}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  flavorText: e.target.value,
+                                })
+                              }
+                              placeholder="e.g. 'It smells like old moss...'"
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                            />
+                          </div>
+
+                          {project.globalSettings.enableTTRPGStats &&
+                            selectedObject.interaction === "skill_check" && (
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <LabelWithHelp
+                                    label="Required Skill"
+                                    helpText="A skill check the player must pass to interact with this object."
+                                  />
+                                  <select
+                                    value={
+                                      selectedObject.requiredSkill || "none"
+                                    }
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        requiredSkill: e.target.value as any,
+                                      })
+                                    }
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                                  >
+                                    <option value="none">None</option>
+                                    <option value="naturalist">
+                                      Naturalist
+                                    </option>
+                                    <option value="occultist">Occultist</option>
+                                    <option value="scribal">Scribal</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="text-xs text-neutral-500">
+                                    Difficulty (DC)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={
+                                      selectedObject.skillCheckDifficulty || 10
+                                    }
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        skillCheckDifficulty: Number(
+                                          e.target.value,
+                                        ),
+                                      })
+                                    }
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                          {project.globalSettings.enableNeeds && (
+                            <div>
+                              <LabelWithHelp
+                                label="Needs Effect (JSON)"
+                                helpText='JSON object modifying player needs (e.g., {"hunger": -10}).'
+                              />
+                              <textarea
+                                value={
+                                  selectedObject.needsEffect
+                                    ? JSON.stringify(selectedObject.needsEffect)
+                                    : ""
+                                }
+                                onChange={(e) => {
+                                  try {
+                                    const val = e.target.value
+                                      ? JSON.parse(e.target.value)
+                                      : undefined;
+                                    updateObject(selectedObject.id, {
+                                      needsEffect: val,
+                                    });
+                                  } catch (err) {} // Ignore invalid JSON while typing
+                                }}
+                                placeholder='{"rest": 10, "hunger": -5}'
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 font-mono text-xs"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Actions */}
+                      <div className="pt-4 border-t border-neutral-800 flex gap-2">
+                        <button
+                          onClick={() => {
+                            const newObj = {
+                              ...selectedObject,
+                              id: uuidv4(),
+                              x: selectedObject.x + 20,
+                              y: selectedObject.y + 20,
+                            };
+                            updateScene({
+                              objects: [...currentScene.objects, newObj],
+                            });
+                            setSelectedObjectId(newObj.id);
+                          }}
+                          className="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 rounded text-sm transition-colors"
+                        >
+                          <Copy size={14} /> Duplicate
+                        </button>
+                        <button
+                          onClick={() => {
+                            updateScene({
+                              objects: currentScene.objects.filter(
+                                (o) => o.id !== selectedObject.id,
+                              ),
+                            });
+                            setSelectedObjectId(null);
+                          }}
+                          className="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded text-sm transition-colors"
+                        >
+                          <Trash2 size={14} /> Delete
+                        </button>
+                      </div>
+                    </>
+                  ))}
+              </div>
+            </aside>
+          </>
+        )}
+
+        {editorMode === "dialogue" && (
+          <div className="flex-1 flex gap-6 p-6 bg-neutral-950 overflow-hidden">
+            <div className="w-64 flex flex-col gap-4 border-r border-neutral-800 pr-6">
+              <button
+                onClick={() => {
+                  const newTree: DialogueTree = {
+                    id: uuidv4(),
+                    name: "New Conversation",
+                    nodes: [],
+                    startNodeId: null,
+                  };
+                  pushHistory({
+                    ...project,
+                    dialogueTrees: [...project.dialogueTrees, newTree],
+                  });
+                  setActiveTreeId(newTree.id);
+                }}
+                className="flex items-center justify-center gap-2 w-full py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
+              >
+                <Plus size={16} /> New Dialogue Tree
+              </button>
+              <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+                {(project.dialogueTrees || []).map((tree, idx) => {
+                  const isActive = activeTreeId
+                    ? activeTreeId === tree.id
+                    : idx === 0;
+                  return (
+                    <div
+                      key={tree.id}
+                      onClick={() => setActiveTreeId(tree.id)}
+                      className={`p-3 rounded cursor-pointer border ${isActive ? "bg-neutral-800 border-emerald-500" : "bg-neutral-900 border-neutral-800 hover:border-neutral-700"}`}
+                    >
+                      <div className="font-medium text-sm">{tree.name}</div>
+                      <div className="text-xs text-neutral-500">
+                        {(tree.nodes || []).length} nodes
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="pt-4 border-t border-neutral-800 space-y-3">
+                <h3 className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">
+                  Dialogue Styling
+                </h3>
+                <div>
+                  <label className="text-xs text-neutral-400 block mb-1">
+                    Position
+                  </label>
+                  <select
+                    value={project.globalSettings.dialoguePosition || "bottom"}
+                    onChange={(e) =>
+                      setProject((p) => ({
+                        ...p,
+                        globalSettings: {
+                          ...p.globalSettings,
+                          dialoguePosition: e.target.value as
+                            | "top"
+                            | "center"
+                            | "bottom",
+                        },
+                      }))
+                    }
+                    className="w-full bg-neutral-900 border border-neutral-700 text-neutral-200 text-xs rounded px-2 py-1.5 focus:border-emerald-500 focus:outline-none"
+                  >
+                    <option value="top">Top</option>
+                    <option value="center">Center</option>
+                    <option value="bottom">Bottom</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-neutral-400 block mb-1">
+                    Text Speed (ms/char) 0=Instant
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="200"
+                    step="5"
+                    value={project.globalSettings.typewriterSpeed ?? 15}
+                    onChange={(e) =>
+                      setProject((p) => ({
+                        ...p,
+                        globalSettings: {
+                          ...p.globalSettings,
+                          typewriterSpeed: Number(e.target.value),
+                        },
+                      }))
+                    }
+                    className="w-full bg-neutral-900 border border-neutral-700 text-neutral-200 text-xs rounded px-2 py-1.5 focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+              {activeTreeId ||
+              (project.dialogueTrees && project.dialogueTrees.length > 0) ? (
+                (() => {
+                  const currentTreeId =
+                    activeTreeId ||
+                    (project.dialogueTrees && project.dialogueTrees[0]
+                      ? project.dialogueTrees[0].id
+                      : null);
+                  if (!currentTreeId) return null;
+                  const tree = (project.dialogueTrees || []).find(
+                    (t) => t.id === currentTreeId,
+                  );
+                  if (!tree) return null;
+                  return (
+                    <div className="max-w-3xl space-y-6 pb-20">
+                      <input
+                        type="text"
+                        value={tree.name}
+                        onChange={(e) => {
+                          const newTrees = (project.dialogueTrees || []).map(
+                            (t) =>
+                              t.id === tree.id
+                                ? { ...t, name: e.target.value }
+                                : t,
+                          );
+                          pushHistory({ ...project, dialogueTrees: newTrees });
+                        }}
+                        className="bg-transparent text-2xl font-bold text-white focus:outline-none border-b border-transparent focus:border-emerald-500 w-full pb-2"
+                      />
+
+                      <button
+                        onClick={() => {
+                          const newNode: DialogueNode = {
+                            id: uuidv4(),
+                            speaker: "Speaker",
+                            text: "Hello...",
+                            choices: [],
+                          };
+                          const newTrees = (project.dialogueTrees || []).map(
+                            (t) =>
+                              t.id === tree.id
+                                ? {
+                                    ...t,
+                                    nodes: [...(t.nodes || []), newNode],
+                                    startNodeId: t.startNodeId || newNode.id,
+                                  }
+                                : t,
+                          );
+                          pushHistory({ ...project, dialogueTrees: newTrees });
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 rounded text-sm"
+                      >
+                        <Plus size={16} /> Add Node
+                      </button>
+
+                      <div className="space-y-4">
+                        {(tree.nodes || []).map((node) => (
+                          <div
+                            key={node.id}
+                            className={`p-4 rounded-lg border ${tree.startNodeId === node.id ? "border-emerald-500/50 bg-emerald-500/5" : "border-neutral-800 bg-neutral-900"}`}
+                          >
+                            <div className="flex justify-between mb-3">
+                              <div className="flex items-center gap-3">
+                                {tree.startNodeId === node.id && (
+                                  <span className="text-[10px] uppercase tracking-wider bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">
+                                    Start Node
+                                  </span>
+                                )}
+                                <input
+                                  type="text"
+                                  value={node.speaker}
+                                  onChange={(e) => {
+                                    const newTrees = (
+                                      project.dialogueTrees || []
+                                    ).map((t) =>
+                                      t.id === tree.id
+                                        ? {
+                                            ...t,
+                                            nodes: (t.nodes || []).map((n) =>
+                                              n.id === node.id
+                                                ? {
+                                                    ...n,
+                                                    speaker: e.target.value,
+                                                  }
+                                                : n,
+                                            ),
+                                          }
+                                        : t,
+                                    );
+                                    pushHistory({
+                                      ...project,
+                                      dialogueTrees: newTrees,
+                                    });
+                                  }}
+                                  className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm font-bold w-32"
+                                  placeholder="Speaker"
+                                />
+                                <div className="flex gap-1 items-center border-l border-neutral-700 pl-3">
+                                  {node.speakerAssetId &&
+                                  (project.assets || []).find(
+                                    (a) => a.id === node.speakerAssetId,
+                                  ) ? (
+                                    <div className="flex gap-2 items-center">
+                                      <img
+                                        src={
+                                          (project.assets || []).find(
+                                            (a) => a.id === node.speakerAssetId,
+                                          )?.src
+                                        }
+                                        alt="Portrait"
+                                        className="w-6 h-6 object-cover rounded bg-neutral-800"
+                                      />
+                                      <button
+                                        onClick={() => {
+                                          const newTrees = (
+                                            project.dialogueTrees || []
+                                          ).map((t) =>
+                                            t.id === tree.id
+                                              ? {
+                                                  ...t,
+                                                  nodes: (t.nodes || []).map(
+                                                    (n) =>
+                                                      n.id === node.id
+                                                        ? {
+                                                            ...n,
+                                                            speakerAssetId:
+                                                              undefined,
+                                                          }
+                                                        : n,
+                                                  ),
+                                                }
+                                              : t,
+                                          );
+                                          pushHistory({
+                                            ...project,
+                                            dialogueTrees: newTrees,
+                                          });
+                                        }}
+                                        className="text-red-400 hover:text-red-300 px-1 text-xs"
+                                        title="Remove Portrait"
+                                      >
+                                        <X size={12} />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() =>
+                                        setAssetPickerCb({
+                                          onSelect: (id) => {
+                                            const newTrees = (
+                                              project.dialogueTrees || []
+                                            ).map((t) =>
+                                              t.id === tree.id
+                                                ? {
+                                                    ...t,
+                                                    nodes: (t.nodes || []).map(
+                                                      (n) =>
+                                                        n.id === node.id
+                                                          ? {
+                                                              ...n,
+                                                              speakerAssetId:
+                                                                id,
+                                                            }
+                                                          : n,
+                                                    ),
+                                                  }
+                                                : t,
+                                            );
+                                            pushHistory({
+                                              ...project,
+                                              dialogueTrees: newTrees,
+                                            });
+                                            setAssetPickerCb(null);
+                                          },
+                                          filterType: "image",
+                                        })
+                                      }
+                                      className="bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded px-2 py-1 text-xs text-neutral-300"
+                                    >
+                                      + Portrait
+                                    </button>
+                                  )}
+                                  {node.speakerAssetId && (
+                                    <select
+                                      value={node.portraitPosition || "left"}
+                                      onChange={(e) => {
+                                        const newTrees = (
+                                          project.dialogueTrees || []
+                                        ).map((t) =>
+                                          t.id === tree.id
+                                            ? {
+                                                ...t,
+                                                nodes: (t.nodes || []).map(
+                                                  (n) =>
+                                                    n.id === node.id
+                                                      ? {
+                                                          ...n,
+                                                          portraitPosition: e
+                                                            .target.value as
+                                                            | "left"
+                                                            | "right",
+                                                        }
+                                                      : n,
+                                                ),
+                                              }
+                                            : t,
+                                        );
+                                        pushHistory({
+                                          ...project,
+                                          dialogueTrees: newTrees,
+                                        });
+                                      }}
+                                      className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs ml-1 focus:outline-none"
+                                    >
+                                      <option value="left">Left</option>
+                                      <option value="right">Right</option>
+                                    </select>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                {tree.startNodeId !== node.id && (
+                                  <button
+                                    onClick={() => {
+                                      const newTrees = (
+                                        project.dialogueTrees || []
+                                      ).map((t) =>
+                                        t.id === tree.id
+                                          ? { ...t, startNodeId: node.id }
+                                          : t,
+                                      );
+                                      pushHistory({
+                                        ...project,
+                                        dialogueTrees: newTrees,
+                                      });
+                                    }}
+                                    className="text-xs text-neutral-400 hover:text-emerald-400"
+                                  >
+                                    Set as Start
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => {
+                                    const newTrees = (
+                                      project.dialogueTrees || []
+                                    ).map((t) =>
+                                      t.id === tree.id
+                                        ? {
+                                            ...t,
+                                            nodes: (t.nodes || []).filter(
+                                              (n) => n.id !== node.id,
+                                            ),
+                                          }
+                                        : t,
+                                    );
+                                    pushHistory({
+                                      ...project,
+                                      dialogueTrees: newTrees,
+                                    });
+                                  }}
+                                  className="text-xs text-red-400 hover:text-red-300"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+
+                            <textarea
+                              value={node.text}
+                              onChange={(e) => {
+                                const newTrees = (
+                                  project.dialogueTrees || []
+                                ).map((t) =>
+                                  t.id === tree.id
+                                    ? {
+                                        ...t,
+                                        nodes: (t.nodes || []).map((n) =>
+                                          n.id === node.id
+                                            ? { ...n, text: e.target.value }
+                                            : n,
+                                        ),
+                                      }
+                                    : t,
+                                );
+                                pushHistory({
+                                  ...project,
+                                  dialogueTrees: newTrees,
+                                });
+                              }}
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded p-2 text-sm min-h-[80px] mb-3"
+                              placeholder="Dialogue text..."
+                            ></textarea>
+
+                            <div className="space-y-2 pl-4 border-l-2 border-neutral-800">
+                              {(node.choices || []).map((choice, cIdx) => (
+                                <div
+                                  key={choice.id}
+                                  className="flex flex-col gap-2 p-2 bg-neutral-900 border border-neutral-800 rounded relative"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="text"
+                                      value={choice.text}
+                                      onChange={(e) => {
+                                        const newTrees = (
+                                          project.dialogueTrees || []
+                                        ).map((t) =>
+                                          t.id === tree.id
+                                            ? {
+                                                ...t,
+                                                nodes: (t.nodes || []).map((n) =>
+                                                  n.id === node.id
+                                                    ? {
+                                                        ...n,
+                                                        choices: (
+                                                          n.choices || []
+                                                        ).map((c, i) =>
+                                                          i === cIdx
+                                                            ? {
+                                                                ...c,
+                                                                text: e.target
+                                                                  .value,
+                                                              }
+                                                            : c,
+                                                        ),
+                                                      }
+                                                    : n,
+                                                ),
+                                              }
+                                            : t,
+                                        );
+                                        pushHistory({
+                                          ...project,
+                                          dialogueTrees: newTrees,
+                                        });
+                                      }}
+                                      className="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm font-medium"
+                                      placeholder="Choice text..."
+                                    />
+
+                                    <span className="text-neutral-500 text-xs">
+                                      →
+                                    </span>
+
+                                    <select
+                                      value={choice.nextNodeId || ""}
+                                      onChange={(e) => {
+                                        const newTrees = (
+                                          project.dialogueTrees || []
+                                        ).map((t) =>
+                                          t.id === tree.id
+                                            ? {
+                                                ...t,
+                                                nodes: (t.nodes || []).map((n) =>
+                                                  n.id === node.id
+                                                    ? {
+                                                        ...n,
+                                                        choices: (
+                                                          n.choices || []
+                                                        ).map((c, i) =>
+                                                          i === cIdx
+                                                            ? {
+                                                                ...c,
+                                                                nextNodeId:
+                                                                  e.target
+                                                                    .value ||
+                                                                  null,
+                                                              }
+                                                            : c,
+                                                        ),
+                                                      }
+                                                    : n,
+                                                ),
+                                              }
+                                            : t,
+                                        );
+                                        pushHistory({
+                                          ...project,
+                                          dialogueTrees: newTrees,
+                                        });
+                                      }}
+                                      className="w-48 bg-emerald-950/30 text-emerald-300 border border-emerald-900/50 rounded px-2 py-1 text-sm outline-none focus:border-emerald-500"
+                                    >
+                                      <option value="" className="bg-neutral-900">End Conversation</option>
+                                      {(tree.nodes || []).map((n) => (
+                                        <option key={n.id} value={n.id} className="bg-neutral-900">
+                                          {n.speaker}: {n.text.substring(0, 20)}
+                                          ...
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <button
+                                      onClick={() => {
+                                        const newTrees = (
+                                          project.dialogueTrees || []
+                                        ).map((t) =>
+                                          t.id === tree.id
+                                            ? {
+                                                ...t,
+                                                nodes: (t.nodes || []).map(
+                                                  (n) =>
+                                                    n.id === node.id
+                                                      ? {
+                                                          ...n,
+                                                          choices: (
+                                                            n.choices || []
+                                                          ).filter(
+                                                            (_, i) => i !== cIdx,
+                                                          ),
+                                                        }
+                                                      : n,
+                                                ),
+                                              }
+                                            : t,
+                                        );
+                                        pushHistory({
+                                          ...project,
+                                          dialogueTrees: newTrees,
+                                        });
+                                      }}
+                                      className="text-red-400 hover:text-red-300 p-1 bg-neutral-800 rounded"
+                                      title="Remove Choice"
+                                    >
+                                      <X size={14} />
+                                    </button>
+                                  </div>
+                                  
+                                  {/* Story Events for Choice */}
+                                  <div className="flex gap-2">
+                                    <div className="flex-1 flex items-center gap-1">
+                                      <span className="text-[10px] uppercase font-bold text-neutral-500">Only Show If:</span>
+                                      <select
+                                        value={choice.requiredGameFlag || ""}
+                                        onChange={(e) => {
+                                          const newTrees = (project.dialogueTrees || []).map((t) => t.id === tree.id ? { ...t, nodes: (t.nodes || []).map((n) => n.id === node.id ? { ...n, choices: (n.choices || []).map((c, i) => i === cIdx ? { ...c, requiredGameFlag: e.target.value || undefined } : c) } : n) } : t);
+                                          pushHistory({ ...project, dialogueTrees: newTrees });
+                                        }}
+                                        className="flex-1 bg-neutral-900 border border-neutral-800 rounded px-1 py-0.5 text-xs text-neutral-400"
+                                      >
+                                        <option value="">(Always Show)</option>
+                                        {(project.gameFlags || []).map(f => <option key={f} value={f}>{f}</option>)}
+                                      </select>
+                                    </div>
+                                    <div className="flex-1 flex items-center gap-1">
+                                      <span className="text-[10px] uppercase font-bold text-emerald-800">Trigger Event:</span>
+                                      <select
+                                        value={choice.setGameFlag || ""}
+                                        onChange={(e) => {
+                                          const newTrees = (project.dialogueTrees || []).map((t) => t.id === tree.id ? { ...t, nodes: (t.nodes || []).map((n) => n.id === node.id ? { ...n, choices: (n.choices || []).map((c, i) => i === cIdx ? { ...c, setGameFlag: e.target.value || undefined } : c) } : n) } : t);
+                                          pushHistory({ ...project, dialogueTrees: newTrees });
+                                        }}
+                                        className="flex-1 bg-neutral-900 border border-neutral-800 rounded px-1 py-0.5 text-xs text-emerald-300"
+                                      >
+                                        <option value="">(None)</option>
+                                        {(project.gameFlags || []).map(f => <option key={f} value={f}>{f}</option>)}
+                                      </select>
+                                    </div>
+                                  </div>
+
+                                </div>
+                              ))}
+                              <button
+                                onClick={() => {
+                                  const newTrees = (
+                                    project.dialogueTrees || []
+                                  ).map((t) =>
+                                    t.id === tree.id
+                                      ? {
+                                          ...t,
+                                          nodes: (t.nodes || []).map((n) =>
+                                            n.id === node.id
+                                              ? {
+                                                  ...n,
+                                                  choices: [
+                                                    ...(n.choices || []),
+                                                    {
+                                                      id: uuidv4(),
+                                                      text: "New Choice",
+                                                      nextNodeId: null,
+                                                    },
+                                                  ],
+                                                }
+                                              : n,
+                                          ),
+                                        }
+                                      : t,
+                                  );
+                                  pushHistory({
+                                    ...project,
+                                    dialogueTrees: newTrees,
+                                  });
+                                }}
+                                className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 mt-2"
+                              >
+                                <Plus size={12} /> Add Choice
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : (
+                <div className="h-full flex items-center justify-center text-neutral-500">
+                  Select or create a dialogue tree.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {editorMode === "scenes" && (
+          <div className="flex-1 flex flex-col p-6 bg-neutral-950 overflow-hidden">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-white">Scene Manager</h2>
+              <button
+                onClick={() => {
+                  const newScene: Scene = {
+                    id: uuidv4(),
+                    name: `Scene ${project.scenes.length + 1}`,
+                    width: project.scenes[0]?.width || 800,
+                    height: project.scenes[0]?.height || 600,
+                    backgroundColor: "#000000",
+                    objects: [],
+                  };
+                  pushHistory({
+                    ...project,
+                    scenes: [...project.scenes, newScene],
+                    currentSceneId: newScene.id,
+                  });
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
+              >
+                <Plus size={16} /> Create Scene
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto custom-scrollbar pb-20">
+              {project.scenes.map((scene) => (
+                <div
+                  key={scene.id}
+                  className={`bg-neutral-900 border rounded-lg p-5 flex flex-col gap-4 transition-colors ${project.currentSceneId === scene.id ? "border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]" : "border-neutral-800 hover:border-neutral-700"}`}
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-4 h-4 rounded-full border border-neutral-700"
+                        style={{ backgroundColor: scene.backgroundColor }}
+                      ></div>
+                      <input
+                        type="text"
+                        value={scene.name}
+                        onChange={(e) => {
+                          pushHistory({
+                            ...project,
+                            scenes: project.scenes.map((s) =>
+                              s.id === scene.id
+                                ? { ...s, name: e.target.value }
+                                : s,
+                            ),
+                          });
+                        }}
+                        className="bg-transparent border-b border-transparent hover:border-neutral-700 focus:border-emerald-500 text-lg font-bold text-white outline-none px-1"
+                      />
+                    </div>
+                    {project.scenes.length > 1 && (
+                      <button
+                        onClick={() => {
+                          const newScenes = project.scenes.filter(
+                            (s) => s.id !== scene.id,
+                          );
+                          const newCurrentId =
+                            project.currentSceneId === scene.id
+                              ? newScenes[0].id
+                              : project.currentSceneId;
+                          pushHistory({
+                            ...project,
+                            scenes: newScenes,
+                            currentSceneId: newCurrentId,
+                          });
+                        }}
+                        className="text-red-400 hover:text-red-300 p-1"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex gap-4 text-xs text-neutral-400 font-mono">
+                    <div className="flex flex-col gap-1">
+                      <LabelWithHelp
+                        label="Width"
+                        helpText="The total width of the scene in pixels."
+                      />
+                      <input
+                        type="number"
+                        value={scene.width}
+                        onChange={(e) =>
+                          pushHistory({
+                            ...project,
+                            scenes: project.scenes.map((s) =>
+                              s.id === scene.id
+                                ? { ...s, width: Number(e.target.value) }
+                                : s,
+                            ),
+                          })
+                        }
+                        className="w-20 bg-neutral-800 border border-neutral-700 rounded px-2 py-1"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <LabelWithHelp
+                        label="Height"
+                        helpText="The total height of the scene in pixels."
+                      />
+                      <input
+                        type="number"
+                        value={scene.height}
+                        onChange={(e) =>
+                          pushHistory({
+                            ...project,
+                            scenes: project.scenes.map((s) =>
+                              s.id === scene.id
+                                ? { ...s, height: Number(e.target.value) }
+                                : s,
+                            ),
+                          })
+                        }
+                        className="w-20 bg-neutral-800 border border-neutral-700 rounded px-2 py-1"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <LabelWithHelp
+                        label="Background Color"
+                        helpText="Solid background color behind everything."
+                      />
+                      <input
+                        type="color"
+                        value={scene.backgroundColor}
+                        onChange={(e) =>
+                          pushHistory({
+                            ...project,
+                            scenes: project.scenes.map((s) =>
+                              s.id === scene.id
+                                ? { ...s, backgroundColor: e.target.value }
+                                : s,
+                            ),
+                          })
+                        }
+                        className="w-16 h-7 bg-neutral-800 border border-neutral-700 rounded cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <LabelWithHelp
+                      label="Background Music (BGM)"
+                      helpText="The music track that plays on loop when the player enters this scene."
+                      className="uppercase font-bold mb-1 block text-[10px] mt-2"
+                    />
+                    <select
+                      value={scene.bgmAssetId || ""}
+                      onChange={(e) =>
+                        pushHistory({
+                          ...project,
+                          scenes: (project.scenes || []).map((s) =>
+                            s.id === scene.id
+                              ? { ...s, bgmAssetId: e.target.value }
+                              : s,
+                          ),
+                        })
+                      }
+                      className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm"
+                    >
+                      <option value="">None</option>
+                      {project.assets
+                        .filter((a) => a.type === "audio")
+                        .map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div className="pt-4 border-t border-neutral-800 flex justify-between items-center">
+                    <span className="text-xs text-neutral-500">
+                      {scene.objects.length} Objects
+                    </span>
+                    <button
+                      onClick={() => {
+                        setProject((p) => ({ ...p, currentSceneId: scene.id }));
+                        setEditorMode("stage");
+                      }}
+                      className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs rounded transition-colors"
+                    >
+                      {project.currentSceneId === scene.id
+                        ? "Viewing Stage"
+                        : "Go to Stage →"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {editorMode === "ui_maker" && (
+          <div className="flex-1 flex flex-col p-6 bg-neutral-950 overflow-hidden">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-white">UI Map Manager</h2>
+              <button
+                onClick={() => {
+                  const newMenu: Scene = {
+                    id: uuidv4(),
+                    name: `UI Menu ${(project.uiMenus || []).length + 1}`,
+                    width: project.globalSettings.stageWidth || 800,
+                    height: project.globalSettings.stageHeight || 600,
+                    backgroundColor: "transparent",
+                    objects: [],
+                    blocksClicks: false,
+                  };
+                  pushHistory({
+                    ...project,
+                    uiMenus: [...(project.uiMenus || []), newMenu],
+                    currentUiMenuId: newMenu.id,
+                  });
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
+              >
+                <Plus size={16} /> Create UI Menu
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto custom-scrollbar pb-20">
+              {(project.uiMenus || []).map((scene) => (
+                <div
+                  key={scene.id}
+                  className={`bg-neutral-900 border rounded-lg p-5 flex flex-col gap-4 transition-colors ${project.currentUiMenuId === scene.id ? "border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]" : "border-neutral-800 hover:border-neutral-700"}`}
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-4 h-4 rounded-full border border-neutral-700"
+                        style={{ backgroundColor: scene.backgroundColor }}
+                      ></div>
+                      <input
+                        type="text"
+                        value={scene.name}
+                        onChange={(e) => {
+                          pushHistory({
+                            ...project,
+                            uiMenus: (project.uiMenus || []).map((s) =>
+                              s.id === scene.id
+                                ? { ...s, name: e.target.value }
+                                : s,
+                            ),
+                          });
+                        }}
+                        className="bg-transparent border-b border-transparent hover:border-neutral-700 focus:border-emerald-500 text-lg font-bold text-white outline-none px-1 w-full"
+                      />
+                    </div>
+                    {(project.uiMenus || []).length > 0 && (
+                      <button
+                        onClick={() => {
+                          const newMenus = (project.uiMenus || []).filter(
+                            (s) => s.id !== scene.id,
+                          );
+                          const newCurrentId =
+                            project.currentUiMenuId === scene.id
+                              ? newMenus[0]?.id || null
+                              : project.currentUiMenuId;
+                          pushHistory({
+                            ...project,
+                            uiMenus: newMenus,
+                            currentUiMenuId: newCurrentId,
+                          });
+                        }}
+                        className="text-red-400 hover:text-red-300 p-1"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-4 text-xs text-neutral-400 font-mono">
+                    <div className="flex gap-4">
+                      <div className="flex flex-col gap-1 w-full">
+                        <LabelWithHelp
+                          label="Width"
+                          helpText="Width of the UI space."
+                        />
+                        <input
+                          type="number"
+                          value={scene.width}
+                          onChange={(e) =>
+                            pushHistory({
+                              ...project,
+                              uiMenus: (project.uiMenus || []).map((s) =>
+                                s.id === scene.id
+                                  ? { ...s, width: Number(e.target.value) }
+                                  : s,
+                              ),
+                            })
+                          }
+                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1 w-full">
+                        <LabelWithHelp
+                          label="Height"
+                          helpText="Height of the UI space."
+                        />
+                        <input
+                          type="number"
+                          value={scene.height}
+                          onChange={(e) =>
+                            pushHistory({
+                              ...project,
+                              uiMenus: (project.uiMenus || []).map((s) =>
+                                s.id === scene.id
+                                  ? { ...s, height: Number(e.target.value) }
+                                  : s,
+                              ),
+                            })
+                          }
+                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1 w-full relative">
+                      <LabelWithHelp
+                        label="Background (Supports RGBA)"
+                        helpText="The background color of the UI Menu panel. Use rgba() string for transparency."
+                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={scene.backgroundColor}
+                          onChange={(e) =>
+                            pushHistory({
+                              ...project,
+                              uiMenus: (project.uiMenus || []).map((s) =>
+                                s.id === scene.id
+                                  ? { ...s, backgroundColor: e.target.value }
+                                  : s,
+                              ),
+                            })
+                          }
+                          className="flex-1 w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1"
+                          placeholder="transparent"
+                        />
+                        <button
+                          onClick={() =>
+                            pushHistory({
+                              ...project,
+                              uiMenus: (project.uiMenus || []).map((s) =>
+                                s.id === scene.id
+                                  ? { ...s, backgroundColor: "transparent" }
+                                  : s,
+                              ),
+                            })
+                          }
+                          className="px-2 py-1 bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 rounded text-xs text-neutral-400"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={!!scene.isOpenByDefault}
+                        onChange={(e) =>
+                          pushHistory({
+                            ...project,
+                            uiMenus: (project.uiMenus || []).map((s) =>
+                              s.id === scene.id
+                                ? { ...s, isOpenByDefault: e.target.checked }
+                                : s,
+                            ),
+                          })
+                        }
+                        className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950"
+                      />
+                      <LabelWithHelp
+                        label="Show By Default (HUD)"
+                        helpText="Checked if this is a HUD or always-on interface that should be visible immediately!"
+                      />
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={!!scene.blocksClicks}
+                        onChange={(e) =>
+                          pushHistory({
+                            ...project,
+                            uiMenus: (project.uiMenus || []).map((s) =>
+                              s.id === scene.id
+                                ? { ...s, blocksClicks: e.target.checked }
+                                : s,
+                            ),
+                          })
+                        }
+                        className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950"
+                      />
+                      <LabelWithHelp
+                        label="Block Clicks Below UI Canvas"
+                        helpText="If checked, clicks inside this UI map's bounds will not pass through to the game scene below. Make the width/height match the stage if you want to block the entire screen!"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="pt-4 border-t border-neutral-800 flex justify-between items-center">
+                    <span className="text-xs text-neutral-500">
+                      {scene.objects.length} Objects
+                    </span>
+                    <button
+                      onClick={() => {
+                        setProject((p) => ({
+                          ...p,
+                          currentUiMenuId: scene.id,
+                        }));
+                        setEditorMode("ui_stage");
+                      }}
+                      className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs rounded transition-colors"
+                    >
+                      {project.currentUiMenuId === scene.id
+                        ? "Viewing UI Stage"
+                        : "Edit UI →"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {editorMode === "rpg_systems" && (
+          <div className="flex-1 flex p-6 gap-6 bg-neutral-950 overflow-hidden">
+            <div className="w-80 flex flex-col gap-4 border-r border-neutral-800 pr-6 overflow-y-auto custom-scrollbar">
+              <h2 className="text-xl font-bold text-white mb-2">Quests</h2>
+              <button
+                onClick={() => {
+                  const newQuest: Quest = {
+                    id: uuidv4(),
+                    name: "New Quest",
+                    description: "",
+                    objectives: [],
+                    rewards: [],
+                  };
+                  pushHistory({
+                    ...project,
+                    quests: [...(project.quests || []), newQuest],
+                  });
+                  setActiveQuestId(newQuest.id);
+                }}
+                className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold transition-colors shadow-lg"
+              >
+                + New Quest
+              </button>
+
+              <div className="space-y-2">
+                {(project.quests || []).map((quest) => (
+                  <div
+                    key={quest.id}
+                    onClick={() => setActiveQuestId(quest.id)}
+                    className={`p-3 rounded-lg cursor-pointer transition-all border ${activeQuestId === quest.id ? "bg-emerald-500/20 border-emerald-500 text-emerald-400" : "bg-neutral-900 border-neutral-800 text-neutral-300 hover:bg-neutral-800"}`}
+                  >
+                    <div className="font-bold">{quest.name}</div>
+                    <div className="text-xs text-neutral-500 truncate mr-2">
+                      {quest.description || "No description"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-8">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-xl font-bold text-white">Story Events</h2>
+                </div>
+                <div className="flex gap-2 mb-4">
+                  <input
+                    type="text"
+                    value={newEventText}
+                    onChange={(e) => setNewEventText(e.target.value)}
+                    placeholder="e.g. Unlocked Door"
+                    className="flex-1 bg-neutral-950 border border-neutral-800 rounded px-2 text-sm text-white"
+                  />
+                  <button
+                    onClick={() => {
+                      const currentFlags = Array.isArray(project.gameFlags) ? project.gameFlags : [];
+                      if (
+                        newEventText.trim() &&
+                        !currentFlags.includes(newEventText.trim())
+                      ) {
+                        pushHistory({
+                          ...project,
+                          gameFlags: [
+                            ...currentFlags,
+                            newEventText.trim(),
+                          ],
+                        });
+                        setNewEventText("");
+                      }
+                    }}
+                    className="text-emerald-400 p-2 bg-neutral-900 border border-neutral-800 hover:bg-emerald-500/20 rounded"
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(Array.isArray(project.gameFlags) ? project.gameFlags : []).map((flag) => (
+                    <div
+                      key={flag}
+                      className="flex items-center gap-1 bg-neutral-800 border border-neutral-700 px-2 py-1 rounded text-xs text-neutral-300"
+                    >
+                      <span>{flag}</span>
+                      <button
+                        onClick={() => {
+                          const currentFlags = Array.isArray(project.gameFlags) ? project.gameFlags : [];
+                          pushHistory({
+                            ...project,
+                            gameFlags: currentFlags.filter(
+                              (f) => f !== flag,
+                            ),
+                          });
+                        }}
+                        className="text-red-400 hover:text-red-300 ml-1"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                  {(Array.isArray(project.gameFlags) ? project.gameFlags : []).length === 0 && (
+                    <div className="text-xs text-neutral-500 italic">
+                      No story events created yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+              {activeQuestId &&
+              (project.quests || []).find((q) => q.id === activeQuestId) ? (
+                (() => {
+                  const quest = (project.quests || []).find(
+                    (q) => q.id === activeQuestId,
+                  )!;
+                  return (
+                    <div className="max-w-2xl bg-neutral-900 border border-neutral-800 rounded-lg p-6 space-y-6">
+                      <div className="flex justify-between items-start">
+                        <div className="space-y-4 w-full">
+                          <div>
+                            <LabelWithHelp
+                              label="Quest Name"
+                              className="font-bold mb-1 block uppercase tracking-wider"
+                              helpText="The primary title of the quest as seen by the player."
+                            />
+                            <input
+                              type="text"
+                              value={quest.name}
+                              onChange={(e) => {
+                                const updated = (project.quests || []).map(
+                                  (q) =>
+                                    q.id === quest.id
+                                      ? { ...q, name: e.target.value }
+                                      : q,
+                                );
+                                pushHistory({ ...project, quests: updated });
+                              }}
+                              className="w-full bg-neutral-950 border border-neutral-800 rounded px-3 py-2 font-bold text-lg text-white"
+                            />
+                          </div>
+                          <div>
+                            <LabelWithHelp
+                              label="Description"
+                              className="font-bold mb-1 block uppercase tracking-wider"
+                              helpText="The story context or detailed instructions given to the player in their quest log."
+                            />
+                            <textarea
+                              value={quest.description}
+                              onChange={(e) => {
+                                const updated = (project.quests || []).map(
+                                  (q) =>
+                                    q.id === quest.id
+                                      ? { ...q, description: e.target.value }
+                                      : q,
+                                );
+                                pushHistory({ ...project, quests: updated });
+                              }}
+                              className="w-full h-24 bg-neutral-950 border border-neutral-800 rounded px-3 py-2 text-sm text-neutral-300 custom-scrollbar"
+                              placeholder="Quest details..."
+                            />
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            pushHistory({
+                              ...project,
+                              quests: (project.quests || []).filter(
+                                (q) => q.id !== quest.id,
+                              ),
+                            });
+                            setActiveQuestId(null);
+                          }}
+                          className="p-2 text-red-500 hover:bg-neutral-800 rounded ml-4"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between items-center mb-4">
+                          <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
+                            Objectives
+                          </h3>
+                          <button
+                            onClick={() => {
+                              const newObjective: QuestObjective = {
+                                id: uuidv4(),
+                                type: "custom_flag",
+                                targetId: "",
+                                description: "",
+                              };
+                              const updated = (project.quests || []).map((q) =>
+                                q.id === quest.id
+                                  ? {
+                                      ...q,
+                                      objectives: [
+                                        ...(q.objectives || []),
+                                        newObjective,
+                                      ],
+                                    }
+                                  : q,
+                              );
+                              pushHistory({ ...project, quests: updated });
+                            }}
+                            className="text-emerald-400 text-xs hover:text-emerald-300 font-bold flex items-center gap-1"
+                          >
+                            + Add Objective
+                          </button>
+                        </div>
+                        <div className="space-y-3">
+                          {(quest.objectives || []).map((obj) => (
+                            <div
+                              key={obj.id}
+                              className="p-4 border border-neutral-800 bg-neutral-950 rounded-lg relative group"
+                            >
+                              <button
+                                onClick={() => {
+                                  const updated = (project.quests || []).map(
+                                    (q) =>
+                                      q.id === quest.id
+                                        ? {
+                                            ...q,
+                                            objectives: q.objectives.filter(
+                                              (o) => o.id !== obj.id,
+                                            ),
+                                          }
+                                        : q,
+                                  );
+                                  pushHistory({ ...project, quests: updated });
+                                }}
+                                className="absolute top-2 right-2 text-neutral-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <X size={14} />
+                              </button>
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <LabelWithHelp
+                                    label="Type"
+                                    className="uppercase block mb-1"
+                                    helpText="The condition the player must meet to complete this objective."
+                                  />
+                                  <select
+                                    value={obj.type}
+                                    onChange={(e) => {
+                                      const updated = (
+                                        project.quests || []
+                                      ).map((q) =>
+                                        q.id === quest.id
+                                          ? {
+                                              ...q,
+                                              objectives: q.objectives.map(
+                                                (o) =>
+                                                  o.id === obj.id
+                                                    ? {
+                                                        ...o,
+                                                        type: e.target
+                                                          .value as any,
+                                                      }
+                                                    : o,
+                                              ),
+                                            }
+                                          : q,
+                                      );
+                                      pushHistory({
+                                        ...project,
+                                        quests: updated,
+                                      });
+                                    }}
+                                    className="w-full bg-neutral-900 border border-neutral-800 text-sm rounded px-2 py-1"
+                                  >
+                                    <option value="custom_flag">
+                                      Story Event Triggered
+                                    </option>
+                                    <option value="collect_item">
+                                      Collect Item
+                                    </option>
+                                    <option value="reach_scene">
+                                      Reach Scene
+                                    </option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <LabelWithHelp
+                                    label="Target"
+                                    className="uppercase block mb-1"
+                                    helpText="Which specific item, scene, or event triggers completion."
+                                  />
+                                  {obj.type === "custom_flag" && (
+                                    <select
+                                      value={obj.targetId}
+                                      onChange={(e) => {
+                                        const updated = (
+                                          project.quests || []
+                                        ).map((q) =>
+                                          q.id === quest.id
+                                            ? {
+                                                ...q,
+                                                objectives: q.objectives.map(
+                                                  (o) =>
+                                                    o.id === obj.id
+                                                      ? {
+                                                          ...o,
+                                                          targetId:
+                                                            e.target.value,
+                                                        }
+                                                      : o,
+                                                ),
+                                              }
+                                            : q,
+                                        );
+                                        pushHistory({
+                                          ...project,
+                                          quests: updated,
+                                        });
+                                      }}
+                                      className="w-full bg-neutral-900 border border-neutral-800 text-sm rounded px-2 py-1"
+                                    >
+                                      <option value="">Select Event...</option>
+                                      {(project.gameFlags || []).map((f) => (
+                                        <option key={f} value={f}>
+                                          {f}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
+                                  {obj.type === "collect_item" && (
+                                    <select
+                                      value={obj.targetId}
+                                      onChange={(e) => {
+                                        const updated = (
+                                          project.quests || []
+                                        ).map((q) =>
+                                          q.id === quest.id
+                                            ? {
+                                                ...q,
+                                                objectives: q.objectives.map(
+                                                  (o) =>
+                                                    o.id === obj.id
+                                                      ? {
+                                                          ...o,
+                                                          targetId:
+                                                            e.target.value,
+                                                        }
+                                                      : o,
+                                                ),
+                                              }
+                                            : q,
+                                        );
+                                        pushHistory({
+                                          ...project,
+                                          quests: updated,
+                                        });
+                                      }}
+                                      className="w-full bg-neutral-900 border border-neutral-800 text-sm rounded px-2 py-1"
+                                    >
+                                      <option value="">Select Item...</option>
+                                      {(project.inventoryItems || []).map(
+                                        (i) => (
+                                          <option key={i.id} value={i.id}>
+                                            {i.name}
+                                          </option>
+                                        ),
+                                      )}
+                                    </select>
+                                  )}
+                                  {obj.type === "reach_scene" && (
+                                    <select
+                                      value={obj.targetId}
+                                      onChange={(e) => {
+                                        const updated = (
+                                          project.quests || []
+                                        ).map((q) =>
+                                          q.id === quest.id
+                                            ? {
+                                                ...q,
+                                                objectives: q.objectives.map(
+                                                  (o) =>
+                                                    o.id === obj.id
+                                                      ? {
+                                                          ...o,
+                                                          targetId:
+                                                            e.target.value,
+                                                        }
+                                                      : o,
+                                                ),
+                                              }
+                                            : q,
+                                        );
+                                        pushHistory({
+                                          ...project,
+                                          quests: updated,
+                                        });
+                                      }}
+                                      className="w-full bg-neutral-900 border border-neutral-800 text-sm rounded px-2 py-1"
+                                    >
+                                      <option value="">Select Scene...</option>
+                                      {(project.scenes || []).map((s) => (
+                                        <option key={s.id} value={s.id}>
+                                          {s.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="mt-2">
+                                <LabelWithHelp
+                                  label="Player-facing Description"
+                                  className="uppercase block mb-1"
+                                  helpText="What to display to the player as their objective (e.g. 'Find the hidden key')."
+                                />
+                                <input
+                                  type="text"
+                                  value={obj.description}
+                                  onChange={(e) => {
+                                    const updated = (project.quests || []).map(
+                                      (q) =>
+                                        q.id === quest.id
+                                          ? {
+                                              ...q,
+                                              objectives: q.objectives.map(
+                                                (o) =>
+                                                  o.id === obj.id
+                                                    ? {
+                                                        ...o,
+                                                        description:
+                                                          e.target.value,
+                                                      }
+                                                    : o,
+                                              ),
+                                            }
+                                          : q,
+                                    );
+                                    pushHistory({
+                                      ...project,
+                                      quests: updated,
+                                    });
+                                  }}
+                                  className="w-full bg-neutral-900 border border-neutral-800 text-sm rounded px-2 py-1"
+                                  placeholder="e.g. Find the rusty key"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : (
+                <div className="h-full flex items-center justify-center text-neutral-500">
+                  Select or create a quest to edit
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {editorMode === "items" && (
+          <div className="flex-1 flex flex-col p-6 bg-neutral-950 overflow-hidden">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-white">Item Manager</h2>
+              <button
+                onClick={() => {
+                  const newItem: InventoryItem = {
+                    id: uuidv4(),
+                    name: "New Item",
+                    description: "",
+                    iconAssetId: null,
+                  };
+                  pushHistory({
+                    ...project,
+                    inventoryItems: [...project.inventoryItems, newItem],
+                  });
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
+              >
+                <Plus size={16} /> Create Item
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 overflow-y-auto custom-scrollbar pb-20">
+              {project.inventoryItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 flex flex-col gap-3"
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="w-16 h-16 bg-neutral-800 rounded border border-neutral-700 flex items-center justify-center overflow-hidden shrink-0">
+                      {item.iconAssetId &&
+                      project.assets.find((a) => a.id === item.iconAssetId) ? (
+                        <img
+                          src={
+                            project.assets.find(
+                              (a) => a.id === item.iconAssetId,
+                            )!.src
+                          }
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <Backpack size={24} className="text-neutral-600" />
+                      )}
+                    </div>
+                    <button
+                      onClick={() => {
+                        pushHistory({
+                          ...project,
+                          inventoryItems: project.inventoryItems.filter(
+                            (i) => i.id !== item.id,
+                          ),
+                        });
+                      }}
+                      className="text-red-400 hover:text-red-300"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+
+                  <div>
+                    <LabelWithHelp
+                      label="Name"
+                      helpText="The primary name of this item. E.g. 'Rusty Key'."
+                      className="text-[10px] uppercase font-bold"
+                    />
+                    <input
+                      type="text"
+                      value={item.name}
+                      onChange={(e) => {
+                        pushHistory({
+                          ...project,
+                          inventoryItems: project.inventoryItems.map((i) =>
+                            i.id === item.id
+                              ? { ...i, name: e.target.value }
+                              : i,
+                          ),
+                        });
+                      }}
+                      className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1 mb-2"
+                    />
+
+                    <LabelWithHelp
+                      label="RPG Category"
+                      helpText="What kind of item is this?"
+                      className="text-[10px] uppercase font-bold"
+                    />
+                    <select
+                      value={item.category || "normal"}
+                      onChange={(e) => {
+                        pushHistory({
+                          ...project,
+                          inventoryItems: project.inventoryItems.map((i) =>
+                            i.id === item.id
+                              ? { ...i, category: e.target.value as any }
+                              : i,
+                          ),
+                        });
+                      }}
+                      className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1"
+                    >
+                      <option value="normal">Normal Item</option>
+                      <option value="consumable">
+                        Consumable (Food/Potion)
+                      </option>
+                      <option value="ingredient">Ingredient (Crafting)</option>
+                      <option value="quest">Quest Item</option>
+                      <option value="crafting_station">
+                        Crafting Station / Tool
+                      </option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <LabelWithHelp
+                      label="Description"
+                      helpText="The text shown to the player when they inspect this item in their inventory."
+                      className="text-[10px] uppercase font-bold"
+                    />
+                    <textarea
+                      value={item.description}
+                      onChange={(e) => {
+                        pushHistory({
+                          ...project,
+                          inventoryItems: project.inventoryItems.map((i) =>
+                            i.id === item.id
+                              ? { ...i, description: e.target.value }
+                              : i,
+                          ),
+                        });
+                      }}
+                      className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1 min-h-[60px]"
+                    ></textarea>
+                  </div>
+
+                  <div>
+                    <LabelWithHelp
+                      label="Icon Asset"
+                      helpText="The image displayed for this item in menus. Click to choose."
+                      className="text-[10px] uppercase font-bold mb-1 block"
+                    />
+                    <button
+                      onClick={() =>
+                        setAssetPickerCb({
+                          onSelect: (id) => {
+                            pushHistory({
+                              ...project,
+                              inventoryItems: project.inventoryItems.map((i) =>
+                                i.id === item.id
+                                  ? { ...i, iconAssetId: id }
+                                  : i,
+                              ),
+                            });
+                            setAssetPickerCb(null);
+                          },
+                          filterType: "image",
+                        })
+                      }
+                      className="w-full bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 hover:border-neutral-500 rounded px-3 py-2 text-sm flex items-center justify-between transition-colors"
+                    >
+                      <span className="text-neutral-300 truncate pr-2">
+                        {item.iconAssetId &&
+                        project.assets.find((a) => a.id === item.iconAssetId)
+                          ? project.assets.find(
+                              (a) => a.id === item.iconAssetId,
+                            )!.name
+                          : "No Icon Selected"}
+                      </span>
+                      <ImageIcon
+                        size={16}
+                        className="text-neutral-500 shrink-0"
+                      />
+                    </button>
+                  </div>
+
+                  <div className="pt-2 border-t border-neutral-800">
+                    <label className="flex items-center gap-2 text-sm text-neutral-300 font-medium">
+                      <input
+                        type="checkbox"
+                        className="rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-900"
+                        checked={item.isUsable || false}
+                        onChange={(e) =>
+                          pushHistory({
+                            ...project,
+                            inventoryItems: project.inventoryItems.map((i) =>
+                              i.id === item.id
+                                ? { ...i, isUsable: e.target.checked }
+                                : i,
+                            ),
+                          })
+                        }
+                      />
+                      Is Usable?
+                    </label>
+                    {item.isUsable && (
+                      <div className="mt-2 pl-4 border-l-2 border-neutral-800 flex flex-col gap-2">
+                        <label className="flex items-center gap-2 text-xs text-neutral-400">
+                          <input
+                            type="checkbox"
+                            className="rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-900"
+                            checked={item.consumeOnUse || false}
+                            onChange={(e) =>
+                              pushHistory({
+                                ...project,
+                                inventoryItems: project.inventoryItems.map(
+                                  (i) =>
+                                    i.id === item.id
+                                      ? { ...i, consumeOnUse: e.target.checked }
+                                      : i,
+                                ),
+                              })
+                            }
+                          />
+                          Consume On Use
+                        </label>
+                        <div>
+                          <LabelWithHelp
+                            label="Use Message"
+                            helpText="Message shown when used."
+                            className="text-[10px] uppercase font-bold"
+                          />
+                          <input
+                            type="text"
+                            value={item.useMessage || ""}
+                            onChange={(e) =>
+                              pushHistory({
+                                ...project,
+                                inventoryItems: project.inventoryItems.map(
+                                  (i) =>
+                                    i.id === item.id
+                                      ? { ...i, useMessage: e.target.value }
+                                      : i,
+                                ),
+                              })
+                            }
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1"
+                          />
+                        </div>
+                        <div>
+                          <LabelWithHelp
+                            label="Use Sound"
+                            helpText="Sound to play."
+                            className="text-[10px] uppercase font-bold text-neutral-500"
+                          />
+                          <select
+                            value={item.useSoundAssetId || ""}
+                            onChange={(e) =>
+                              pushHistory({
+                                ...project,
+                                inventoryItems: project.inventoryItems.map(
+                                  (i) =>
+                                    i.id === item.id
+                                      ? {
+                                          ...i,
+                                          useSoundAssetId: e.target.value,
+                                        }
+                                      : i,
+                                ),
+                              })
+                            }
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1"
+                          >
+                            <option value="">None</option>
+                            {project.assets
+                              .filter((a: any) => a.type === "audio")
+                              .map((a: any) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.name}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                        <div className="pt-2 border-t border-neutral-800">
+                          <div className="flex justify-between items-center mb-1">
+                            <LabelWithHelp
+                              label="Stat Effects"
+                              helpText="Does this restore health or hunger?"
+                              className="text-[10px] uppercase font-bold text-neutral-500"
+                            />
+                            <button
+                              onClick={() => {
+                                pushHistory({
+                                  ...project,
+                                  inventoryItems: project.inventoryItems.map(
+                                    (i) =>
+                                      i.id === item.id
+                                        ? {
+                                            ...i,
+                                            statRestores: [
+                                              ...(i.statRestores || []),
+                                              { stat: "hunger", amount: 10 },
+                                            ],
+                                          }
+                                        : i,
+                                  ),
+                                });
+                              }}
+                              className="text-[10px] text-emerald-400 font-bold"
+                            >
+                              + Add
+                            </button>
+                          </div>
+                          {(item.statRestores || []).map((restore, rIdx) => (
+                            <div
+                              key={rIdx}
+                              className="flex gap-2 items-center mb-1"
+                            >
+                              <input
+                                type="text"
+                                value={restore.stat}
+                                onChange={(e) => {
+                                  const nr = [...(item.statRestores || [])];
+                                  nr[rIdx].stat = e.target.value;
+                                  pushHistory({
+                                    ...project,
+                                    inventoryItems: project.inventoryItems.map(
+                                      (i) =>
+                                        i.id === item.id
+                                          ? { ...i, statRestores: nr }
+                                          : i,
+                                    ),
+                                  });
+                                }}
+                                className="flex-1 min-w-0 bg-neutral-800 border border-neutral-700 rounded px-1 py-1 text-[10px]"
+                                placeholder="e.g. hunger (use Needs tool words)"
+                              />
+                              <span className="text-[10px]">+</span>
+                              <input
+                                type="number"
+                                value={restore.amount}
+                                onChange={(e) => {
+                                  const nr = [...(item.statRestores || [])];
+                                  nr[rIdx].amount =
+                                    parseInt(e.target.value) || 0;
+                                  pushHistory({
+                                    ...project,
+                                    inventoryItems: project.inventoryItems.map(
+                                      (i) =>
+                                        i.id === item.id
+                                          ? { ...i, statRestores: nr }
+                                          : i,
+                                    ),
+                                  });
+                                }}
+                                className="w-12 bg-neutral-800 border border-neutral-700 rounded px-1 py-1 text-[10px]"
+                              />
+                              <button
+                                onClick={() => {
+                                  const nr = [...(item.statRestores || [])];
+                                  nr.splice(rIdx, 1);
+                                  pushHistory({
+                                    ...project,
+                                    inventoryItems: project.inventoryItems.map(
+                                      (i) =>
+                                        i.id === item.id
+                                          ? { ...i, statRestores: nr }
+                                          : i,
+                                    ),
+                                  });
+                                }}
+                                className="text-red-500"
+                              >
+                                <X size={10} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 border-t border-neutral-800">
+                    <div className="flex justify-between items-center mb-2">
+                      <LabelWithHelp
+                        label="Combinations"
+                        helpText="Items that can be combined with this one."
+                        className="text-[10px] uppercase font-bold"
+                      />
+                      <button
+                        onClick={() => {
+                          const newComb = {
+                            withItemId: "",
+                            resultItemId: null,
+                            destroyTarget: true,
+                            destroySelf: true,
+                          };
+                          pushHistory({
+                            ...project,
+                            inventoryItems: project.inventoryItems.map((i) =>
+                              i.id === item.id
+                                ? {
+                                    ...i,
+                                    combinations: [
+                                      ...(i.combinations || []),
+                                      newComb,
+                                    ],
+                                  }
+                                : i,
+                            ),
+                          });
+                        }}
+                        className="text-xs text-emerald-400 hover:text-emerald-300 font-bold"
+                      >
+                        + Add
+                      </button>
+                    </div>
+                    {(item.combinations || []).map(
+                      (comb: any, cIdx: number) => (
+                        <div
+                          key={cIdx}
+                          className="bg-neutral-950 p-2 rounded mb-2 border border-neutral-800 text-xs flex flex-col gap-2 relative group"
+                        >
+                          <button
+                            onClick={() => {
+                              const newCombs = [...(item.combinations || [])];
+                              newCombs.splice(cIdx, 1);
+                              pushHistory({
+                                ...project,
+                                inventoryItems: project.inventoryItems.map(
+                                  (i) =>
+                                    i.id === item.id
+                                      ? { ...i, combinations: newCombs }
+                                      : i,
+                                ),
+                              });
+                            }}
+                            className="absolute top-1 right-1 text-red-500 opacity-0 group-hover:opacity-100"
+                          >
+                            <X size={12} />
+                          </button>
+
+                          <div>
+                            <label className="text-[9px] text-neutral-500 uppercase">
+                              Combine With
+                            </label>
+                            <select
+                              value={comb.withItemId}
+                              onChange={(e) => {
+                                const newCombs = [...(item.combinations || [])];
+                                newCombs[cIdx].withItemId = e.target.value;
+                                pushHistory({
+                                  ...project,
+                                  inventoryItems: project.inventoryItems.map(
+                                    (i) =>
+                                      i.id === item.id
+                                        ? { ...i, combinations: newCombs }
+                                        : i,
+                                  ),
+                                });
+                              }}
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-1 py-1 mt-0.5"
+                            >
+                              <option value="">Select Item...</option>
+                              {project.inventoryItems
+                                .filter((i: any) => i.id !== item.id)
+                                .map((i: any) => (
+                                  <option key={i.id} value={i.id}>
+                                    {i.name}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[9px] text-neutral-500 uppercase">
+                              Result Item
+                            </label>
+                            <select
+                              value={comb.resultItemId || ""}
+                              onChange={(e) => {
+                                const newCombs = [...(item.combinations || [])];
+                                newCombs[cIdx].resultItemId =
+                                  e.target.value || null;
+                                pushHistory({
+                                  ...project,
+                                  inventoryItems: project.inventoryItems.map(
+                                    (i) =>
+                                      i.id === item.id
+                                        ? { ...i, combinations: newCombs }
+                                        : i,
+                                  ),
+                                });
+                              }}
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-1 py-1 mt-0.5"
+                            >
+                              <option value="">None (Just consumed)</option>
+                              {project.inventoryItems.map((i: any) => (
+                                <option key={i.id} value={i.id}>
+                                  {i.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[9px] text-neutral-500 uppercase">
+                              Success Message
+                            </label>
+                            <input
+                              type="text"
+                              value={comb.successMessage || ""}
+                              onChange={(e) => {
+                                const newCombs = [...(item.combinations || [])];
+                                newCombs[cIdx].successMessage = e.target.value;
+                                pushHistory({
+                                  ...project,
+                                  inventoryItems: project.inventoryItems.map(
+                                    (i) =>
+                                      i.id === item.id
+                                        ? { ...i, combinations: newCombs }
+                                        : i,
+                                  ),
+                                });
+                              }}
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-1 py-1 mt-0.5 text-[10px]"
+                              placeholder="Items combined successfully!"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1 mt-1">
+                            <label className="flex items-center gap-1 text-[10px]">
+                              <input
+                                type="checkbox"
+                                className="rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950 h-3 w-3"
+                                checked={comb.destroySelf}
+                                onChange={(e) => {
+                                  const newCombs = [
+                                    ...(item.combinations || []),
+                                  ];
+                                  newCombs[cIdx].destroySelf = e.target.checked;
+                                  pushHistory({
+                                    ...project,
+                                    inventoryItems: project.inventoryItems.map(
+                                      (i) =>
+                                        i.id === item.id
+                                          ? { ...i, combinations: newCombs }
+                                          : i,
+                                    ),
+                                  });
+                                }}
+                              />{" "}
+                              Destroy This Item
+                            </label>
+                            <label className="flex items-center gap-1 text-[10px]">
+                              <input
+                                type="checkbox"
+                                className="rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950 h-3 w-3"
+                                checked={comb.destroyTarget}
+                                onChange={(e) => {
+                                  const newCombs = [
+                                    ...(item.combinations || []),
+                                  ];
+                                  newCombs[cIdx].destroyTarget =
+                                    e.target.checked;
+                                  pushHistory({
+                                    ...project,
+                                    inventoryItems: project.inventoryItems.map(
+                                      (i) =>
+                                        i.id === item.id
+                                          ? { ...i, combinations: newCombs }
+                                          : i,
+                                    ),
+                                  });
+                                }}
+                              />{" "}
+                              Destroy Target Item
+                            </label>
+                          </div>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </div>
+              ))}
+              {project.inventoryItems.length === 0 && (
+                <div className="col-span-full text-center text-neutral-500 py-10">
+                  No items created yet.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Template Modal */}
+      {isTemplateModalOpen && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-neutral-700 rounded-lg p-6 max-w-2xl w-full shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold">Start a New Project</h2>
+              <button
+                onClick={() => {
+                  setIsTemplateModalOpen(false);
+                  setConfirmTemplateId(null);
+                }}
+                className="text-neutral-500 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-neutral-400 mb-6">
+              Choose a template to quickly set up your workspace.{" "}
+              <span className="text-red-400 font-bold">
+                Warning: This will overwrite your current project!
+              </span>
+            </p>
+
+            <div className="grid grid-cols-2 gap-4 overflow-y-auto custom-scrollbar">
+              {Object.entries(TEMPLATES).map(([key, templateFn]) => {
+                const temp = templateFn();
+                return (
+                  <div
+                    key={key}
+                    onClick={() => {
+                      if (confirmTemplateId === key) {
+                        setProject({ ...temp, assets: project.assets });
+                        setHistory({ past: [], future: [] });
+                        setIsTemplateModalOpen(false);
+                        setConfirmTemplateId(null);
+                      } else {
+                        setConfirmTemplateId(key);
+                      }
+                    }}
+                    className={`border p-4 rounded-lg cursor-pointer transition-colors group relative overflow-hidden ${
+                      confirmTemplateId === key
+                        ? "border-red-500 bg-red-500/10"
+                        : "border-neutral-700 hover:border-emerald-500 bg-neutral-800"
+                    }`}
+                  >
+                    {confirmTemplateId === key && (
+                      <div className="absolute inset-0 bg-red-950/80 backdrop-blur-sm z-10 flex flex-col justify-center items-center">
+                        <span className="text-white font-bold mb-2">
+                          Overwrite Project?
+                        </span>
+                        <span className="bg-red-500 hover:bg-red-400 text-white text-xs px-3 py-1 rounded shadow-lg transition-colors">
+                          Click again to confirm
+                        </span>
+                      </div>
+                    )}
+                    <h3 className="font-bold text-lg text-emerald-400 mb-2">
+                      {temp.name}
+                    </h3>
+                    <ul className="text-xs text-neutral-400 space-y-1 mb-4">
+                      <li>• {temp.scenes.length} Scene(s)</li>
+                      <li>• {temp.dialogueTrees.length} Dialogue Tree(s)</li>
+                      <li>• {temp.inventoryItems.length} Item(s)</li>
+                    </ul>
+                    <div className="text-sm font-medium text-neutral-300 group-hover:text-emerald-400 transition-colors">
+                      Start Building →
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Object Context Menu */}
+      {contextMenu &&
+        (() => {
+          const obj = contextMenu.objectId
+            ? project.scenes
+                .flatMap((s) => s.objects)
+                .concat(project.uiMenus?.flatMap((m) => m.objects) || [])
+                .find((o) => o.id === contextMenu.objectId)
+            : null;
+
+          if (contextMenu.objectId && !obj) return null;
+
+          return (
+            <div
+              className="fixed z-[9999] bg-neutral-900 border border-neutral-700 shadow-2xl rounded-lg py-1 min-w-[160px] text-sm overflow-hidden"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              {!obj ? (
+                <>
+                  <div className="px-3 py-1.5 text-xs font-bold text-neutral-500 uppercase tracking-wider border-b border-neutral-800 mb-1">
+                    Scene Options
+                  </div>
+                  <button
+                    className="w-full text-left px-3 py-1.5 hover:bg-neutral-800 flex items-center gap-2 text-emerald-400 font-bold"
+                    onClick={() => {
+                      // Find player object if it exists and move it here
+                      const playerObj = currentScene.objects.find(
+                        (o) =>
+                          o.name?.toLowerCase().includes("player") ||
+                          o.interaction === "player",
+                      );
+                      if (playerObj) {
+                        const rect = stageRef.current?.getBoundingClientRect();
+                        if (rect) {
+                          const x = contextMenu.x - rect.left;
+                          const y = contextMenu.y - rect.top;
+                          updateObject(playerObj.id, { x, y });
+                        }
+                      }
+                      setContextMenu(null);
+                      setIsPlaying(true);
+                    }}
+                  >
+                    <Play size={14} /> Play from Here
+                  </button>
+                  <button
+                    className={`w-full text-left px-3 py-1.5 flex items-center gap-2 ${clipboard.length > 0 ? "hover:bg-neutral-800" : "opacity-50 cursor-not-allowed"}`}
+                    onClick={() => {
+                      if (clipboard.length === 0) return;
+                      const rect = stageRef.current?.getBoundingClientRect();
+                      const baseX = rect ? contextMenu.x - rect.left : 0;
+                      const baseY = rect ? contextMenu.y - rect.top : 0;
+                      // Move first pasted object to context menu x,y and others relative to it
+                      const firstX = clipboard[0].x;
+                      const firstY = clipboard[0].y;
+
+                      const newObjs = clipboard.map((o) => ({
+                        ...o,
+                        id: uuidv4(),
+                        x: baseX + (o.x - firstX),
+                        y: baseY + (o.y - firstY),
+                        locked: false,
+                      }));
+
+                      setProject((p) => ({
+                        ...p,
+                        scenes: p.scenes.map((s) => {
+                          if (
+                            editorMode === "stage" &&
+                            s.id === currentScene.id
+                          ) {
+                            return {
+                              ...s,
+                              objects: [...s.objects, ...newObjs],
+                            };
+                          }
+                          return s;
+                        }),
+                        uiMenus: p.uiMenus?.map((m) => {
+                          if (
+                            editorMode === "ui_stage" &&
+                            m.id === currentScene.id
+                          ) {
+                            return {
+                              ...m,
+                              objects: [...m.objects, ...newObjs],
+                            };
+                          }
+                          return m;
+                        }),
+                      }));
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Package size={14} className="text-neutral-400" />
+                    Paste {clipboard.length > 0 ? `(${clipboard.length})` : ""}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="px-3 py-1.5 text-xs font-bold text-neutral-500 uppercase tracking-wider border-b border-neutral-800 mb-1">
+                    {obj.name}
+                  </div>
+
+                  <button
+                    className="w-full text-left px-3 py-1.5 hover:bg-neutral-800 flex items-center gap-2"
+                    onClick={() => {
+                      if (
+                        selectedMultiIds.length > 1 &&
+                        selectedMultiIds.includes(obj.id)
+                      ) {
+                        const objs = currentScene.objects.filter((o) =>
+                          selectedMultiIds.includes(o.id),
+                        );
+                        setClipboard(objs);
+                      } else {
+                        setClipboard([obj]);
+                      }
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Copy size={14} className="text-neutral-400" /> Copy
+                  </button>
+                  <button
+                    className="w-full text-left px-3 py-1.5 hover:bg-neutral-800 flex items-center gap-2"
+                    onClick={() => {
+                      if (
+                        selectedMultiIds.length > 1 &&
+                        selectedMultiIds.includes(obj.id)
+                      ) {
+                        const objs = currentScene.objects.filter((o) =>
+                          selectedMultiIds.includes(o.id),
+                        );
+                        setClipboard(objs);
+                        const idsToDel = objs.map((o) => o.id);
+                        setProject((p) => ({
+                          ...p,
+                          scenes: p.scenes.map((s) =>
+                            s.id === currentScene.id
+                              ? {
+                                  ...s,
+                                  objects: s.objects.filter(
+                                    (o) => !idsToDel.includes(o.id),
+                                  ),
+                                }
+                              : s,
+                          ),
+                          uiMenus: p.uiMenus?.map((m) =>
+                            m.id === currentScene.id
+                              ? {
+                                  ...m,
+                                  objects: m.objects.filter(
+                                    (o) => !idsToDel.includes(o.id),
+                                  ),
+                                }
+                              : m,
+                          ),
+                        }));
+                      } else {
+                        setClipboard([obj]);
+                        setProject((p) => ({
+                          ...p,
+                          scenes: p.scenes.map((s) =>
+                            s.id === currentScene.id
+                              ? {
+                                  ...s,
+                                  objects: s.objects.filter(
+                                    (o) => o.id !== obj.id,
+                                  ),
+                                }
+                              : s,
+                          ),
+                          uiMenus: p.uiMenus?.map((m) =>
+                            m.id === currentScene.id
+                              ? {
+                                  ...m,
+                                  objects: m.objects.filter(
+                                    (o) => o.id !== obj.id,
+                                  ),
+                                }
+                              : m,
+                          ),
+                        }));
+                      }
+                      setContextMenu(null);
+                    }}
+                  >
+                    <PackageX size={14} className="text-neutral-400" /> Cut
+                  </button>
+                  <button
+                    className="w-full text-left px-3 py-1.5 hover:bg-neutral-800 flex items-center gap-2"
+                    onClick={() => {
+                      updateObject(obj.id, { locked: !obj.locked });
+                      setContextMenu(null);
+                    }}
+                  >
+                    {obj.locked ? (
+                      <Unlock size={14} className="text-neutral-400" />
+                    ) : (
+                      <Lock size={14} className="text-neutral-400" />
+                    )}
+                    {obj.locked ? "Unlock" : "Lock"}
+                  </button>
+
+                  <button
+                    className="w-full text-left px-3 py-1.5 hover:bg-neutral-800 flex items-center gap-2"
+                    onClick={() => {
+                      updateObject(obj.id, {
+                        opacity: obj.opacity === 0 ? 1 : 0,
+                      });
+                      setContextMenu(null);
+                    }}
+                  >
+                    {obj.opacity === 0 ? (
+                      <Eye size={14} className="text-neutral-400" />
+                    ) : (
+                      <EyeOff size={14} className="text-neutral-400" />
+                    )}
+                    {obj.opacity === 0 ? "Show" : "Hide"}
+                  </button>
+                  <button
+                    className="w-full text-left px-3 py-1.5 hover:bg-neutral-800 flex items-center gap-2"
+                    onClick={() => {
+                      updateObject(obj.id, { zIndex: obj.zIndex - 1 });
+                      setContextMenu(null);
+                    }}
+                  >
+                    <ArrowDown size={14} className="text-neutral-400" /> Send
+                    Backward
+                  </button>
+                  <div className="h-px bg-neutral-800 my-1 font-bold text-neutral-400 mx-2" />
+                  <button
+                    className="w-full text-left px-3 py-1.5 hover:bg-neutral-800 flex items-center gap-2 text-indigo-400"
+                    onClick={() => {
+                      // Quick Duplicate
+                      const newObj = {
+                        ...obj,
+                        id: uuidv4(),
+                        x: obj.x + 20,
+                        y: obj.y + 20,
+                      };
+                      updateScene({
+                        objects: [...currentScene.objects, newObj],
+                      });
+                      setSelectedObjectId(newObj.id);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Copy size={14} /> Duplicate
+                  </button>
+
+                  <button
+                    className="w-full text-left px-3 py-1.5 hover:bg-red-500/20 flex items-center gap-2 text-red-500 transition-colors"
+                    onClick={() => {
+                      updateScene({
+                        objects: currentScene.objects.filter(
+                          (o) => o.id !== obj.id,
+                        ),
+                      });
+                      setSelectedObjectId(null);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Trash2 size={14} /> Delete
+                  </button>
+                </>
+              )}
+            </div>
+          );
+        })()}
+
+      {/* AI Sprite Generator Modal */}
+      {isAiModalOpen && (
+        <AISpriteModal
+          onClose={() => setIsAiModalOpen(false)}
+          onSave={(base64Image, generatedName) => {
+            const newAsset: Asset = {
+              id: uuidv4(),
+              type: "image",
+              category: "ai_generated",
+              src: base64Image,
+              name: generatedName,
+            };
+            setProject((p) => ({ ...p, assets: [newAsset, ...p.assets] }));
+            setIsAiModalOpen(false);
+          }}
+        />
+      )}
+
+      {/* Image Editor Modal */}
+      {editingAssetId && (
+        <ImageEditorModal
+          asset={project.assets.find((a) => a.id === editingAssetId)!}
+          onSave={(newSrc, isNew) => {
+            const originalAsset = project.assets.find(
+              (a) => a.id === editingAssetId,
+            );
+
+            if (isNew && originalAsset) {
+              const newAsset: Asset = {
+                ...originalAsset,
+                id: uuidv4(),
+                src: newSrc,
+                name: `${originalAsset.name}_crop`,
+              };
+              setProject((p) => ({
+                ...p,
+                assets: [newAsset, ...p.assets],
+              }));
+            } else {
+              setProject((p) => ({
+                ...p,
+                assets: p.assets.map((a) =>
+                  a.id === editingAssetId ? { ...a, src: newSrc } : a,
+                ),
+              }));
+            }
+            setEditingAssetId(null);
+          }}
+          onClose={() => setEditingAssetId(null)}
+        />
+      )}
+
+      {assetPickerCb && (
+        <AssetPickerModal
+          assets={
+            assetPickerCb.onlyOnCanvas
+              ? project.assets.filter((a) => usedAssetSrcs.has(a.src))
+              : project.assets
+          }
+          canvasAssetIds={Array.from(
+            new Set(
+              project.assets
+                .filter((a) => usedAssetSrcs.has(a.src))
+                .map((a) => a.id),
+            ),
+          )}
+          recentAssetIds={recentAssetIds}
+          onSelect={(id) => {
+            setRecentAssetIds((prev) =>
+              [id, ...prev.filter((i) => i !== id)].slice(0, 20),
+            );
+            assetPickerCb.onSelect(id);
+          }}
+          onClose={() => setAssetPickerCb(null)}
+          filterType={assetPickerCb.filterType}
+        />
+      )}
+    </div>
+  );
+};
+
+export default App;

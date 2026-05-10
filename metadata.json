@@ -1,0 +1,6 @@
+{
+  "name": "Remix: Remix 1 Neocities Game Builder",
+  "description": "A visual drag-and-drop game builder for creating point-and-click adventure games and exporting to pure HTML/JS for Neocities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
