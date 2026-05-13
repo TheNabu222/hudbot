@@ -1,0 +1,35 @@
+4104-                                textShadow: obj.textShadow || "none",
+4105-                                WebkitTextStroke: obj.textOutline
+4106-                                  ? `1px ${obj.textOutlineColor || "#000000"}`
+4107-                                  : "none",
+4108-                                transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
+4109:                                pointerEvents: "none",
+4110-                              };
+4111-
+4112-                              const boxStyle: React.CSSProperties = {
+4113-                                width: "100%",
+4114-                                height: "100%",
+--
+4361-                                  cursor: obj.cursor,
+4362-                                  backgroundColor: obj.isHitbox
+4363-                                    ? "transparent"
+4364-                                    : "transparent",
+4365-                                  mixBlendMode: obj.blendMode || "normal",
+4366:                                  pointerEvents: "auto",
+4367-                                }}
+4368-                              >
+4369-                                {obj.isUiElement &&
+4370-                                  (() => {
+4371-                                    const borderStyle =
+--
+4734-                                      textShadow: obj.textShadow || "none",
+4735-                                      WebkitTextStroke: obj.textOutline
+4736-                                        ? `1px ${obj.textOutlineColor || "#000000"}`
+4737-                                        : "none",
+4738-                                      transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
+4739:                                      pointerEvents: "none",
+4740-                                    };
+4741-
+4742-                                    const boxStyle: React.CSSProperties = {
+4743-                                      width: "100%",
+4744-                                      height: "100%",

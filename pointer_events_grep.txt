@@ -1,0 +1,477 @@
+141-    <label className="text-sm font-medium text-neutral-400">{label}</label>
+142-    <HelpCircle
+143-      size={14}
+144-      className="text-neutral-500 hover:text-neutral-300 cursor-help transition-colors"
+145-    />
+146:    <div className="absolute left-0 top-full mt-1 hidden group-hover:block w-56 p-2 bg-neutral-950 text-neutral-300 text-sm rounded border border-neutral-700 shadow-xl z-[100] pointer-events-none whitespace-normal font-normal leading-relaxed">
+147-      {helpText}
+148-    </div>
+149-  </div>
+150-);
+151-
+--
+2902-                              ) : asset.type === "audio" ? (
+2903-                                <Music size={32} className="text-emerald-500" />
+2904-                              ) : asset.type === "video" ? (
+2905-                                <video
+2906-                                  src={asset.src}
+2907:                                  className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md group-hover:scale-150 transition-transform"
+2908-                                />
+2909-                              ) : (
+2910-                                <img
+2911-                                  src={asset.src}
+2912-                                  alt={asset.name}
+2913:                                  className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md group-hover:scale-150 transition-transform max-w-[200%] max-h-[200%]"
+2914-                                  loading="lazy"
+2915-                                />
+2916-                              )}
+2917-                              <div className="absolute bottom-1 right-1 flex items-center gap-1 opacity-0 group-hover/info:opacity-100 transition-opacity">
+2918-                                {asset.type === "image" && (
+--
+3271-                    onPointerDown={(e) => e.stopPropagation()}
+3272-                  >
+3273-                    <div
+3274-                      className={`relative flex items-center rounded-md transition-all ${editorMode === "stage" ? "bg-indigo-600 text-white shadow-inner" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+3275-                    >
+3276:                      <div className="pl-3 pr-1 py-1.5 pointer-events-none absolute font-bold text-sm">
+3277-                        🎮 Edit Scene:
+3278-                      </div>
+3279-                      <select
+3280-                        className={`appearance-none bg-transparent outline-none pl-[98px] pr-8 py-1.5 text-sm font-bold w-48 cursor-pointer ${editorMode === "stage" ? "text-white" : "text-neutral-300"}`}
+3281-                        value={project.currentSceneId}
+--
+3296-                          >
+3297-                            {s.name}
+3298-                          </option>
+3299-                        ))}
+3300-                      </select>
+3301:                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">
+3302-                        <ChevronDown size={14} />
+3303-                      </div>
+3304-                    </div>
+3305-
+3306-                    <div
+3307-                      className={`relative flex items-center rounded-md transition-all ${editorMode === "ui_stage" ? "bg-emerald-600 text-white shadow-inner" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+3308-                    >
+3309:                      <div className="pl-3 pr-1 py-1.5 pointer-events-none absolute font-bold text-sm">
+3310-                        ✨ Edit UI:
+3311-                      </div>
+3312-                      <select
+3313-                        className={`appearance-none bg-transparent outline-none pl-[80px] pr-8 py-1.5 text-sm font-bold w-44 cursor-pointer ${editorMode === "ui_stage" ? "text-white" : "text-neutral-300"}`}
+3314-                        value={project.currentUiMenuId || ""}
+--
+3336-                          >
+3337-                            {s.name}
+3338-                          </option>
+3339-                        ))}
+3340-                      </select>
+3341:                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">
+3342-                        <ChevronDown size={14} />
+3343-                      </div>
+3344-                    </div>
+3345-                  </div>
+3346-                )}
+--
+3375-                   const left = -(totalW * (overlay.screenRect.x || 0));
+3376-                   const top = -(totalH * (overlay.screenRect.y || 0));
+3377-
+3378-                   return (
+3379-                     <div 
+3380:                       className="absolute pointer-events-none"
+3381-                       style={{
+3382-                          left, top,
+3383-                          width: totalW, height: totalH,
+3384-                          backgroundImage: `url(${asset.src})`,
+3385-                          backgroundSize: '100% 100%',
+--
+3400-                        (s) => s.id === project.currentSceneId,
+3401-                      ) || project.scenes[0];
+3402-                    if (!bgScene) return null;
+3403-                    return (
+3404-                      <div
+3405:                        className="absolute pointer-events-none opacity-30 select-none grayscale z-0 ring-1 ring-neutral-700/50"
+3406-                        style={{
+3407-                          left: "0px",
+3408-                          top: "0px",
+3409-                          width:
+3410-                            bgScene.width ||
+--
+3436-                                !obj.isHitbox &&
+3437-                                !obj.isText &&
+3438-                                (obj.isVideo ? (
+3439-                                  <video
+3440-                                    src={obj.src}
+3441:                                    className="w-full h-full object-fill opacity-50 pointer-events-none"
+3442-                                  />
+3443-                                ) : (
+3444-                                  <img
+3445-                                    src={obj.src}
+3446:                                    className="w-full h-full object-fill opacity-50 pointer-events-none"
+3447-                                  />
+3448-                                ))}
+3449-                            </div>
+3450-                          ))}
+3451-                      </div>
+--
+3516-                  }}
+3517-                >
+3518-                  {/* Draw selection box */}
+3519-                  {selectionBox && !isPlaying && (
+3520-                    <div
+3521:                      className="absolute border border-emerald-500 bg-emerald-500/20 pointer-events-none z-[9999]"
+3522-                      style={{
+3523-                        left:
+3524-                          selectionBox.w >= 0
+3525-                            ? selectionBox.x
+3526-                            : selectionBox.x + selectionBox.w,
+--
+3745-                          }}
+3746-                        >
+3747-                          {/* Smart Overlays (Editor only) */}
+3748-                          {!isPlaying && (
+3749-                            <div
+3750:                              className="absolute top-0 right-0 -translate-y-[calc(100%+4px)] pointer-events-none flex flex-col gap-1 z-[1000] scale-100 origin-bottom-right"
+3751-                              style={{
+3752-                                // Inverse rotation so badges stay upright
+3753-                                transform: `rotate(${-renderRot}deg)`,
+3754-                              }}
+3755-                            >
+--
+3811-                            (obj.isHitbox &&
+3812-                              !isPlaying &&
+3813-                              project.globalSettings.showGhostOutlines)) &&
+3814-                            !obj.isScript &&
+3815-                            !obj.isText && (
+3816:                              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+3817-                                {obj.isHitbox && (
+3818-                                  <span className="text-red-900/50 font-bold text-sm text-center leading-tight">
+3819-                                    CLICK TARGET
+3820-                                  </span>
+3821-                                )}
+3822-                              </div>
+3823-                            )}
+3824-                          {obj.isScript && !isPlaying && (
+3825:                            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center bg-blue-500/20 border border-dashed border-blue-500 rounded">
+3826-                              <FileCode size={24} className="text-blue-400" />
+3827-                              <span className="text-blue-400 font-bold text-sm mt-1 truncate w-full text-center px-1">
+3828-                                {obj.name}
+3829-                              </span>
+3830-                            </div>
+--
+3851-                                                : "2px solid";
+3852-
+3853-                              if (obj.uiElementType === "panel") {
+3854-                                return (
+3855-                                  <div
+3856:                                    className="w-full h-full pointer-events-none"
+3857-                                    style={{
+3858-                                      backgroundColor:
+3859-                                        obj.uiColorSecondary || "#171717",
+3860-                                      border: `${borderStyle} ${obj.uiColorPrimary || "#10b981"}`,
+3861-                                      borderRadius:
+--
+3866-                                );
+3867-                              }
+3868-                              if (obj.uiElementType === "progress") {
+3869-                                return (
+3870-                                  <div
+3871:                                    className="w-full h-full pointer-events-none overflow-hidden"
+3872-                                    style={{
+3873-                                      backgroundColor:
+3874-                                        obj.uiColorSecondary || "#171717",
+3875-                                      border: `${borderStyle} ${obj.uiColorPrimary || "#10b981"}`,
+3876-                                      borderRadius:
+--
+3890-                                );
+3891-                              }
+3892-                              if (obj.uiElementType === "button") {
+3893-                                return (
+3894-                                  <div
+3895:                                    className="w-full h-full pointer-events-none flex items-center justify-center shadow-lg"
+3896-                                    style={{
+3897-                                      backgroundColor:
+3898-                                        obj.uiColorPrimary || "#10b981",
+3899-                                      color: obj.uiColorSecondary || "#ffffff",
+3900-                                      border: `${borderStyle} color-mix(in srgb, ${obj.uiColorPrimary || "#10b981"} 80%, black)`,
+--
+3912-                                );
+3913-                              }
+3914-                              if (obj.uiElementType === "icon") {
+3915-                                return (
+3916-                                  <div
+3917:                                    className="w-full h-full pointer-events-none flex items-center justify-center"
+3918-                                    style={{
+3919-                                      color: obj.uiColorPrimary || "#10b981",
+3920-                                    }}
+3921-                                  >
+3922-                                    {obj.uiIconType === "bag" ? (
+--
+4000-                                );
+4001-                              }
+4002-                              if (obj.uiElementType === "toggle") {
+4003-                                return (
+4004-                                  <div
+4005:                                    className="w-full h-full pointer-events-none rounded-full flex items-center p-1 transition-colors relative"
+4006-                                    style={{
+4007-                                      backgroundColor: obj.uiChecked
+4008-                                        ? obj.uiColorPrimary || "#10b981"
+4009-                                        : obj.uiColorSecondary || "#525252",
+4010-                                    }}
+--
+4021-                                );
+4022-                              }
+4023-                              if (obj.uiElementType === "tooltip") {
+4024-                                return (
+4025-                                  <div
+4026:                                    className="w-full h-full pointer-events-none flex items-center justify-center p-2 shadow-lg relative"
+4027-                                    style={{
+4028-                                      backgroundColor:
+4029-                                        obj.uiColorSecondary || "#171717",
+4030-                                      color: obj.uiColorPrimary || "#ffffff",
+4031-                                      border: `1px solid ${obj.uiColorPrimary || "#10b981"}`,
+--
+4051-                                );
+4052-                              }
+4053-                              if (obj.uiElementType === "selection") {
+4054-                                return (
+4055-                                  <div
+4056:                                    className="w-full h-full pointer-events-none flex items-center justify-center animate-pulse"
+4057-                                    style={{
+4058-                                      color: obj.uiColorPrimary || "#10b981",
+4059-                                    }}
+4060-                                  >
+4061-                                    <Pointer
+--
+4071-                            !obj.isText &&
+4072-                            !obj.isUiElement &&
+4073-                            (obj.isVideo ? (
+4074-                              <video
+4075-                                src={obj.src}
+4076:                                className="w-full h-full object-fill pointer-events-none"
+4077-                                autoPlay
+4078-                                loop
+4079-                                muted={!isPlaying}
+4080-                                playsInline
+4081-                                style={{
+--
+4084-                              />
+4085-                            ) : (
+4086-                              <img
+4087-                                src={obj.src}
+4088-                                alt={obj.name}
+4089:                                className="w-full h-full object-fill pointer-events-none"
+4090-                                draggable={false}
+4091-                                style={{
+4092-                                  transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
+4093-                                }}
+4094-                              />
+--
+4173-                                  handleRotatePointerDown(e, obj)
+4174-                                }
+4175-                              >
+4176-                                <RotateCw size={12} strokeWidth={3} />
+4177-                              </div>
+4178:                              <div className="absolute -top-4 left-1/2 -translate-x-1/2 w-px h-4 bg-emerald-500 pointer-events-none" />
+4179-                              {/* nw */}
+4180-                              <div
+4181-                                className="absolute -top-2 -left-2 w-4 h-4 bg-emerald-500 rounded-full cursor-nw-resize shadow-md transition-transform hover:scale-110"
+4182-                                onPointerDown={(e) => handleResizePointerDown(e, obj, 'nw')}
+4183-                              />
+--
+4209-                  (project.uiMenus || [])
+4210-                    .filter((m) => m.isOpenByDefault)
+4211-                    .map((uiMenu, menuIndex) => (
+4212-                      <div
+4213-                        key={`ghost-fg-ui-${uiMenu.id}`}
+4214:                        className="absolute pointer-events-none select-none z-[500]"
+4215-                        style={{
+4216-                          left: "0px",
+4217-                          top: "0px",
+4218-                          width:
+4219-                            uiMenu.width ||
+--
+4255-                    if (!uiMenu) return null;
+4256-
+4257-                    return (
+4258-                      <div
+4259-                        key={`ui-${uiId}-${menuIndex}`}
+4260:                        className={`absolute ${uiMenu.blocksClicks ? "pointer-events-auto" : "pointer-events-none"}`}
+4261-                        style={{
+4262-                          zIndex: 1000 + menuIndex,
+4263-                          backgroundColor: uiMenu.backgroundColor,
+4264-                          width:
+4265-                            uiMenu.width ||
+--
+4419-                                    }
+4420-
+4421-                                    if (obj.uiElementType === "panel") {
+4422-                                      return (
+4423-                                        <div
+4424:                                          className="w-full h-full pointer-events-none"
+4425-                                          style={{
+4426-                                            backgroundColor:
+4427-                                              obj.uiColorSecondary || "#171717",
+4428-                                            border: `${borderStyle} ${obj.uiColorPrimary || "#10b981"}`,
+4429-                                            borderRadius:
+--
+4436-                                      );
+4437-                                    }
+4438-                                    if (obj.uiElementType === "progress") {
+4439-                                      return (
+4440-                                        <div
+4441:                                          className="w-full h-full pointer-events-none overflow-hidden"
+4442-                                          style={{
+4443-                                            backgroundColor:
+4444-                                              obj.uiColorSecondary || "#171717",
+4445-                                            border: `${borderStyle} ${obj.uiColorPrimary || "#10b981"}`,
+4446-                                            borderRadius:
+--
+4462-                                      );
+4463-                                    }
+4464-                                    if (obj.uiElementType === "button") {
+4465-                                      return (
+4466-                                        <div
+4467:                                          className="w-full h-full pointer-events-none flex items-center justify-center shadow-lg"
+4468-                                          style={{
+4469-                                            backgroundColor:
+4470-                                              obj.uiColorPrimary || "#10b981",
+4471-                                            color:
+4472-                                              obj.uiColorSecondary || "#ffffff",
+--
+4488-                                      );
+4489-                                    }
+4490-                                    if (obj.uiElementType === "icon") {
+4491-                                      return (
+4492-                                        <div
+4493:                                          className="w-full h-full pointer-events-none flex items-center justify-center"
+4494-                                          style={{
+4495-                                            color:
+4496-                                              obj.uiColorPrimary || "#10b981",
+4497-                                          }}
+4498-                                        >
+--
+4621-                                      );
+4622-                                    }
+4623-                                    if (obj.uiElementType === "toggle") {
+4624-                                      return (
+4625-                                        <div
+4626:                                          className="w-full h-full pointer-events-none rounded-full flex items-center p-1 transition-colors relative"
+4627-                                          style={{
+4628-                                            backgroundColor: boundChecked
+4629-                                              ? obj.uiColorPrimary || "#10b981"
+4630-                                              : obj.uiColorSecondary ||
+4631-                                                "#525252",
+--
+4643-                                      );
+4644-                                    }
+4645-                                    if (obj.uiElementType === "tooltip") {
+4646-                                      return (
+4647-                                        <div
+4648:                                          className="w-full h-full pointer-events-none flex items-center justify-center p-2 shadow-lg relative"
+4649-                                          style={{
+4650-                                            backgroundColor:
+4651-                                              obj.uiColorSecondary || "#171717",
+4652-                                            color:
+4653-                                              obj.uiColorPrimary || "#ffffff",
+--
+4676-                                      );
+4677-                                    }
+4678-                                    if (obj.uiElementType === "selection") {
+4679-                                      return (
+4680-                                        <div
+4681:                                          className="w-full h-full pointer-events-none flex items-center justify-center animate-pulse"
+4682-                                          style={{
+4683-                                            color:
+4684-                                              obj.uiColorPrimary || "#10b981",
+4685-                                          }}
+4686-                                        >
+--
+4700-                                  !obj.isText &&
+4701-                                  !obj.isUiElement &&
+4702-                                  (obj.isVideo ? (
+4703-                                    <video
+4704-                                      src={obj.src}
+4705:                                      className="w-full h-full object-fill pointer-events-none"
+4706-                                      autoPlay
+4707-                                      loop
+4708-                                      muted={!isPlaying}
+4709-                                      playsInline
+4710-                                      style={{
+--
+4713-                                    />
+4714-                                  ) : (
+4715-                                    <img
+4716-                                      src={obj.src}
+4717-                                      alt={obj.name}
+4718:                                      className="w-full h-full object-fill pointer-events-none"
+4719-                                      draggable={false}
+4720-                                      style={{
+4721-                                        transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
+4722-                                      }}
+4723-                                    />
+--
+4863-                    posClass =
+4864-                      "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2";
+4865-                  return (
+4866-                    <div
+4867-                      onClick={() => setPreviewDialogue(null)}
+4868:                      className={`absolute ${posClass} w-4/5 max-w-lg max-h-[80%] overflow-y-auto custom-scrollbar shadow-2xl backdrop-blur-sm pointer-events-auto cursor-pointer drop-shadow-2xl hover:scale-[1.02] transition-transform z-[9000]`}
+4869-                      style={{
+4870-                        backgroundColor: `${uiBg}ee`,
+4871-                        border: `2px solid ${uiPrimary}80`,
+4872-                        borderRadius: uiRadius,
+4873-                        fontFamily: uiFont,
+--
+4884-                    </div>
+4885-                  );
+4886-                })()}
+4887-
+4888-              {transition.active && (
+4889:                <div className="absolute inset-0 z-[1500] bg-black pointer-events-none animate-[fadeTransition_1s_ease-in-out]" />
+4890-              )}
+4891-
+4892-              {/* Active Dialogue Tree Box */}
+4893-              {isPlaying &&
+4894-                activeDialogue &&
+--
+5779-                                    );
+5780-                                  })}
+5781-                                </select>
+5782-                              )}
+5783-                              {!craftSlot1 && (
+5784:                                <div className="text-sm text-white/50 text-center pointer-events-none">
+5785-                                  Click to
+5786-                                  <br />
+5787-                                  Select Item
+5788-                                </div>
+5789-                              )}
+--
+5854-                                    );
+5855-                                  })}
+5856-                                </select>
+5857-                              )}
+5858-                              {!craftSlot2 && (
+5859:                                <div className="text-sm text-white/50 text-center pointer-events-none">
+5860-                                  Click to
+5861-                                  <br />
+5862-                                  Select Item
+5863-                                </div>
+5864-                              )}
+--
+6679-                            ) : asset.type === "text" ? (
+6680-                              <div className="text-neutral-300 font-serif italic text-lg tracking-wider">Aa</div>
+6681-                            ) : asset.type === "video" ? (
+6682-                              <video
+6683-                                src={asset.src}
+6684:                                className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md"
+6685-                              />
+6686-                            ) : (
+6687-                              <img
+6688-                                src={asset.src}
+6689-                                alt={asset.name}
+6690:                                className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md"
+6691-                                loading="lazy"
+6692-                              />
+6693-                            )}
+6694-                          </div>
+6695-                          <span className="text-[10px] text-neutral-400 font-medium truncate w-full text-center">

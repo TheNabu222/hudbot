@@ -1,0 +1,6 @@
+      data-interaction="scene_change"
+      data-interaction="start-dialogue"
+      data-interaction="scene_change"
+      data-interaction="scene_change"
+      data-interaction="scene_change"
+      data-interaction="set_flag"

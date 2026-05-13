@@ -43,14 +43,28 @@ export type InteractionType =
   | "open_crafting"
   | "open_quest_log"
   | "set_flag"
-  | "play_cutscene";
+  | "play_cutscene"
+  | "restart_scene"
+  | "restart_game"
+  | "toggle_fullscreen"
+  | "toggle_mute"
+  | "exit_game";
 export type BlendMode =
   | "normal"
   | "multiply"
   | "screen"
   | "overlay"
+  | "darken"
+  | "lighten"
   | "color-dodge"
+  | "color-burn"
+  | "hard-light"
+  | "soft-light"
   | "difference"
+  | "exclusion"
+  | "hue"
+  | "saturation"
+  | "color"
   | "luminosity";
 export type AssetCategory = string;
 
@@ -108,6 +122,7 @@ export interface InventoryItem {
 export interface Asset {
   id: string;
   src: string;
+  dataURL?: string;
   name: string;
   type:
     | "image"
@@ -149,6 +164,7 @@ export interface SceneObject {
   interactionData?: string;
   triggerOnEnter?: boolean;
   triggerOnce?: boolean;
+  ignoreClicks?: boolean;
   isHitbox?: boolean;
   isScript?: boolean;
   isVideo?: boolean;
@@ -181,6 +197,7 @@ export interface SceneObject {
 
   // UI Maker settings
   isUiElement?: boolean;
+  isDraggable?: boolean;
   uiElementType?:
     | "panel"
     | "button"
@@ -188,7 +205,9 @@ export interface SceneObject {
     | "toggle"
     | "icon"
     | "tooltip"
-    | "selection";
+    | "selection"
+    | "image"
+    | "text";
   uiColorPrimary?: string;
   uiColorSecondary?: string;
   uiIconType?:
@@ -206,10 +225,30 @@ export interface SceneObject {
     | "arrow-down";
   uiValue?: number; // for progress bar
   uiChecked?: boolean; // for toggles
-  uiBorderType?: "none" | "solid" | "double" | "bevel";
+  uiBorderType?:
+    | "none"
+    | "solid"
+    | "double"
+    | "bevel"
+    | "dashed"
+    | "dotted"
+    | "inset"
+    | "outset"
+    | "groove"
+    | "ridge";
   uiBorderRadius?: number;
   uiBindingType?: "none" | "need" | "flag" | "inventory_count";
   uiBindingId?: string;
+  uiAnchor?: 
+    | "top-left" 
+    | "top-center" 
+    | "top-right" 
+    | "center-left" 
+    | "center" 
+    | "center-right" 
+    | "bottom-left" 
+    | "bottom-center" 
+    | "bottom-right";
 
   // RPG Logic
   requireItemId?: string;
@@ -231,10 +270,15 @@ export interface SceneObject {
     blur?: number;
     sepia?: number;
     invert?: number;
+    grayscale?: number;
   };
 
   // Physics & Engine
   hasPhysics: boolean;
+  physicsStatic?: boolean;
+  physicsBounciness?: number; // 0-1 (restitution)
+  physicsFriction?: number;
+  physicsDensity?: number;
   audioSrc?: string;
 
   // Sim & RPG Elements (Urbz / TTRPG)
@@ -249,6 +293,8 @@ export interface SceneObject {
     novelty: number;
   };
   reputationEffect?: { npcId: string; value: number };
+  grantSkill?: "none" | "naturalist" | "occultist" | "scribal";
+  grantSkillValue?: number;
 
   // Dialogue, Inventory, UI
   targetUiId?: string;
@@ -297,6 +343,24 @@ export interface Quest {
   autoStart?: boolean;
 }
 
+export interface MapNode {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  targetSceneId: string | null;
+  iconSrc?: string | null;
+  unlockedByDefault?: boolean;
+  requiredFlagId?: string; // Must have this flag to travel here
+}
+
+export interface FastTravelMap {
+  id: string;
+  name: string;
+  backgroundSrc: string | null;
+  nodes: MapNode[];
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -308,6 +372,7 @@ export interface Project {
   dialogueTrees: DialogueTree[];
   inventoryItems: InventoryItem[];
   quests: Quest[];
+  maps: FastTravelMap[];
   gameFlags: string[]; // Custom string flag names used throughout the project
   globalSettings: {
     useDayNightCycle: boolean;
@@ -322,6 +387,11 @@ export interface Project {
     typewriterSpeed?: number;
     hideDefaultInventoryBtn?: boolean;
     customCursorAssetId?: string; // ID of the custom cursor asset
+    hudOverlay?: {
+      assetId?: string;
+      opacity?: number;
+      blendMode?: string;
+    };
     uiTheme?:
       | "default"
       | "barbie"

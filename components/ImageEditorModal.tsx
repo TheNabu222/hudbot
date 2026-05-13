@@ -18,6 +18,10 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
   const [contrast, setContrast] = useState(100);
   const [saturate, setSaturate] = useState(100);
   const [sepia, setSepia] = useState(0);
+  const [hue, setHue] = useState(0);
+  const [grayscale, setGrayscale] = useState(0);
+  const [invert, setInvert] = useState(0);
+  const [blur, setBlur] = useState(0);
 
   const [chromaKeyColor, setChromaKeyColor] = useState<string>('');
   const [chromaTolerance, setChromaTolerance] = useState<number>(30);
@@ -25,7 +29,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
   const [isPickingColor, setIsPickingColor] = useState(false);
 
   const getFilterString = () => {
-    return `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturate}%) sepia(${sepia}%)`;
+    return `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturate}%) sepia(${sepia}%) hue-rotate(${hue}deg) grayscale(${grayscale}%) invert(${invert}%) blur(${blur}px)`;
   };
 
   const applyChromaKey = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
@@ -206,6 +210,38 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
                 <span className="text-xs text-neutral-500">{sepia}%</span>
               </div>
               <input type="range" min="0" max="100" value={sepia} onChange={e => setSepia(Number(e.target.value))} className="w-full accent-emerald-500" />
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-sm text-neutral-400">Hue Rotate</label>
+                <span className="text-xs text-neutral-500">{hue}deg</span>
+              </div>
+              <input type="range" min="0" max="360" value={hue} onChange={e => setHue(Number(e.target.value))} className="w-full accent-emerald-500" />
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-sm text-neutral-400">Grayscale</label>
+                <span className="text-xs text-neutral-500">{grayscale}%</span>
+              </div>
+              <input type="range" min="0" max="100" value={grayscale} onChange={e => setGrayscale(Number(e.target.value))} className="w-full accent-emerald-500" />
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-sm text-neutral-400">Invert</label>
+                <span className="text-xs text-neutral-500">{invert}%</span>
+              </div>
+              <input type="range" min="0" max="100" value={invert} onChange={e => setInvert(Number(e.target.value))} className="w-full accent-emerald-500" />
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-sm text-neutral-400">Blur</label>
+                <span className="text-xs text-neutral-500">{blur}px</span>
+              </div>
+              <input type="range" min="0" max="20" value={blur} onChange={e => setBlur(Number(e.target.value))} className="w-full accent-emerald-500" />
             </div>
 
             <div className="pt-4 mt-4 border-t border-neutral-800">

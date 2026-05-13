@@ -124,13 +124,13 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSe
                   <div 
                     key={asset.id}
                     onClick={() => onSelect(asset.id)}
-                    className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg overflow-hidden group cursor-pointer hover:border-emerald-500 transition-colors flex flex-col"
+                    className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg group cursor-pointer hover:border-emerald-500 transition-colors flex flex-col hover:z-50 relative"
                   >
-                    <div className="h-24 bg-neutral-900 flex items-center justify-center p-2 relative">
+                    <div className="h-32 bg-neutral-900 flex items-center justify-center p-2 relative rounded-t-lg">
                       {asset.type === 'audio' ? (
                         <Music size={32} className="text-emerald-500 group-hover:scale-110 transition-transform" />
                       ) : (
-                        <img src={asset.src} alt={asset.name} className="max-w-full max-h-full object-contain pointer-events-none group-hover:scale-105 transition-transform" loading="lazy" />
+                        <img src={asset.src} alt={asset.name} className="max-w-full max-h-full object-contain pointer-events-none group-hover:scale-150 transition-transform relative z-10" loading="lazy" />
                       )}
                     </div>
                     <div className="p-2 border-t border-neutral-700/50">

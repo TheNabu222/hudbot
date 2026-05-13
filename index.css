@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -14,9 +14,7 @@
     letter-spacing: 0.5px;
   }
   
-  * {
-    border-radius: 0 !important; /* brutalist/y2k edges */
-  }
+  /* Removed global border-radius override to soften UI */
 
   /* Make scrollbars blocky and neon */
   ::-webkit-scrollbar {
@@ -35,32 +33,7 @@
     background: #ff33ff;
   }
   
-  /* Buttons and neon effects */
-  button {
-    box-shadow: 2px 2px 0px #00ffff !important;
-    text-transform: uppercase;
-    font-weight: bold;
-    border: 2px solid #ff00ff !important;
-  }
-  button:active {
-    box-shadow: inset 2px 2px 0px #00ffff !important;
-    transform: translate(2px, 2px);
-  }
-  
-  .border, .border-b, .border-t, .border-l, .border-r {
-    border-style: dotted !important;
-  }
-
-  input, select, textarea {
-    border: 2px dashed #00ffff !important;
-    background-color: #1a0033 !important;
-    color: #ff00ff !important;
-  }
-  input:focus, select:focus, textarea:focus {
-    border-style: solid !important;
-    box-shadow: 2px 2px 0px #ff00ff !important;
-    outline: none !important;
-  }
+  /* Button and input styling handles by Tailwind in App.tsx */
 }
 
 .light-theme {

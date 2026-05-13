@@ -16,12 +16,14 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-image-crop": "^11.0.10",
+    "react-markdown": "^10.1.0",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@types/matter-js": "^0.20.2",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "jsdom": "^29.1.1",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
     "vite-plugin-singlefile": "^2.3.3"

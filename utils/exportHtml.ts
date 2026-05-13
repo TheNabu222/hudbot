@@ -1,6 +1,29 @@
 import { Project, Scene } from "../types";
 
 export function generateExportHtml(project: Project): string {
+  // Strip duplicate base64 srcs from objects since they are already stored in assets
+  const strippedProject = {
+    ...project,
+    scenes: project.scenes.map((s) => ({
+      ...s,
+      objects: s.objects.map((o) => {
+        if (o.src && o.src.startsWith("data:") && project.assets.some(a => a.src === o.src)) {
+          return { ...o, src: "" };
+        }
+        return o;
+      })
+    })),
+    uiMenus: project.uiMenus ? project.uiMenus.map((m) => ({
+      ...m,
+      objects: m.objects.map((o) => {
+        if (o.src && o.src.startsWith("data:") && project.assets.some(a => a.src === o.src)) {
+          return { ...o, src: "" };
+        }
+        return o;
+      })
+    })) : []
+  };
+
   const scene = project.scenes.find((s) => s.id === project.currentSceneId) ||
     project.scenes[0] || {
       id: "fallback",
@@ -14,6 +37,48 @@ export function generateExportHtml(project: Project): string {
   const exportWidth = scene.width || project.globalSettings?.stageWidth || 800;
   const exportHeight =
     scene.height || project.globalSettings?.stageHeight || 600;
+
+  // Calculate the total bounding box for scaling
+  let boundMinX = 0;
+  let boundMinY = 0;
+  let boundMaxX = exportWidth;
+  let boundMaxY = exportHeight;
+
+  if (project.uiMenus) {
+    project.uiMenus.forEach((menu) => {
+      if (menu.isOpenByDefault) {
+        const mw = menu.width || exportWidth;
+        const mh = menu.height || exportHeight;
+        const mLeft = (exportWidth / 2) - (mw / 2);
+        const mTop = (exportHeight / 2) - (mh / 2);
+        
+        if (mLeft < boundMinX) boundMinX = mLeft;
+        if (mTop < boundMinY) boundMinY = mTop;
+        if (mLeft + mw > boundMaxX) boundMaxX = mLeft + mw;
+        if (mTop + mh > boundMaxY) boundMaxY = mTop + mh;
+      }
+    });
+  }
+
+  if (project.globalSettings?.hudOverlay) {
+    const overlay = project.globalSettings.hudOverlay;
+    if (overlay.assetId) {
+      const w = exportWidth / (overlay.screenRect?.w || 1);
+      const h = exportHeight / (overlay.screenRect?.h || 1);
+      const x = -(w * (overlay.screenRect?.x || 0));
+      const y = -(h * (overlay.screenRect?.y || 0));
+
+      if (x < boundMinX) boundMinX = x;
+      if (y < boundMinY) boundMinY = y;
+      if (x + w > boundMaxX) boundMaxX = x + w;
+      if (y + h > boundMaxY) boundMaxY = y + h;
+    }
+  }
+
+  const boundW = boundMaxX - boundMinX;
+  const boundH = boundMaxY - boundMinY;
+  const offsetX = -boundMinX;
+  const offsetY = -boundMinY;
 
   const css = `
     :root {
@@ -35,10 +100,11 @@ export function generateExportHtml(project: Project): string {
       justify-content: center;
       align-items: center;
       min-height: 100vh;
-      font-family: 'VT323', 'Comic Sans MS', Courier, monospace;
-      overflow: hidden;
+      font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      overflow: visible;
       cursor: crosshair;
       color: #ff00ff;
+      background-color: #1a1a1a;
     }
     * {
       border-radius: 0 !important;
@@ -47,7 +113,8 @@ export function generateExportHtml(project: Project): string {
       position: relative;
       width: ${exportWidth}px;
       height: ${exportHeight}px;
-      background-color: ${scene.backgroundColor};
+      /* background-color handles inside scene divs */
+      background-color: #000;
       overflow: hidden;
       box-shadow: 6px 6px 0px #ff00ff, 12px 12px 0px #00ffff;
       border: 4px dotted #ff00ff;
@@ -59,10 +126,12 @@ export function generateExportHtml(project: Project): string {
       user-select: none;
       transform-origin: center center;
       pointer-events: auto;
+      touch-action: none;
+      background-color: rgba(255, 255, 255, 0.01);
     }
     .hitbox {
-      /* Invisible in production */
-      background-color: transparent;
+      /* Invisible in production, but needs slight opacity for Safari/iOS click detection */
+      background-color: rgba(255, 255, 255, 0.01);
       border: none;
     }
     /* Animations */
@@ -370,6 +439,32 @@ export function generateExportHtml(project: Project): string {
       pointer-events: auto;
       z-index: 20000;
     }
+    #skills-tracker {
+      display: ${project.globalSettings?.enableTTRPGStats ? "block" : "none"};
+      position: absolute;
+      top: 10px;
+      right: ${project.globalSettings?.enableNeeds ? "140px" : "10px"};
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      border: 1px solid #555;
+      font-size: 12px;
+      pointer-events: auto;
+      z-index: 20000;
+    }
+    #time-tracker {
+      display: ${project.globalSettings?.useDayNightCycle ? "block" : "none"};
+      position: absolute;
+      top: ${project.globalSettings?.enableNeeds || project.globalSettings?.enableTTRPGStats ? "180px" : "10px"};
+      right: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      border: 1px solid #555;
+      font-size: 12px;
+      pointer-events: auto;
+      z-index: 20000;
+    }
     .need-bar {
       width: 100px; height: 8px; background: #333; margin-top: 2px; margin-bottom: 6px;
     }
@@ -406,21 +501,24 @@ export function generateExportHtml(project: Project): string {
       animStyle = `animation: ${obj.animation} ${duration}s ${easing} infinite;`;
     }
 
+    const pe = obj.ignoreClicks ? "none" : "auto";
+
     const style = `
       left: ${obj.x}px;
       top: ${obj.y}px;
       width: ${obj.width}px;
       height: ${obj.height}px;
-      z-index: ${obj.zIndex};
-      opacity: ${obj.opacity};
-      transform: rotate(${obj.rotation}deg);
+      z-index: ${obj.zIndex ?? 100};
+      opacity: ${obj.opacity === 0 ? 0.01 : (obj.opacity ?? 1)};
+      transform: rotate(${obj.rotation || 0}deg);
       cursor: ${obj.cursor || "pointer"};
       mix-blend-mode: ${obj.blendMode || "normal"};
+      pointer-events: ${pe};
       ${animStyle}
     `;
 
     const classes = ["scene-object"];
-    if (obj.isHitbox) classes.push("hitbox");
+    if (obj.isHitbox || obj.opacity === 0) classes.push("hitbox");
     if (obj.customCssClasses) classes.push(obj.customCssClasses);
 
     const dataAttrs = `
@@ -433,19 +531,24 @@ export function generateExportHtml(project: Project): string {
       data-flavor="${(obj.flavorText || "").replace(/"/g, "&quot;")}"
       data-parallax="${obj.parallaxSpeed}"
       data-rotation="${obj.rotation || 0}"
-      data-needs='${JSON.stringify(obj.needsEffect || {})}'
+      data-needs="${JSON.stringify(obj.needsEffect || {}).replace(/"/g, "&quot;")}"
       data-skill="${obj.requiredSkill || "none"}"
       data-difficulty="${obj.skillCheckDifficulty || 0}"
+      data-grant-skill="${obj.grantSkill || "none"}"
+      data-grant-skill-val="${obj.grantSkillValue || 0}"
       data-script-src="${obj.scriptAssetId ? (project.assets || []).find((a) => a.id === obj.scriptAssetId)?.src || "" : ""}"
       data-ui-binding="${obj.uiBindingType || ""}"
       data-ui-binding-id="${obj.uiBindingId || ""}"
       data-ui-element-type="${obj.uiElementType || ""}"
+      data-local-checked="${!!obj.uiChecked}"
       data-ui-primary="${obj.uiColorPrimary || ""}"
       data-ui-secondary="${obj.uiColorSecondary || ""}"
+      data-show-flag="${(obj.showIfFlag || "").replace(/"/g, "&quot;")}"
+      data-hide-flag="${(obj.hideIfFlag || "").replace(/"/g, "&quot;")}"
     `;
 
     if (obj.isHitbox) {
-      return `<div id="${obj.id}" class="${classes.join(" ")}" style="${style}" ${dataAttrs}></div>`;
+      return `<div id="${obj.id}" onclick="void(0)" class="${classes.join(" ")}" style="${style}" ${dataAttrs}></div>`;
     } else if (obj.isUiElement) {
       const borderStyle =
         obj.uiBorderType === "none"
@@ -454,7 +557,17 @@ export function generateExportHtml(project: Project): string {
             ? "4px double"
             : obj.uiBorderType === "bevel"
               ? "3px outset"
-              : "2px solid";
+              : obj.uiBorderType === "dashed"
+                ? "2px dashed"
+                : obj.uiBorderType === "dotted"
+                  ? "2px dotted"
+                  : obj.uiBorderType === "inset"
+                    ? "3px inset"
+                    : obj.uiBorderType === "groove"
+                      ? "3px groove"
+                      : obj.uiBorderType === "ridge"
+                        ? "3px ridge"
+                        : "2px solid";
       const br =
         obj.uiBorderRadius ?? project.globalSettings?.uiBorderRadius ?? 8;
       let innerHtml = "";
@@ -518,7 +631,7 @@ export function generateExportHtml(project: Project): string {
           <svg width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 14a8 8 0 0 1-8 8"/><path d="M18 11v-1a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V9a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v1"/><path d="M10 9.5V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v10"/><path d="M18 11a2 2 0 1 1 4 0v3a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
         </div>`;
       }
-      return `<div id="${obj.id}" class="${classes.join(" ")}" style="${style}" ${dataAttrs}>${innerHtml}</div>`;
+      return `<div id="${obj.id}" onclick="void(0)" class="${classes.join(" ")}" style="${style}" ${dataAttrs}>${innerHtml}</div>`;
     } else if (obj.isText) {
       const textColor = obj.textColor || "#ffffff";
       const textFontSize = obj.textFontSize || 16;
@@ -558,23 +671,31 @@ export function generateExportHtml(project: Project): string {
         innerStyle = `color: ${obj.textColor || "#ffffff"}; font-size: ${textFontSize}px; font-family: ${textFontFamily}; font-weight: ${obj.textWeight || "normal"}; letter-spacing: ${obj.textLetterSpacing || 0}px; text-shadow: ${obj.textShadow || "none"}; ${textOutlineStr}`;
       }
 
-      return `<div id="${obj.id}" class="${classes.join(" ")}" style="${style}" ${dataAttrs}>
+      return `<div id="${obj.id}" onclick="void(0)" class="${classes.join(" ")}" style="${style}" ${dataAttrs}>
         <div style="${containerStyle}"><span style="${innerStyle}">${obj.textContent || ""}</span></div>
       </div>`;
     } else {
       const filters = obj.filters
-        ? `brightness(${obj.filters.brightness ?? 1}) contrast(${obj.filters.contrast ?? 1}) saturate(${obj.filters.saturate ?? 1}) hue-rotate(${obj.filters.hueRotate ?? 0}deg) blur(${obj.filters.blur ?? 0}px) sepia(${obj.filters.sepia ?? 0}) invert(${obj.filters.invert ?? 0})`
+        ? `brightness(${obj.filters.brightness ?? 1}) contrast(${obj.filters.contrast ?? 1}) saturate(${obj.filters.saturate ?? 1}) hue-rotate(${obj.filters.hueRotate ?? 0}deg) blur(${obj.filters.blur ?? 0}px) sepia(${obj.filters.sepia ?? 0}) invert(${obj.filters.invert ?? 0}) grayscale(${obj.filters.grayscale ?? 0})`
         : "none";
       const imgStyle = `width: 100%; height: 100%; object-fit: fill; transform: scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1}); filter: ${filters}; pointer-events: auto;`;
+      const asset = project.assets.find(a => a.src === obj.src);
+      const assetDataAttr = asset ? `data-asset-id="${asset.id}" data-runtime-src="true"` : `src="${obj.src}"`;
       if (obj.isVideo) {
-        return `<div id="${obj.id}" class="${classes.join(" ")}" style="${style}" ${dataAttrs}><video src="${obj.src}" style="${imgStyle}" autoplay loop muted playsinline></video></div>`;
+        return `<div id="${obj.id}" onclick="void(0)" class="${classes.join(" ")}" style="${style}" ${dataAttrs}><video ${assetDataAttr} style="${imgStyle}" autoplay loop muted playsinline></video></div>`;
       } else {
-        return `<div id="${obj.id}" class="${classes.join(" ")}" style="${style}" ${dataAttrs}><img src="${obj.src}" style="${imgStyle}" draggable="false" /></div>`;
+        return `<div id="${obj.id}" onclick="void(0)" class="${classes.join(" ")}" style="${style}" ${dataAttrs}><img ${assetDataAttr} style="${imgStyle}" draggable="false" /></div>`;
       }
     }
   };
 
-  const objectsHtml = scene.objects.map(getObjectHtml).join("\n");
+  const scenesHtml = project.scenes.map(s => {
+    const sHtml = s.objects.map(getObjectHtml).join("\\n");
+    const display = s.id === (project.currentSceneId || project.scenes[0].id) ? "block" : "none";
+    return `<div id="scene-${s.id}" class="game-scene" data-bgm="${s.bgmAssetId || ''}" style="display: ${display}; width: 100%; height: 100%; position: absolute; inset: 0; background-color: ${s.backgroundColor}; overflow: hidden;">
+      ${sHtml}
+    </div>`;
+  }).join("\\n");
 
   const generateUiHtml = (uiMenus: Scene[]) => {
     if (!uiMenus || uiMenus.length === 0) return "";
@@ -586,7 +707,7 @@ export function generateExportHtml(project: Project): string {
         const h = menu.height || project.globalSettings?.stageHeight || 600;
         const pe = menu.blocksClicks ? "auto" : "none";
         return `
-        <div id="ui-menu-${menu.id}" class="ui-menu-layer" style="display: ${menu.isOpenByDefault ? "block" : "none"}; position: absolute; left: 0px; top: 0px; width: ${w}px; height: ${h}px; pointer-events: ${pe}; overflow: hidden; z-index: ${10000 + idx}; background-color: ${menu.backgroundColor || "transparent"}">
+        <div id="ui-menu-${menu.id}" class="ui-menu-layer" style="display: ${menu.isOpenByDefault ? "block" : "none"}; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: ${w}px; height: ${h}px; pointer-events: ${pe}; overflow: visible; z-index: ${10000 + idx}; background-color: ${menu.backgroundColor || "transparent"}">
           ${uiObjectsHtml}
         </div>
       `;
@@ -630,10 +751,23 @@ export function generateExportHtml(project: Project): string {
     } catch(e) {}
 
     let saveGame = () => {
-      localStorage.setItem('neocities_game_save_${project.id}', JSON.stringify(state));
+      try {
+        localStorage.setItem('neocities_game_save_${project.id}', JSON.stringify(state));
+      } catch(e) {
+        console.warn('Failed to save game to localStorage');
+      }
     };
 
     const initGame = () => {
+      // Resolve runtime asset sources
+      document.querySelectorAll('[data-runtime-src="true"]').forEach(el => {
+        const assetId = el.getAttribute('data-asset-id');
+        if (!assetId) return;
+        const asset = assets.find(a => a.id === assetId);
+        if (asset && asset.src) {
+          el.setAttribute('src', asset.src);
+        }
+      });
       const dialogueBox = document.getElementById('dialogue-box');
       const flavorText = document.getElementById('flavor-text');
       const container = document.getElementById('game-container');
@@ -643,8 +777,8 @@ export function generateExportHtml(project: Project): string {
       const scaleWrapper = document.getElementById('scale-wrapper');
       let currentScale = 1;
       const resizeGame = () => {
-        const gameW = ${exportWidth};
-        const gameH = ${exportHeight};
+        const gameW = ${boundW};
+        const gameH = ${boundH};
         const winW = window.innerWidth;
         const winH = window.innerHeight;
         currentScale = Math.min(winW / gameW, winH / gameH);
@@ -654,23 +788,44 @@ export function generateExportHtml(project: Project): string {
       window.addEventListener('resize', resizeGame);
       resizeGame();
 
-      // BGM Setup
-      ${
-        scene.bgmAssetId
-          ? `
-      const bgmAsset = assets.find(a => a.id === '${scene.bgmAssetId}');
-      if (bgmAsset) {
-        const bgm = new Audio(bgmAsset.src);
-        bgm.loop = true;
-        // Need user interaction to play audio in most browsers
-        const startBgm = () => {
-          bgm.play().catch(e => console.warn("BGM play failed", e));
-          document.removeEventListener('click', startBgm);
+      // Global BGM State
+      let currentBgmAudio = null;
+      let currentBgmAssetId = null;
+
+      const playBgm = (assetId) => {
+        if (!assetId) {
+          if (currentBgmAudio) {
+            currentBgmAudio.pause();
+            currentBgmAudio.currentTime = 0;
+            currentBgmAudio = null;
+            currentBgmAssetId = null;
+          }
+          return;
+        }
+        if (assetId === currentBgmAssetId && currentBgmAudio) return; // already playing
+        
+        if (currentBgmAudio) {
+           currentBgmAudio.pause();
+           currentBgmAudio = null;
+        }
+
+        const bgmAsset = assets.find(a => a.id === assetId);
+        if (bgmAsset && bgmAsset.src) {
+           currentBgmAudio = new Audio(bgmAsset.src);
+           currentBgmAudio.loop = true;
+           currentBgmAudio.play().catch(e => console.warn("BGM play failed. User interaction needed:", e));
+           currentBgmAssetId = assetId;
+        }
+      };
+
+      // Set initial BGM
+      const initialSceneBgm = document.querySelector('.game-scene[style*="display: block"]')?.getAttribute('data-bgm');
+      if (initialSceneBgm) {
+        const startInitBgm = () => {
+           playBgm(initialSceneBgm);
+           document.removeEventListener('click', startInitBgm);
         };
-        document.addEventListener('click', startBgm);
-      }
-      `
-          : ""
+        document.addEventListener('click', startInitBgm);
       }
 
       // Dialogue System
@@ -791,6 +946,28 @@ export function generateExportHtml(project: Project): string {
             }
           }
         });
+        
+        // Dynamic Object Visibility based on Flags
+        document.querySelectorAll('.scene-object').forEach((el) => {
+          if (state['collected_' + el.id]) {
+            el.style.display = 'none';
+            return;
+          }
+          
+          const showFlag = el.getAttribute('data-show-flag');
+          const hideFlag = el.getAttribute('data-hide-flag');
+          
+          if ((!showFlag || showFlag.trim() === "") && (!hideFlag || hideFlag.trim() === "")) {
+            return; // Don't mess with visibility if no flags are assigned
+          }
+
+          let isVisible = true;
+          if (hideFlag && hideFlag.trim() !== "" && state.flags[hideFlag]) isVisible = false;
+          if (showFlag && showFlag.trim() !== "" && !state.flags[showFlag]) isVisible = false;
+          
+          // Only show what's supposed to be visible
+          el.style.display = isVisible ? 'flex' : 'none';
+        });
       };
       
       const _origSaveGame = saveGame;
@@ -805,10 +982,19 @@ export function generateExportHtml(project: Project): string {
       const updateNeedsUI = () => {
         ['rest', 'hunger', 'connection', 'spiritual', 'novelty'].forEach(need => {
           const el = document.getElementById('need-' + need);
-          if (el) el.style.width = Math.max(0, Math.min(100, state.needs[need])) + '%';
+          if (el) el.style.width = Math.max(0, Math.min(100, state.needs[need] || 0)) + '%';
         });
       };
       updateNeedsUI();
+
+      // Update Skills UI
+      const updateSkillsUI = () => {
+        ['naturalist', 'occultist', 'scribal'].forEach(skill => {
+          const el = document.getElementById('skill-' + skill);
+          if (el) el.style.width = Math.max(0, Math.min(100, (state.skills[skill] || 0) * 5)) + '%';
+        });
+      };
+      updateSkillsUI();
 
       // Day/Night Cycle
       ${
@@ -827,6 +1013,13 @@ export function generateExportHtml(project: Project): string {
             filter = 'brightness(0.8) sepia(0.5) hue-rotate(-20deg)';
           }
           document.documentElement.style.setProperty('--time-filter', filter);
+
+          const timeDisplay = document.getElementById('time-display');
+          if (timeDisplay) {
+            const h = Math.floor(state.time).toString().padStart(2, "0");
+            const m = Math.floor((state.time % 1) * 60).toString().padStart(2, "0");
+            timeDisplay.innerText = h + ":" + m;
+          }
         }, 1000);
       `
           : ""
@@ -869,6 +1062,9 @@ export function generateExportHtml(project: Project): string {
           obj.style.display = 'none';
         }
 
+        // Apply any immediate flag visibility checks to ensure objects are hidden correctly
+        // before interaction events are even dispatched, but updateGameFlagsUI handles the bulk.
+
         // Flavor Text on Hover
         obj.addEventListener('mouseenter', (e) => {
           const flavor = obj.getAttribute('data-flavor');
@@ -886,9 +1082,13 @@ export function generateExportHtml(project: Project): string {
           flavorText.style.opacity = 0;
         });
 
-        obj.addEventListener('pointerdown', (e) => {
-          // e.stopPropagation(); 
+        let lastClickTime = 0;
+        const handleClick = (e) => {
+          if (Date.now() - lastClickTime < 300) return;
+          lastClickTime = Date.now();
+          
           try {
+            console.log('Object clicked:', obj.id, 'class:', obj.className);
             // flavorText.innerText = "Clicked " + obj.id;
             // flavorText.style.opacity = 1;
             // setTimeout(() => flavorText.style.opacity = 0, 1000);
@@ -911,8 +1111,8 @@ export function generateExportHtml(project: Project): string {
               const effect = JSON.parse(needsStr);
               let changed = false;
               for (const [key, val] of Object.entries(effect)) {
-                if (val && state.needs[key] !== undefined) {
-                  state.needs[key] += val;
+                if (val) {
+                  state.needs[key] = (state.needs[key] || 0) + val;
                   changed = true;
                 }
               }
@@ -922,6 +1122,15 @@ export function generateExportHtml(project: Project): string {
               }
             }
           } catch(e) {}
+
+          const grantSkill = obj.getAttribute('data-grant-skill');
+          if (grantSkill && grantSkill !== 'none') {
+            const amount = parseInt(obj.getAttribute('data-grant-skill-val')) || 1;
+            state.skills[grantSkill] = Math.min(20, (state.skills[grantSkill] || 0) + amount);
+            showSimpleDialogue(\`Gained +\${amount} \${grantSkill}!\`, "System");
+            updateSkillsUI();
+            saveGame();
+          }
 
           const interaction = obj.getAttribute('data-interaction');
           const data = obj.getAttribute('data-interaction-data');
@@ -984,11 +1193,18 @@ export function generateExportHtml(project: Project): string {
               state.flags[data] = true;
               saveGame();
               console.log("Story Event Flag Set:", data);
+              showSimpleDialogue("Story Event: " + data, "System");
             }
           } else if (interaction === 'scene_change') {
-            // In a real multi-scene export, this would load the next scene data
-            dialogueBox.innerHTML = 'Loading scene: ' + data + '...';
-            dialogueBox.style.display = 'block';
+            document.querySelectorAll('.game-scene').forEach(el => el.style.display = 'none');
+            const targetScene = document.getElementById('scene-' + data);
+            if (targetScene) {
+              targetScene.style.display = 'block';
+              playBgm(targetScene.getAttribute('data-bgm') || null);
+            } else {
+              dialogueBox.innerHTML = 'Error: Cannot load scene ' + data;
+              dialogueBox.style.display = 'block';
+            }
           } else if (interaction === 'open_ui') {
             const targetUi = obj.getAttribute('data-target-ui');
             if (targetUi) {
@@ -1028,6 +1244,8 @@ export function generateExportHtml(project: Project): string {
             setTimeout(() => flavorText.style.display = 'none', 2000);
           } else if (interaction === 'load_game') {
             location.reload(); 
+          } else if (interaction === 'skill_check') {
+            showSimpleDialogue("[Skill Check Success]\\n" + (data || "You succeeded!"), "");
           } else if (interaction === 'toggle_inventory') {
             toggleInventory();
           } else if (interaction === 'play_cutscene') {
@@ -1047,8 +1265,12 @@ export function generateExportHtml(project: Project): string {
                     cutsceneVideo.pause();
                     cutscenePlayer.style.display = 'none';
                     if (scriptAssetId) {
-                        dialogueBox.innerHTML = 'Loading scene: ' + scriptAssetId + '...';
-                        dialogueBox.style.display = 'block';
+                        document.querySelectorAll('.game-scene').forEach(el => el.style.display = 'none');
+                        const targetScene = document.getElementById('scene-' + scriptAssetId);
+                        if (targetScene) {
+                          targetScene.style.display = 'block';
+                          playBgm(targetScene.getAttribute('data-bgm') || null);
+                        }
                     }
                 };
 
@@ -1057,12 +1279,38 @@ export function generateExportHtml(project: Project): string {
             }
           }
           
+          const uiElementType = obj.getAttribute('data-ui-element-type');
+          if (uiElementType === 'toggle') {
+            const bindingType = obj.getAttribute('data-ui-binding');
+            const bindingId = obj.getAttribute('data-ui-binding-id');
+            if (bindingType === 'flag' && bindingId) {
+               state.flags[bindingId] = !state.flags[bindingId];
+               // updateGameFlagsUI is called inside saveGame
+            } else {
+               const isChecked = obj.getAttribute('data-local-checked') === 'true';
+               const newVal = !isChecked;
+               obj.setAttribute('data-local-checked', newVal.toString());
+               
+               const w = parseFloat(obj.style.width);
+               const h = parseFloat(obj.style.height);
+               const primary = obj.getAttribute('data-ui-primary') || '#10b981';
+               const secondary = obj.getAttribute('data-ui-secondary') || '#525252';
+               const bgDiv = obj.querySelector('div');
+               const handle = obj.querySelector('div > div');
+               if (bgDiv && handle) {
+                 bgDiv.style.backgroundColor = newVal ? primary : secondary;
+                 handle.style.transform = newVal ? 'translateX(' + (w - h) + 'px)' : 'translateX(0)';
+               }
+            }
+          }
+          
           if (interaction !== 'save_game') saveGame();
           } catch(err) {
             console.error(err);
             showSimpleDialogue("Error: " + err.message, "System");
           }
-        });
+        };
+        obj.addEventListener('click', handleClick);
       });
       
       window.toggleInventory = () => {
@@ -1213,6 +1461,25 @@ export function generateExportHtml(project: Project): string {
     initGame();
   `;
 
+  let hudHtml = "";
+  if (project.globalSettings?.hudOverlay) {
+    const overlay = project.globalSettings.hudOverlay;
+    const asset = project.assets.find((a) => a.id === overlay.assetId);
+    if (asset) {
+      const stageW = exportWidth;
+      const stageH = exportHeight;
+      const totalW = stageW / (overlay.screenRect.w || 1);
+      const totalH = stageH / (overlay.screenRect.h || 1);
+      const left = -(totalW * (overlay.screenRect.x || 0));
+      const top = -(totalH * (overlay.screenRect.y || 0));
+
+      const hudSrc = asset.dataURL || asset.src || "";
+      hudHtml = `
+      <div id="global-hud-overlay" style="position: absolute; left: ${left}px; top: ${top}px; width: ${totalW}px; height: ${totalH}px; background-image: url('${hudSrc}'); background-size: 100% 100%; pointer-events: none; z-index: 99999; mix-blend-mode: ${overlay.blendMode || "normal"}; opacity: ${overlay.opacity ?? 1};"></div>
+      `;
+    }
+  }
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1226,15 +1493,18 @@ export function generateExportHtml(project: Project): string {
   </style>
 </head>
 <body>
-  <div id="scale-wrapper" style="width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; overflow: hidden; background-color: #1a1a1a;">
-    <div id="game-positioner" style="position: relative; width: ${exportWidth}px; height: ${exportHeight}px;">
-      <div id="game-container" style="position: absolute; inset: 0; overflow: hidden; width: 100%; height: 100%;">
-        ${objectsHtml}
-      </div>
-      
-      <div id="ui-layer">
-        <!-- Custom UI Menus -->
-        ${uiMenusHtml}
+  <div id="scale-wrapper" style="width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; overflow: visible; background-color: #1a1a1a;">
+    <div id="game-positioner" style="position: relative; width: ${boundW}px; height: ${boundH}px;">
+      <div id="game-coordinate-space" style="position: absolute; left: ${offsetX}px; top: ${offsetY}px; width: ${exportWidth}px; height: ${exportHeight}px;">
+        ${hudHtml}
+        <div id="game-container" style="position: absolute; inset: 0; overflow: hidden; width: 100%; height: 100%;">
+          ${scenesHtml}
+        </div>
+        
+        <div id="ui-layer" style="position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;">
+          <!-- Custom UI Menus -->
+          ${uiMenusHtml}
+        </div>
 
         <div id="cutscene-player" style="display: none; position: fixed; inset: 0; z-index: 99998; background: black; justify-content: center; align-items: center;">
             <video id="cutscene-video" class="w-full h-full object-contain" style="max-width: 100%; max-height: 100%; object-fit: contain;"></video>
@@ -1280,11 +1550,23 @@ export function generateExportHtml(project: Project): string {
         <div>Spiritual <div class="need-bar"><div id="need-spiritual" class="need-fill"></div></div></div>
         <div>Novelty <div class="need-bar"><div id="need-novelty" class="need-fill"></div></div></div>
       </div>
-    </div>
-  </div>
+      
+      <div id="skills-tracker">
+        <div>Naturalist <div class="need-bar"><div id="skill-naturalist" class="need-fill"></div></div></div>
+        <div>Occultist <div class="need-bar"><div id="skill-occultist" class="need-fill"></div></div></div>
+        <div>Scribal <div class="need-bar"><div id="skill-scribal" class="need-fill"></div></div></div>
+      </div>
+      
+      <div id="time-tracker">
+        <div style="font-weight: bold; border-top: 1px solid rgba(255,255,255,0.3); padding-top: 4px; margin-top: 4px;">
+           TIME: <span id="time-display">08:00</span>
+        </div>
+      </div>
+  </div> <!-- Close game-coordinate-space -->
+  </div> <!-- Close game-positioner -->
   <!-- Close scale-wrapper -->
   </div>
-  <script id="__GAME_DATA__" type="application/json">${JSON.stringify(project).replace(/<\/script>/gi, "<\\/script>")}</script>
+  <script id="__GAME_DATA__" type="application/json">${JSON.stringify(strippedProject).split("</script>").join("<\\/script>").split("</SCRIPT>").join("<\\/script>")}</script>
   <script>${js}</script>
 </body>
 </html>`;

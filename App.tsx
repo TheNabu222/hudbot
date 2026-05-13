@@ -59,8 +59,14 @@ import {
   Gift,
   ArrowDown,
   Video,
+  Map as MapIcon,
+  Navigation,
+  MapPin,
+  FolderOpen,
+  Bot
 } from "lucide-react";
 import Matter from "matter-js";
+import { AIAssistant } from "./components/AIAssistant";
 import {
   Project,
   SceneObject,
@@ -80,8 +86,10 @@ import { analyzeAssetVibe } from "./services/gemini";
 import { generateExportHtml } from "./utils/exportHtml";
 import { TEMPLATES } from "./utils/templates";
 import { ImageEditorModal } from "./components/ImageEditorModal";
+import { MapMaker } from "./components/MapMaker";
 import { AISpriteModal } from "./components/AISpriteModal";
 import { AssetPickerModal } from "./components/AssetPickerModal";
+import { AssetLibraryManager } from "./components/AssetLibraryManager";
 import { get, set } from "idb-keyval";
 
 const TypewriterText = ({
@@ -130,12 +138,12 @@ const LabelWithHelp = ({
   className?: string;
 }) => (
   <div className={`flex items-center gap-1 group relative w-max ${className}`}>
-    <label className="text-xs text-neutral-500">{label}</label>
+    <label className="text-sm font-medium text-neutral-400">{label}</label>
     <HelpCircle
-      size={12}
+      size={14}
       className="text-neutral-500 hover:text-neutral-300 cursor-help transition-colors"
     />
-    <div className="absolute left-0 top-full mt-1 hidden group-hover:block w-48 p-2 bg-neutral-950 text-neutral-300 text-[10px] rounded border border-neutral-700 shadow-xl z-[100] pointer-events-none whitespace-normal font-normal leading-relaxed">
+    <div className="absolute left-0 top-full mt-1 hidden group-hover:block w-56 p-2 bg-neutral-950 text-neutral-300 text-sm rounded border border-neutral-700 shadow-xl z-[100] pointer-events-none whitespace-normal font-normal leading-relaxed">
       {helpText}
     </div>
   </div>
@@ -174,6 +182,7 @@ const App: React.FC = () => {
     dialogueTrees: [],
     inventoryItems: [],
     quests: [],
+    maps: [],
     gameFlags: [],
   });
 
@@ -216,14 +225,19 @@ const App: React.FC = () => {
     | "ui_maker"
     | "ui_stage"
     | "rpg_systems"
+    | "map_maker"
+    | "assets"
   >("stage");
+  const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [leftSidebarTab, setLeftSidebarTab] = useState<"librarian" | "theme">(
     "librarian",
   );
   const [rightSidebarTab, setRightSidebarTab] = useState<
-    "properties" | "layers" | "prefabs"
+    "properties" | "layers" | "prefabs" | "assets"
   >("properties");
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(256);
   const [rightSidebarWidth, setRightSidebarWidth] = useState(288);
+  const [assetPaletteCategory, setAssetPaletteCategory] = useState<string>("all");
   const [activeTreeId, setActiveTreeId] = useState<string | null>(null);
   const [playerInventory, setPlayerInventory] = useState<string[]>([]);
   const [playerFlags, setPlayerFlags] = useState<string[]>([]);
@@ -236,10 +250,16 @@ const App: React.FC = () => {
     treeId: string;
     nodeId: string;
   } | null>(null);
+  const [runtimeOverrides, setRuntimeOverrides] = useState<Record<string, {x: number, y: number}>>({});
+  const [runtimeDraggingId, setRuntimeDraggingId] = useState<string | null>(null);
+  const [quickEditPos, setQuickEditPos] = useState<{ x: number, y: number } | null>(null);
+  const [quickEditDragging, setQuickEditDragging] = useState<{ startX: number, startY: number, startPos: { x: number, y: number } } | null>(null);
   const [activeCutscene, setActiveCutscene] = useState<{
     src: string;
     targetSceneId?: string;
   } | null>(null);
+  const [isMapOpen, setIsMapOpen] = useState(false);
+  const [activeFastTravelMapId, setActiveFastTravelMapId] = useState<string | null>(null);
   const [playerNeeds, setPlayerNeeds] = useState<Record<string, number>>({
     rest: 100,
     hunger: 100,
@@ -328,6 +348,56 @@ const App: React.FC = () => {
     setProject(next);
   };
 
+  const hydrateProject = (parsed: any): Project => {
+    const assets = parsed.assets || [];
+    return {
+      ...parsed,
+      dialogueTrees: parsed.dialogueTrees
+        ? parsed.dialogueTrees.map((t: any) => ({
+            ...t,
+            nodes: t.nodes
+              ? t.nodes.map((n: any) => ({
+                  ...n,
+                  choices: n.choices || [],
+                }))
+              : [],
+          }))
+        : [],
+      inventoryItems: parsed.inventoryItems || [],
+      assets: assets,
+      scenes: parsed.scenes
+        ? parsed.scenes.map((s: any) => ({
+            ...s,
+            objects: s.objects.map((o: any) => {
+              // Hydrate missing srcs from assets
+              if (!o.src && o._assetId) {
+                const asset = assets.find((a: any) => a.id === o._assetId);
+                if (asset) return { ...o, src: asset.src };
+              }
+              return o;
+            }),
+          }))
+        : [],
+      uiMenus: parsed.uiMenus
+        ? parsed.uiMenus.map((s: any) => ({
+            ...s,
+            objects: s.objects.map((o: any) => {
+              if (!o.src && o._assetId) {
+                const asset = assets.find((a: any) => a.id === o._assetId);
+                if (asset) return { ...o, src: asset.src };
+              }
+              return o;
+            }),
+          }))
+        : [],
+      maps: parsed.maps || [],
+      currentUiMenuId: parsed.currentUiMenuId || null,
+      globalSettings: {
+        ...(parsed.globalSettings || {}),
+      },
+    };
+  };
+
   // Load from IndexedDB (fallback to LocalStorage) on mount
   useEffect(() => {
     const loadProject = async () => {
@@ -340,40 +410,13 @@ const App: React.FC = () => {
           }
         }
         if (saved) {
-          const parsed = saved;
           setProject((prev) => ({
             ...prev,
-            ...parsed,
-            dialogueTrees: parsed.dialogueTrees
-              ? parsed.dialogueTrees.map((t: any) => ({
-                  ...t,
-                  nodes: t.nodes
-                    ? t.nodes.map((n: any) => ({
-                        ...n,
-                        choices: n.choices || [],
-                      }))
-                    : [],
-                }))
-              : [],
-            inventoryItems: parsed.inventoryItems || [],
-            assets: parsed.assets || [],
-            scenes: parsed.scenes
-              ? parsed.scenes.map((s: any) => ({
-                  ...s,
-                  objects: s.objects || [],
-                }))
-              : prev.scenes,
-            uiMenus: parsed.uiMenus
-              ? parsed.uiMenus.map((s: any) => ({
-                  ...s,
-                  objects: s.objects || [],
-                }))
-              : prev.uiMenus || [],
-            currentUiMenuId: parsed.currentUiMenuId || null,
+            ...hydrateProject(saved),
             globalSettings: {
               ...prev.globalSettings,
-              ...(parsed.globalSettings || {}),
-            },
+              ...(saved.globalSettings || {}),
+            }
           }));
         }
       } catch (e) {
@@ -388,7 +431,31 @@ const App: React.FC = () => {
     const saveProject = async () => {
       setSaveStatus("saving");
       try {
-        await set("neocities_project", project);
+        // Strip out duplicated large base64 strings before saving
+        const strippedProject = {
+          ...project,
+          scenes: project.scenes.map((s) => ({
+            ...s,
+            objects: s.objects.map((o) => {
+              if (o.src && o.src.startsWith("data:") && project.assets.some(a => a.src === o.src)) {
+                const asset = project.assets.find(a => a.src === o.src);
+                return { ...o, src: "", _assetId: asset?.id };
+              }
+              return o;
+            })
+          })),
+          uiMenus: project.uiMenus ? project.uiMenus.map((m) => ({
+            ...m,
+            objects: m.objects.map((o) => {
+              if (o.src && o.src.startsWith("data:") && project.assets.some(a => a.src === o.src)) {
+                const asset = project.assets.find(a => a.src === o.src);
+                return { ...o, src: "", _assetId: asset?.id };
+              }
+              return o;
+            })
+          })) : []
+        };
+        await set("neocities_project", strippedProject);
         setSaveStatus("saved");
       } catch (e) {
         console.error("Failed to save project to IndexedDB", e);
@@ -404,7 +471,30 @@ const App: React.FC = () => {
 
   const handleExportProject = () => {
     try {
-      const jsonStr = JSON.stringify(project);
+      const strippedProject = {
+        ...project,
+        scenes: project.scenes.map((s) => ({
+          ...s,
+          objects: s.objects.map((o) => {
+            if (o.src && o.src.startsWith("data:") && project.assets.some(a => a.src === o.src)) {
+              const asset = project.assets.find(a => a.src === o.src);
+              return { ...o, src: "", _assetId: asset?.id };
+            }
+            return o;
+          })
+        })),
+        uiMenus: project.uiMenus ? project.uiMenus.map((m) => ({
+          ...m,
+          objects: m.objects.map((o) => {
+            if (o.src && o.src.startsWith("data:") && project.assets.some(a => a.src === o.src)) {
+              const asset = project.assets.find(a => a.src === o.src);
+              return { ...o, src: "", _assetId: asset?.id };
+            }
+            return o;
+          })
+        })) : []
+      };
+      const jsonStr = JSON.stringify(strippedProject);
       const blob = new Blob([jsonStr], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const downloadAnchorNode = document.createElement("a");
@@ -451,7 +541,7 @@ const App: React.FC = () => {
         }
         const parsed = JSON.parse(content);
         if (parsed && parsed.id && parsed.scenes) {
-          setProject(parsed);
+          setProject(hydrateProject(parsed));
           setHistory({ past: [], future: [] });
           showError("Project loaded successfully!");
         } else {
@@ -516,33 +606,6 @@ const App: React.FC = () => {
     };
   }, [isPlaying, project.globalSettings.useDayNightCycle]);
 
-  // Auto-save game state in preview mode
-  useEffect(() => {
-    if (isPlaying) {
-      const stateToSave = {
-        inventory: playerInventory,
-        needs: playerNeeds,
-        time: gameTime,
-        skills: playerSkills,
-        collectedObjects: collectedObjects,
-        flags: playerFlags,
-      };
-      localStorage.setItem(
-        `neocities_game_save_${project.id}`,
-        JSON.stringify(stateToSave),
-      );
-    }
-  }, [
-    playerInventory,
-    playerNeeds,
-    gameTime,
-    playerSkills,
-    collectedObjects,
-    playerFlags,
-    isPlaying,
-    project.id,
-  ]);
-
   useEffect(() => {
     if (isPlaying) {
       const engine = Matter.Engine.create();
@@ -583,7 +646,12 @@ const App: React.FC = () => {
               obj.y + obj.height / 2,
               obj.width,
               obj.height,
-              { restitution: 0.6, friction: 0.1, density: 0.05 },
+              { 
+                isStatic: !!obj.physicsStatic,
+                restitution: obj.physicsBounciness ?? 0.6, 
+                friction: obj.physicsFriction ?? 0.1, 
+                density: obj.physicsDensity ?? 0.05 
+              },
             );
             Matter.Body.setAngle(body, obj.rotation * (Math.PI / 180));
             bodies[obj.id] = body;
@@ -654,7 +722,7 @@ const App: React.FC = () => {
   const stageRef = useRef<HTMLDivElement>(null);
 
   const getWorkingScene = () => {
-    if (editorMode === "ui_stage") {
+    if (editorMode === "ui_stage" && !isPlaying) {
       return (
         (project.uiMenus || []).find((s) => s.id === project.currentUiMenuId) ||
         (project.uiMenus || [])[0] ||
@@ -681,7 +749,7 @@ const App: React.FC = () => {
 
   const updateScene = (updates: Partial<typeof currentScene>) => {
     if (!currentScene) return;
-    const isUI = editorMode === "ui_stage";
+    const isUI = editorMode === "ui_stage" && !isPlaying;
     const newProject = {
       ...project,
       [isUI ? "uiMenus" : "scenes"]: (
@@ -693,7 +761,7 @@ const App: React.FC = () => {
 
   const updateObject = (id: string, updates: Partial<SceneObject>) => {
     if (!currentScene) return;
-    const isUI = editorMode === "ui_stage";
+    const isUI = editorMode === "ui_stage" && !isPlaying;
     const newProject = {
       ...project,
       [isUI ? "uiMenus" : "scenes"]: (
@@ -714,7 +782,7 @@ const App: React.FC = () => {
 
   const updateObjectTransient = (id: string, updates: Partial<SceneObject>) => {
     if (!currentScene) return;
-    const isUI = editorMode === "ui_stage";
+    const isUI = editorMode === "ui_stage" && !isPlaying;
     setProject((prev) => ({
       ...prev,
       [isUI ? "uiMenus" : "scenes"]: (
@@ -842,13 +910,14 @@ const App: React.FC = () => {
           zIndex: currentScene?.objects.length || 0,
           opacity: 1,
           locked: false,
-          cursor: asset.type === "prefab" ? "pointer" : "default",
+          cursor: asset.type === "prefab" || asset.type === "audio" ? "pointer" : "default",
           animation: "none",
-          interaction: "none",
+          interaction: asset.type === "audio" ? "sound" : "none",
+          interactionData: asset.type === "audio" ? asset.id : undefined,
           isVideo: asset.type === "video",
           isHitbox: asset.type === "hitbox",
           isScript: asset.type === "script",
-          isText: asset.type === "text",
+          isText: asset.type === "text" || asset.type === "audio",
           isUiElement: asset.type === "ui_element",
           uiElementType: asset.uiElementType,
           uiColorPrimary: "#00ffff",
@@ -860,6 +929,8 @@ const App: React.FC = () => {
           textContent:
             asset.type === "text"
               ? "New Text"
+              : asset.type === "audio"
+                ? "🎵"
               : asset.type === "ui_element" && asset.uiElementType === "tooltip"
                 ? "Tooltip text"
                 : undefined,
@@ -887,7 +958,7 @@ const App: React.FC = () => {
 
   // Resizing state
   const [resizingId, setResizingId] = useState<string | null>(null);
-  const [resizeStart, setResizeStart] = useState({ w: 0, h: 0, x: 0, y: 0 });
+  const [resizeStart, setResizeStart] = useState({ w: 0, h: 0, x: 0, y: 0, objX: 0, objY: 0, anchor: 'se' });
 
   const [rotatingId, setRotatingId] = useState<string | null>(null);
   const [rotateStart, setRotateStart] = useState({
@@ -899,7 +970,23 @@ const App: React.FC = () => {
 
   // Object dragging on stage
   const handleObjectPointerDown = (e: React.PointerEvent, obj: SceneObject) => {
-    if (isPlaying || obj.locked) return;
+    if (isPlaying) {
+      if (!obj.isDraggable) return;
+      e.stopPropagation();
+      setRuntimeDraggingId(obj.id);
+      
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      setDragOffset({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      });
+
+      try {
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      } catch (err) {}
+      return;
+    }
+    if (obj.locked) return;
     e.stopPropagation();
 
     if (e.shiftKey) {
@@ -942,12 +1029,12 @@ const App: React.FC = () => {
     } catch (err) {}
   };
 
-  const handleResizePointerDown = (e: React.PointerEvent, obj: SceneObject) => {
+  const handleResizePointerDown = (e: React.PointerEvent, obj: SceneObject, anchor: string = 'se') => {
     if (isPlaying || obj.locked) return;
     e.stopPropagation();
     setResizingId(obj.id);
     dragStartProjectRef.current = project;
-    setResizeStart({ w: obj.width, h: obj.height, x: e.clientX, y: e.clientY });
+    setResizeStart({ w: obj.width, h: obj.height, x: e.clientX, y: e.clientY, objX: obj.x, objY: obj.y, anchor });
     try {
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
     } catch (err) {}
@@ -980,6 +1067,15 @@ const App: React.FC = () => {
 
   const handleObjectPointerMove = (e: React.PointerEvent) => {
     if (isPlaying) {
+      if (runtimeDraggingId && stageRef.current) {
+        const rect = stageRef.current.getBoundingClientRect();
+        let newX = e.clientX - rect.left - dragOffset.x;
+        let newY = e.clientY - rect.top - dragOffset.y;
+        setRuntimeOverrides(prev => ({
+          ...prev, [runtimeDraggingId]: { x: newX, y: newY }
+        }));
+      }
+
       if (stageRef.current) {
         const rect = stageRef.current.getBoundingClientRect();
         const mx = (e.clientX - rect.left) / rect.width - 0.5;
@@ -992,9 +1088,28 @@ const App: React.FC = () => {
     if (resizingId) {
       const dx = e.clientX - resizeStart.x;
       const dy = e.clientY - resizeStart.y;
+      
+      let newW = resizeStart.w;
+      let newH = resizeStart.h;
+      let newX = resizeStart.objX;
+      let newY = resizeStart.objY;
+      
+      if (resizeStart.anchor.includes("e")) newW = Math.max(10, resizeStart.w + dx);
+      if (resizeStart.anchor.includes("w")) {
+        newW = Math.max(10, resizeStart.w - dx);
+        newX = resizeStart.objX + (resizeStart.w - newW);
+      }
+      if (resizeStart.anchor.includes("s")) newH = Math.max(10, resizeStart.h + dy);
+      if (resizeStart.anchor.includes("n")) {
+        newH = Math.max(10, resizeStart.h - dy);
+        newY = resizeStart.objY + (resizeStart.h - newH);
+      }
+
       updateObjectTransient(resizingId, {
-        width: Math.max(10, resizeStart.w + dx),
-        height: Math.max(10, resizeStart.h + dy),
+        width: newW,
+        height: newH,
+        x: newX,
+        y: newY,
       });
       return;
     }
@@ -1061,7 +1176,7 @@ const App: React.FC = () => {
       const dy = newY - startDragObj.y;
 
       setProject((prev) => {
-        const isUI = editorMode === "ui_stage";
+        const isUI = editorMode === "ui_stage" && !isPlaying;
         const sceneList = isUI ? prev.uiMenus : prev.scenes;
         if (!sceneList) return prev;
 
@@ -1090,6 +1205,18 @@ const App: React.FC = () => {
   };
 
   const handleObjectPointerUp = (e: React.PointerEvent) => {
+    if (isPlaying) {
+      if (runtimeDraggingId) {
+        setRuntimeDraggingId(null);
+        try {
+          (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        } catch (err) {}
+      }
+      setSelectionBox(null);
+      setSelectionStart(null);
+      return;
+    }
+
     if (selectionBox) {
       const bx = Math.min(selectionBox.x, selectionBox.x + selectionBox.w);
       const by = Math.min(selectionBox.y, selectionBox.y + selectionBox.h);
@@ -1469,21 +1596,46 @@ const App: React.FC = () => {
     }
   };
 
+  // Quick Edit UI Dragging
+  useEffect(() => {
+    if (!quickEditDragging) return;
+    const handlePointerMove = (e: PointerEvent) => {
+      setQuickEditPos({
+        x: quickEditDragging.startPos.x + (e.clientX - quickEditDragging.startX),
+        y: quickEditDragging.startPos.y + (e.clientY - quickEditDragging.startY),
+      });
+    };
+    const handlePointerUp = () => setQuickEditDragging(null);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [quickEditDragging]);
+
   // Sidebar Resizing Logic
   useEffect(() => {
     const handlePointerMove = (e: PointerEvent) => {
-      if (document.body.classList.contains("resizing-sidebar")) {
-        const newWidth = Math.max(
-          200,
-          Math.min(800, document.body.clientWidth - e.clientX),
-        );
-        setRightSidebarWidth(newWidth);
+      if (document.body.classList.contains("resizing-left-sidebar")) {
+        setLeftSidebarWidth((w) => {
+          const newWidth = e.clientX; // Left sidebar width is approximately the clientX
+          if (newWidth < 120) return 0;
+          if (w === 0 && newWidth > 30) return 256;
+          return Math.max(0, Math.min(800, newWidth));
+        });
+      } else if (document.body.classList.contains("resizing-right-sidebar")) {
+        setRightSidebarWidth((w) => {
+          const newWidth = document.body.clientWidth - e.clientX;
+          if (newWidth < 120) return 0;
+          if (w === 0 && newWidth > 30) return 288;
+          return Math.max(0, Math.min(800, newWidth));
+        });
       }
     };
     const handlePointerUp = () => {
-      if (document.body.classList.contains("resizing-sidebar")) {
-        document.body.classList.remove("resizing-sidebar");
-      }
+      document.body.classList.remove("resizing-left-sidebar");
+      document.body.classList.remove("resizing-right-sidebar");
     };
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
@@ -1513,7 +1665,14 @@ const App: React.FC = () => {
     updateObject(id, { zIndex: obj.zIndex + dir });
   };
 
-  const [previewDialogue, setPreviewDialogue] = useState<string | null>(null);
+  const [previewDialogueText, _setPreviewDialogue] = useState<string | null>(null);
+  const previewDialogueRef = useRef<number | NodeJS.Timeout | null>(null);
+  const setPreviewDialogue = (text: string | null) => {
+    _setPreviewDialogue(text);
+    if (previewDialogueRef.current) clearTimeout(previewDialogueRef.current);
+    // Dialogues must be clicked to close
+  };
+  const previewDialogue = previewDialogueText;
 
   const handleObjectClick = (obj: SceneObject) => {
     if (!isPlaying) return;
@@ -1546,7 +1705,7 @@ const App: React.FC = () => {
         setPreviewDialogue(
           `[Skill Check Failed] ${obj.requiredSkill} roll: ${roll} vs ${diff}`,
         );
-        setTimeout(() => setPreviewDialogue(null), 3000);
+        
         return; // Stop interaction!
       }
     }
@@ -1565,8 +1724,8 @@ const App: React.FC = () => {
         let changed = false;
         const nextNeeds = { ...playerNeeds };
         for (const [key, val] of Object.entries(effect) as [string, number][]) {
-          if (val && nextNeeds[key] !== undefined) {
-            nextNeeds[key] += val;
+          if (val) {
+            nextNeeds[key] = (nextNeeds[key] || 0) + val;
             changed = true;
           }
         }
@@ -1576,6 +1735,16 @@ const App: React.FC = () => {
       }
     }
 
+    if (obj.grantSkill && obj.grantSkill !== "none") {
+      const amount = obj.grantSkillValue || 1;
+      setPlayerSkills(prev => ({
+        ...prev,
+        [obj.grantSkill as string]: Math.min(20, (prev[obj.grantSkill as string] || 0) + amount)
+      }));
+      setPreviewDialogue(`Gained +${amount} ${obj.grantSkill}!`);
+      
+    }
+
     if (obj.requireItemId && !playerInventory.includes(obj.requireItemId)) {
       const item = project.inventoryItems.find(
         (i) => i.id === obj.requireItemId,
@@ -1583,7 +1752,7 @@ const App: React.FC = () => {
       setPreviewDialogue(
         `You need ${item?.name || "a specific item"} to interact with this.`,
       );
-      setTimeout(() => setPreviewDialogue(null), 3000);
+      
       return;
     }
 
@@ -1603,13 +1772,13 @@ const App: React.FC = () => {
       );
       if (reqItem) {
         setPreviewDialogue(`You used up: ${reqItem.name}`);
-        setTimeout(() => setPreviewDialogue(null), 3000);
+        
       }
     }
 
     if (obj.interaction === "dialogue" && obj.interactionData) {
       setPreviewDialogue(obj.interactionData);
-      setTimeout(() => setPreviewDialogue(null), 3000);
+      
     } else if (obj.interaction === "start-dialogue" && obj.dialogueTreeId) {
       const tree = project.dialogueTrees.find(
         (t) => t.id === obj.dialogueTreeId,
@@ -1629,10 +1798,10 @@ const App: React.FC = () => {
         setPreviewDialogue(
           obj.interactionData || `You obtained: ${item?.name || "an item"}!`,
         );
-        setTimeout(() => setPreviewDialogue(null), 3000);
+        
       } else if (!obj.giveItemId) {
         setPreviewDialogue(obj.interactionData || `You interacted with this!`);
-        setTimeout(() => setPreviewDialogue(null), 3000);
+        
       }
 
       if (obj.interaction === "collect") {
@@ -1703,6 +1872,39 @@ const App: React.FC = () => {
       }
     } else if (obj.interaction === "toggle_inventory") {
       setIsInventoryOpen((prev) => !prev);
+    } else if (obj.interaction === "restart_scene") {
+      setPreviewDialogue("");
+      setPlayerInventory([]);
+      setCollectedObjects([]);
+      setRuntimeOverrides({});
+    } else if (obj.interaction === "restart_game") {
+      setPreviewDialogue("");
+      setPlayerInventory([]);
+      setCollectedObjects([]);
+      setPlayerFlags([]);
+      setPlayerSkills([]);
+      setRuntimeOverrides({});
+      setPlayerNeeds({});
+      setActiveUiMenus([]);
+      setIsInventoryOpen(false);
+      setIsCraftingOpen(false);
+      setIsQuestLogOpen(false);
+      const firstScene = (project.scenes && project.scenes[0]) || null;
+      if (firstScene) {
+        setProject(p => ({ ...p, currentSceneId: firstScene.id }));
+      }
+    } else if (obj.interaction === "toggle_fullscreen") {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => console.error("Fullscreen error", err));
+      } else {
+        document.exitFullscreen().catch(err => console.error("Exit fullscreen error", err));
+      }
+    } else if (obj.interaction === "toggle_mute") {
+      // In a real implementation this would toggle a global volume state, 
+      // but without a global audio context we can just mock it or toggle a player flag
+      setPreviewDialogue("Audio mute toggled.");
+    } else if (obj.interaction === "exit_game") {
+      setIsPlaying(false);
     } else if (obj.interaction === "open_crafting") {
       setIsCraftingOpen(true);
     } else if (obj.interaction === "open_quest_log") {
@@ -1710,9 +1912,9 @@ const App: React.FC = () => {
     } else if (obj.interaction === "set_flag" && obj.interactionData) {
       if (!playerFlags.includes(obj.interactionData)) {
         setPlayerFlags((prev) => [...prev, obj.interactionData!]);
-        setPreviewDialogue(`Story Event Triggered!`);
-        setTimeout(() => setPreviewDialogue(null), 3000);
       }
+      // Show the event text every time they interact with this object!
+      setPreviewDialogue(obj.interactionData);
     } else if (obj.interaction === "save_game") {
       const stateToSave = {
         inventory: playerInventory,
@@ -1727,7 +1929,7 @@ const App: React.FC = () => {
         JSON.stringify(stateToSave),
       );
       setPreviewDialogue("Game Saved!");
-      setTimeout(() => setPreviewDialogue(null), 2000);
+      
     } else if (obj.interaction === "load_game") {
       const saved = localStorage.getItem(`neocities_game_save_${project.id}`);
       if (saved) {
@@ -1747,7 +1949,7 @@ const App: React.FC = () => {
       } else {
         setPreviewDialogue("No save game found.");
       }
-      setTimeout(() => setPreviewDialogue(null), 3000);
+      
     } else if (obj.interaction === "skill_check") {
       const skill = obj.requiredSkill || "none";
       const dc = obj.skillCheckDifficulty || 10;
@@ -1762,7 +1964,7 @@ const App: React.FC = () => {
         : `[${skillName} Check: ${total} vs DC ${dc} - FAILED]\n\nYou failed to interact with this object.`;
 
       setPreviewDialogue(resultText);
-      setTimeout(() => setPreviewDialogue(null), 4000);
+      
     } else if (obj.interaction === "sound" && obj.interactionData) {
       const audioAsset = project.assets.find(
         (a) => a.id === obj.interactionData,
@@ -1801,7 +2003,7 @@ const App: React.FC = () => {
             } catch (err) {
               console.error("Script execution failed", err);
               setPreviewDialogue("Script execution failed!");
-              setTimeout(() => setPreviewDialogue(null), 3000);
+              
             }
           })
           .catch((err) => {
@@ -1898,14 +2100,14 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-      <header className="flex items-center justify-between px-4 py-2 bg-neutral-950 border-b border-neutral-800 relative">
+      <header className="flex flex-wrap items-center justify-between gap-y-4 px-6 py-4 bg-neutral-950 border-b border-neutral-800 relative z-[2100]">
         <div className="flex items-center gap-4">
           <h1 className="text-lg font-bold text-emerald-400">
             Neocities Game Builder
           </h1>
           <button
             onClick={() => setIsTemplateModalOpen(true)}
-            className="flex items-center gap-1 bg-amber-500 hover:bg-amber-400 text-black px-2 py-1 rounded text-xs font-bold transition-colors"
+            className="flex items-center gap-1 bg-amber-500 hover:bg-amber-400 text-black px-2 py-1 rounded text-sm font-bold transition-colors"
           >
             <Plus size={14} /> New
           </button>
@@ -1917,7 +2119,13 @@ const App: React.FC = () => {
           />
         </div>
 
-        <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-lg border border-neutral-800 absolute left-1/2 -translate-x-1/2">
+        <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-lg border border-neutral-800 mx-auto overflow-x-auto max-w-full">
+          <button
+            onClick={() => setEditorMode("assets")}
+            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${editorMode === "assets" ? "bg-neutral-700 text-white" : "text-neutral-400 hover:text-neutral-200 flex items-center gap-2"}`}
+          >
+            <FolderOpen size={14} /> Assets
+          </button>
           <button
             onClick={() => setEditorMode("scenes")}
             className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${editorMode === "scenes" ? "bg-neutral-700 text-white" : "text-neutral-400 hover:text-neutral-200 flex items-center gap-2"}`}
@@ -1954,6 +2162,12 @@ const App: React.FC = () => {
           >
             <Shield size={14} /> RPG Systems
           </button>
+          <button
+            onClick={() => setEditorMode("map_maker")}
+            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${editorMode === "map_maker" ? "bg-neutral-700 text-white" : "text-neutral-400 hover:text-neutral-200 flex items-center gap-2"}`}
+          >
+            <MapIcon size={14} /> Maps
+          </button>
           {editorMode === "ui_stage" && (
             <button
               onClick={() => setEditorMode("ui_stage")}
@@ -1966,7 +2180,7 @@ const App: React.FC = () => {
 
         <div className="flex items-center gap-2">
           {/* Save Status Indicator */}
-          <div className="flex items-center gap-1 mr-2 text-xs font-mono">
+          <div className="flex items-center gap-1 mr-2 text-sm font-mono">
             {saveStatus === "saving" && (
               <span className="text-amber-500 animate-pulse">Saving...</span>
             )}
@@ -2046,13 +2260,13 @@ const App: React.FC = () => {
           <div className="flex items-center gap-1 mr-2">
             <button
               onClick={handleExportProject}
-              className="flex items-center gap-1 px-2 py-1.5 bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 rounded text-xs transition-colors"
+              className="flex items-center gap-1 px-2 py-1.5 bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 rounded text-sm transition-colors"
               title="Backup Project (JSON)"
             >
               <Save size={14} /> Backup
             </button>
             <label
-              className="flex items-center gap-1 px-2 py-1.5 bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 rounded text-xs transition-colors cursor-pointer"
+              className="flex items-center gap-1 px-2 py-1.5 bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 rounded text-sm transition-colors cursor-pointer"
               title="Restore Project (JSON or HTML)"
             >
               <Upload size={14} /> Restore
@@ -2067,45 +2281,38 @@ const App: React.FC = () => {
           </div>
 
           <button
+            onClick={() => setShowAIAssistant((prev) => !prev)}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm font-medium transition-colors ${showAIAssistant ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/50" : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200 border border-transparent"}`}
+          >
+            <Bot size={16} />
+            AI Assistant
+          </button>
+          
+          <div className="w-px h-6 bg-neutral-800 mx-1"></div>
+
+          <button
             onClick={() => {
               const newState = !isPlaying;
               setIsPlaying(newState);
+              setRuntimeOverrides({});
               if (newState) {
-                // Try to load save game state
-                try {
-                  const saved = localStorage.getItem(
-                    `neocities_game_save_${project.id}`,
-                  );
-                  if (saved) {
-                    const parsed = JSON.parse(saved);
-                    if (parsed.inventory) setPlayerInventory(parsed.inventory);
-                    if (parsed.needs) setPlayerNeeds(parsed.needs);
-                    if (parsed.time) setGameTime(parsed.time);
-                    if (parsed.skills) setPlayerSkills(parsed.skills);
-                    if (parsed.collectedObjects)
-                      setCollectedObjects(parsed.collectedObjects);
-                    if (parsed.flags) setPlayerFlags(parsed.flags);
-                  } else {
-                    setPlayerInventory([]);
-                    setCollectedObjects([]);
-                    setPlayerNeeds({
-                      rest: 100,
-                      hunger: 100,
-                      connection: 100,
-                      spiritual: 100,
-                      novelty: 100,
-                    });
-                    setPlayerSkills({
-                      naturalist: 5,
-                      occultist: 2,
-                      scribal: 8,
-                    });
-                    setGameTime(8);
-                  }
-                } catch (e) {
-                  setPlayerInventory([]);
-                  setCollectedObjects([]);
-                }
+                setTriggeredObjects(new Set());
+                setPlayerInventory([]);
+                setCollectedObjects([]);
+                setPlayerFlags([]);
+                setPlayerNeeds({
+                  rest: 100,
+                  hunger: 100,
+                  connection: 100,
+                  spiritual: 100,
+                  novelty: 100,
+                });
+                setPlayerSkills({
+                  naturalist: 5,
+                  occultist: 2,
+                  scribal: 8,
+                });
+                setGameTime(8);
               } else {
                 setPlayerInventory([]);
                 setCollectedObjects([]);
@@ -2141,7 +2348,16 @@ const App: React.FC = () => {
         {(editorMode === "stage" || editorMode === "ui_stage") && (
           <>
             {/* Left Sidebar */}
-            <aside className="w-64 bg-neutral-900 border-r border-neutral-800 flex flex-col">
+            <aside 
+              className="bg-neutral-900 border-r border-neutral-800 flex flex-col relative flex-shrink-0"
+              style={{ width: leftSidebarWidth }}
+            >
+              <div
+                className="absolute top-0 bottom-0 -right-[3px] w-[6px] cursor-col-resize z-[100] hover:bg-emerald-500/50"
+                onPointerDown={() =>
+                  document.body.classList.add("resizing-left-sidebar")
+                }
+              />
               <div className="flex border-b border-neutral-800 bg-neutral-950">
                 <button
                   onClick={() => setLeftSidebarTab("librarian")}
@@ -2163,14 +2379,14 @@ const App: React.FC = () => {
                     <div className="flex gap-2 w-full justify-between">
                       <button
                         onClick={() => setIsAiModalOpen(true)}
-                        className="cursor-pointer text-[10px] bg-emerald-600 border border-emerald-500 text-white font-bold px-2 py-1 rounded hover:bg-emerald-500 flex items-center gap-1 shadow-lg"
+                        className="cursor-pointer text-sm bg-emerald-600 border border-emerald-500 text-white font-bold px-2 py-1 rounded hover:bg-emerald-500 flex items-center gap-1 shadow-lg"
                       >
                         <Wand2 size={10} /> AI Make
                       </button>
                       <button
                         onClick={fetchFromGitHub}
                         disabled={isFetchingGithub}
-                        className="cursor-pointer text-[10px] bg-indigo-500/20 text-indigo-400 px-2 py-1 rounded hover:bg-indigo-500/30 disabled:opacity-50"
+                        className="cursor-pointer text-sm bg-indigo-500/20 text-indigo-400 px-2 py-1 rounded hover:bg-indigo-500/30 disabled:opacity-50"
                       >
                         {isFetchingGithub ? "Syncing..." : "Sync GH"}
                       </button>
@@ -2204,13 +2420,13 @@ const App: React.FC = () => {
                             "Unused base64 assets removed to save space.",
                           );
                         }}
-                        className="cursor-pointer text-[10px] bg-red-500/20 text-red-400 px-2 py-1 rounded hover:bg-red-500/30 ring-1 ring-red-500/50 hover:ring-red-500"
+                        className="cursor-pointer text-sm bg-red-500/20 text-red-400 px-2 py-1 rounded hover:bg-red-500/30 ring-1 ring-red-500/50 hover:ring-red-500"
                         title="Remove unused local assets to fix export size"
                       >
                         Purge Base64
                       </button>
                       <label
-                        className="cursor-pointer text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded hover:bg-emerald-500/30 ring-1 ring-emerald-500/50 hover:ring-emerald-500"
+                        className="cursor-pointer text-sm bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded hover:bg-emerald-500/30 ring-1 ring-emerald-500/50 hover:ring-emerald-500"
                         title="Upload a folder of assets"
                       >
                         Folder
@@ -2234,6 +2450,13 @@ const App: React.FC = () => {
                                   const isVideo =
                                     file.type.startsWith("video/");
                                   if (!isAudio && !isImage && !isVideo) {
+                                    resolve();
+                                    return;
+                                  }
+
+                                  const MAX_SIZE = 5 * 1024 * 1024; // 5MB limit
+                                  if (file.size > MAX_SIZE) {
+                                    showError(`File ${file.name} is too large. Max size is 5MB to prevent export crashes.`);
                                     resolve();
                                     return;
                                   }
@@ -2291,7 +2514,7 @@ const App: React.FC = () => {
                         />
                       </label>
                       <label
-                        className="cursor-pointer text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded hover:bg-emerald-500/30 ring-1 ring-emerald-500/50 hover:ring-emerald-500"
+                        className="cursor-pointer text-sm bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded hover:bg-emerald-500/30 ring-1 ring-emerald-500/50 hover:ring-emerald-500"
                         title="Upload one or more files"
                       >
                         Files
@@ -2317,6 +2540,13 @@ const App: React.FC = () => {
                                   const isVideo =
                                     file.type.startsWith("video/");
                                   if (!isAudio && !isImage && !isVideo) {
+                                    resolve();
+                                    return;
+                                  }
+
+                                  const MAX_SIZE = 5 * 1024 * 1024; // 5MB limit
+                                  if (file.size > MAX_SIZE) {
+                                    showError(`File ${file.name} is too large. Max size is 5MB to prevent export crashes.`);
                                     resolve();
                                     return;
                                   }
@@ -2405,12 +2635,12 @@ const App: React.FC = () => {
                           placeholder="Search assets..."
                           value={assetSearch}
                           onChange={(e) => setAssetSearch(e.target.value)}
-                          className="w-full bg-neutral-800 text-neutral-300 text-xs rounded-lg pl-8 pr-3 py-2 border border-neutral-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          className="w-full bg-neutral-800 text-neutral-300 text-sm rounded-lg pl-8 pr-3 py-2 border border-neutral-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
 
                       {/* Breadcrumb Navigation */}
-                      <div className="flex items-center gap-1 text-xs text-neutral-400 overflow-x-auto pb-1 custom-scrollbar">
+                      <div className="flex items-center gap-1 text-sm text-neutral-400 overflow-x-auto pb-1 custom-scrollbar">
                         <button
                           onClick={() => {
                             setActiveBin("all");
@@ -2463,10 +2693,10 @@ const App: React.FC = () => {
                               name: "UI Panel",
                             })
                           }
-                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
                         >
                           <Square size={16} className="text-emerald-400" />
-                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                          <span className="text-sm font-medium text-emerald-200 uppercase">
                             Panel
                           </span>
                         </div>
@@ -2479,13 +2709,13 @@ const App: React.FC = () => {
                               name: "UI Button",
                             })
                           }
-                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
                         >
                           <MousePointerClick
                             size={16}
                             className="text-emerald-400"
                           />
-                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                          <span className="text-sm font-medium text-emerald-200 uppercase">
                             Button
                           </span>
                         </div>
@@ -2498,10 +2728,10 @@ const App: React.FC = () => {
                               name: "UI Progress",
                             })
                           }
-                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
                         >
                           <Menu size={16} className="text-emerald-400" />
-                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                          <span className="text-sm font-medium text-emerald-200 uppercase">
                             Progress
                           </span>
                         </div>
@@ -2514,10 +2744,10 @@ const App: React.FC = () => {
                               name: "UI Toggle",
                             })
                           }
-                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
                         >
                           <ToggleRight size={16} className="text-emerald-400" />
-                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                          <span className="text-sm font-medium text-emerald-200 uppercase">
                             Toggle
                           </span>
                         </div>
@@ -2530,10 +2760,10 @@ const App: React.FC = () => {
                               name: "UI Icon",
                             })
                           }
-                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
                         >
                           <Star size={16} className="text-emerald-400" />
-                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                          <span className="text-sm font-medium text-emerald-200 uppercase">
                             Icon
                           </span>
                         </div>
@@ -2546,13 +2776,13 @@ const App: React.FC = () => {
                               name: "UI Tooltip",
                             })
                           }
-                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
                         >
                           <MessageSquare
                             size={16}
                             className="text-emerald-400"
                           />
-                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                          <span className="text-sm font-medium text-emerald-200 uppercase">
                             Tooltip
                           </span>
                         </div>
@@ -2565,10 +2795,10 @@ const App: React.FC = () => {
                               name: "UI Selection Indicator",
                             })
                           }
-                          className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
                         >
                           <Pointer size={16} className="text-emerald-400" />
-                          <span className="text-[10px] font-medium text-emerald-200 uppercase">
+                          <span className="text-sm font-medium text-emerald-200 uppercase">
                             Selection
                           </span>
                         </div>
@@ -2583,7 +2813,7 @@ const App: React.FC = () => {
                           className="p-2 border border-dashed border-indigo-500/50 bg-indigo-500/10 rounded-lg cursor-grab hover:bg-indigo-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
                         >
                           <Type size={16} className="text-indigo-400" />
-                          <span className="text-[10px] font-medium text-indigo-200 uppercase">
+                          <span className="text-sm font-medium text-indigo-200 uppercase">
                             Text
                           </span>
                         </div>
@@ -2601,7 +2831,7 @@ const App: React.FC = () => {
                           className="flex-1 p-2 border border-dashed border-red-500/50 bg-red-500/10 rounded-lg cursor-grab hover:bg-red-500/20 flex flex-col items-center justify-center gap-1 transition-colors text-center"
                         >
                           <Square size={16} className="text-red-400" />
-                          <span className="text-[10px] font-medium text-red-200 uppercase leading-tight">
+                          <span className="text-sm font-medium text-red-200 uppercase leading-tight">
                             Clickable Area
                           </span>
                         </div>
@@ -2616,7 +2846,7 @@ const App: React.FC = () => {
                           className="flex-1 p-2 border border-dashed border-indigo-500/50 bg-indigo-500/10 rounded-lg cursor-grab hover:bg-indigo-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
                         >
                           <Type size={16} className="text-indigo-400" />
-                          <span className="text-[10px] font-medium text-indigo-200 uppercase">
+                          <span className="text-sm font-medium text-indigo-200 uppercase">
                             Text
                           </span>
                         </div>
@@ -2625,7 +2855,7 @@ const App: React.FC = () => {
 
                     {editorMode === "stage" && (
                       <div className="mb-4">
-                        <div className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-2">
+                        <div className="text-sm font-bold text-neutral-500 uppercase tracking-wider mb-2">
                           Smart Prefabs
                         </div>
                         <div className="grid grid-cols-3 gap-2">
@@ -2641,7 +2871,7 @@ const App: React.FC = () => {
                             className="p-2 border border-dashed border-amber-500/50 bg-amber-500/10 rounded-lg cursor-grab hover:bg-amber-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
                           >
                             <Package size={16} className="text-amber-400" />
-                            <span className="text-[10px] font-medium text-amber-200 uppercase truncate w-full text-center">
+                            <span className="text-sm font-medium text-amber-200 uppercase truncate w-full text-center">
                               Chest
                             </span>
                           </div>
@@ -2657,7 +2887,7 @@ const App: React.FC = () => {
                             className="p-2 border border-dashed border-blue-500/50 bg-blue-500/10 rounded-lg cursor-grab hover:bg-blue-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
                           >
                             <LogIn size={16} className="text-blue-400" />
-                            <span className="text-[10px] font-medium text-blue-200 uppercase truncate w-full text-center">
+                            <span className="text-sm font-medium text-blue-200 uppercase truncate w-full text-center">
                               Portal
                             </span>
                           </div>
@@ -2676,7 +2906,7 @@ const App: React.FC = () => {
                               size={16}
                               className="text-emerald-400"
                             />
-                            <span className="text-[10px] font-medium text-emerald-200 uppercase truncate w-full text-center">
+                            <span className="text-sm font-medium text-emerald-200 uppercase truncate w-full text-center">
                               NPC
                             </span>
                           </div>
@@ -2728,7 +2958,7 @@ const App: React.FC = () => {
                                   size={14}
                                   className="text-emerald-400 shrink-0"
                                 />
-                                <span className="text-xs text-neutral-300 truncate">
+                                <span className="text-sm text-neutral-300 truncate">
                                   {sub}
                                 </span>
                               </div>
@@ -2737,7 +2967,7 @@ const App: React.FC = () => {
                         );
                       })()}
 
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-3">
                       {project.assets
                         .filter((a) => {
                           if (assetSearch)
@@ -2754,9 +2984,9 @@ const App: React.FC = () => {
                             key={asset.id}
                             draggable
                             onDragStart={(e) => handleDragStartAsset(e, asset)}
-                            className="bg-neutral-800 rounded-lg cursor-grab hover:ring-2 hover:ring-emerald-500/50 overflow-hidden group relative flex flex-col"
+                            className="bg-neutral-800 rounded-lg shadow cursor-grab hover:ring-2 hover:ring-emerald-500/50 group relative flex flex-col hover:z-50"
                           >
-                            <div className="h-20 bg-neutral-900 flex items-center justify-center p-2 relative group/info">
+                            <div className="h-40 bg-neutral-900 flex items-center justify-center p-2 relative group/info rounded-t-lg">
                               {asset.type === "script" ? (
                                 <FileCode
                                   size={32}
@@ -2766,14 +2996,14 @@ const App: React.FC = () => {
                                 <Music size={32} className="text-emerald-500" />
                               ) : asset.type === "video" ? (
                                 <video
-                                  src={asset.src}
-                                  className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md"
+                                  src={asset.src || undefined}
+                                  className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md group-hover:scale-150 transition-transform"
                                 />
                               ) : (
                                 <img
-                                  src={asset.src}
+                                  src={asset.src || undefined}
                                   alt={asset.name}
-                                  className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md"
+                                  className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md group-hover:scale-150 transition-transform max-w-[200%] max-h-[200%]"
                                   loading="lazy"
                                 />
                               )}
@@ -2824,7 +3054,7 @@ const App: React.FC = () => {
                             </div>
                             <div className="p-2 border-t border-neutral-700/50">
                               <span
-                                className="text-[10px] text-neutral-300 truncate block font-medium"
+                                className="text-sm text-neutral-300 truncate block font-medium"
                                 title={asset.name}
                               >
                                 {asset.name}
@@ -2843,7 +3073,7 @@ const App: React.FC = () => {
                       page * ITEMS_PER_PAGE && (
                       <button
                         onClick={() => setPage((p) => p + 1)}
-                        className="w-full mt-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-medium rounded-lg transition-colors"
+                        className="w-full mt-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium rounded-lg transition-colors"
                       >
                         Load More
                       </button>
@@ -2858,13 +3088,13 @@ const App: React.FC = () => {
                     <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
                       <LayoutTemplate size={16} /> UI Theme Designer
                     </h3>
-                    <p className="text-xs text-neutral-400 mb-4">
+                    <p className="text-sm text-neutral-400 mb-4">
                       Design the look of menus, dialogue boxes, and overlays.
                     </p>
 
                     <div className="space-y-4">
                       <div>
-                        <label className="text-xs text-neutral-500 block mb-1">
+                        <label className="text-sm text-neutral-500 block mb-1">
                           Preset Themes
                         </label>
                         <select
@@ -2941,7 +3171,7 @@ const App: React.FC = () => {
                       </div>
 
                       <div>
-                        <label className="text-xs text-neutral-500 block mb-1">
+                        <label className="text-sm text-neutral-500 block mb-1">
                           Accent (Primary) Color
                         </label>
                         <div className="flex items-center gap-2">
@@ -2975,13 +3205,13 @@ const App: React.FC = () => {
                                 },
                               })
                             }
-                            className="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs"
+                            className="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
                           />
                         </div>
                       </div>
 
                       <div>
-                        <label className="text-xs text-neutral-500 block mb-1">
+                        <label className="text-sm text-neutral-500 block mb-1">
                           Background Color (RGBA)
                         </label>
                         <input
@@ -2999,12 +3229,12 @@ const App: React.FC = () => {
                               },
                             })
                           }
-                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs"
+                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
                         />
                       </div>
 
                       <div>
-                        <label className="text-xs text-neutral-500 block mb-1">
+                        <label className="text-sm text-neutral-500 block mb-1">
                           Border Radius (px)
                         </label>
                         <input
@@ -3019,12 +3249,12 @@ const App: React.FC = () => {
                               },
                             })
                           }
-                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs"
+                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
                         />
                       </div>
 
                       <div>
-                        <label className="text-xs text-neutral-500 block mb-1">
+                        <label className="text-sm text-neutral-500 block mb-1">
                           Font Family
                         </label>
                         <select
@@ -3047,12 +3277,16 @@ const App: React.FC = () => {
                           <option value="monospace">
                             Monospace / Terminal
                           </option>
-                          <option value="Helvetica, Arial, sans-serif">
-                            Helvetica / Arial
-                          </option>
+                          <option value="Helvetica, Arial, sans-serif">Helvetica / Arial</option>
+                          <option value="'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif">Trebuchet MS</option>
+                          <option value="Verdana, Geneva, sans-serif">Verdana</option>
+                          <option value="'Times New Roman', Times, serif">Times New Roman</option>
+                          <option value="Georgia, serif">Georgia</option>
+                          <option value="Garamond, serif">Garamond</option>
                           <option value='"Comic Sans MS", cursive'>
                             Comic Sans / Bubbly
                           </option>
+                          <option value="'Brush Script MT', cursive">Brush Script</option>
                           <option value="Impact, sans-serif">
                             Impact / Heavy
                           </option>
@@ -3090,7 +3324,7 @@ const App: React.FC = () => {
                               }
                             }}
                           />
-                          <span className="text-xs text-neutral-300">
+                          <span className="text-sm text-neutral-300">
                             Enable Custom CSS
                           </span>
                         </label>
@@ -3106,7 +3340,7 @@ const App: React.FC = () => {
                                 },
                               })
                             }
-                            className="w-full h-32 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-[10px] font-mono text-neutral-400 focus:text-neutral-200 outline-none custom-scrollbar"
+                            className="w-full h-32 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-sm font-mono text-neutral-400 focus:text-neutral-200 outline-none custom-scrollbar"
                             placeholder="body { ... }"
                           />
                         )}
@@ -3126,9 +3360,39 @@ const App: React.FC = () => {
               {(editorMode === "stage" || editorMode === "ui_stage") &&
                 !isPlaying && (
                   <div
-                    className="absolute top-4 left-1/2 -translate-x-1/2 z-[5000] flex bg-neutral-900 border border-neutral-700 p-1 rounded-lg shadow-2xl items-center gap-1"
+                    className="absolute z-[5000] flex bg-neutral-900 border border-neutral-700 p-1 rounded-lg shadow-2xl items-center gap-1"
+                    style={{
+                      top: quickEditPos ? undefined : "1rem",
+                      left: quickEditPos ? undefined : "50%",
+                      transform: quickEditPos ? "none" : "translate(-50%, 0)",
+                      ...(quickEditPos && {
+                        left: quickEditPos.x,
+                        top: quickEditPos.y,
+                      })
+                    }}
                     onPointerDown={(e) => e.stopPropagation()}
                   >
+                    <div 
+                      className="px-2 py-1 cursor-grab active:cursor-grabbing text-neutral-500 hover:text-neutral-300"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        // If there is no quickEditPos yet, initialize to its center-top position so it doesn't jump
+                        const rect = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+                        const parentRect = (e.currentTarget.parentElement!.parentElement as HTMLElement).getBoundingClientRect();
+                        const startPos = quickEditPos || { x: rect.left - parentRect.left, y: rect.top - parentRect.top };
+                        setQuickEditPos(startPos);
+                        setQuickEditDragging({ startX: e.clientX, startY: e.clientY, startPos });
+                      }}
+                    >
+                      <svg width="12" height="20" viewBox="0 0 12 20" fill="currentColor">
+                        <circle cx="4" cy="4" r="1.5" />
+                        <circle cx="4" cy="10" r="1.5" />
+                        <circle cx="4" cy="16" r="1.5" />
+                        <circle cx="8" cy="4" r="1.5" />
+                        <circle cx="8" cy="10" r="1.5" />
+                        <circle cx="8" cy="16" r="1.5" />
+                      </svg>
+                    </div>
                     <div
                       className={`relative flex items-center rounded-md transition-all ${editorMode === "stage" ? "bg-indigo-600 text-white shadow-inner" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
                     >
@@ -3205,7 +3469,7 @@ const App: React.FC = () => {
                 )}
 
               <div
-                className={`relative mx-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 ${isPlaying ? "overflow-hidden" : "overflow-visible"} border border-neutral-800`}
+                className={`relative mx-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 overflow-visible ${isPlaying ? "border-transparent" : "border-neutral-800 border"}`}
                 style={{
                   width:
                     currentScene.width ||
@@ -3231,10 +3495,11 @@ const App: React.FC = () => {
                     if (!bgScene) return null;
                     return (
                       <div
-                        className="absolute pointer-events-none opacity-30 select-none grayscale z-0 ring-1 ring-neutral-700/50"
+                        className="absolute pointer-events-none select-none opacity-80 z-0 ring-1 ring-neutral-700/50"
                         style={{
-                          left: "0px",
-                          top: "0px",
+                          left: "50%",
+                          top: "50%",
+                          transform: "translate(-50%, -50%)",
                           width:
                             bgScene.width ||
                             project.globalSettings.stageWidth ||
@@ -3266,12 +3531,12 @@ const App: React.FC = () => {
                                 !obj.isText &&
                                 (obj.isVideo ? (
                                   <video
-                                    src={obj.src}
+                                    src={obj.src || undefined}
                                     className="w-full h-full object-fill opacity-50 pointer-events-none"
                                   />
                                 ) : (
                                   <img
-                                    src={obj.src}
+                                    src={obj.src || undefined}
                                     className="w-full h-full object-fill opacity-50 pointer-events-none"
                                   />
                                 ))}
@@ -3287,8 +3552,6 @@ const App: React.FC = () => {
                   onDragOver={handleStageDragOver}
                   onPointerDown={(e) => {
                     if (isPlaying) return;
-                    // Only start drag pan / selection if clicking directly on stage or its background
-                    if (e.target !== stageRef.current) return;
                     e.stopPropagation();
                     try {
                       (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -3315,7 +3578,6 @@ const App: React.FC = () => {
                   }}
                   onContextMenu={(e) => {
                     if (isPlaying) return;
-                    if (e.target !== stageRef.current) return;
                     e.preventDefault();
                     e.stopPropagation();
                     setSelectedObjectId(null);
@@ -3326,7 +3588,7 @@ const App: React.FC = () => {
                       objectId: null,
                     });
                   }}
-                  className={`absolute inset-0 shadow-2xl transition-all ${isPlaying ? "overflow-hidden" : "overflow-visible"} ${editorMode === "ui_stage" ? "ring-4 ring-indigo-500/40 shadow-[0_0_30px_rgba(99,102,241,0.2)]" : "ring-2 ring-pink-500 shadow-[0_0_40px_rgba(0,0,0,0.5)] z-10"}`}
+                  className={`absolute inset-0 shadow-2xl transition-all overflow-visible ${editorMode === "ui_stage" ? "ring-4 ring-indigo-500/40 shadow-[0_0_30px_rgba(99,102,241,0.2)]" : "ring-2 ring-pink-500 shadow-[0_0_40px_rgba(0,0,0,0.5)] z-10"}`}
                   style={{
                     backgroundColor: currentScene.backgroundColor,
                     backgroundImage: project.globalSettings.snapToGrid
@@ -3344,7 +3606,9 @@ const App: React.FC = () => {
                     transition: "filter 2s ease",
                   }}
                 >
-                  {/* Draw selection box */}
+                  <div className={`absolute inset-0 ${isPlaying ? "overflow-hidden" : "overflow-visible"} pointer-events-none`}>
+                    <div className="absolute inset-0 pointer-events-auto">
+                      {/* Draw selection box */}
                   {selectionBox && !isPlaying && (
                     <div
                       className="absolute border border-emerald-500 bg-emerald-500/20 pointer-events-none z-[9999]"
@@ -3386,9 +3650,14 @@ const App: React.FC = () => {
                           selectedMultiIds.includes(obj.id)) &&
                         !activeUiMenus.length;
                       const phys = physicsState[obj.id];
-                      const renderX = phys ? phys.x : obj.x;
-                      const renderY = phys ? phys.y : obj.y;
+                      let renderX = phys ? phys.x : obj.x;
+                      let renderY = phys ? phys.y : obj.y;
                       const renderRot = phys ? phys.rotation : obj.rotation;
+
+                      if (isPlaying && runtimeOverrides[obj.id]) {
+                        renderX = runtimeOverrides[obj.id].x;
+                        renderY = runtimeOverrides[obj.id].y;
+                      }
 
                       const stageW =
                         currentScene.width ||
@@ -3448,6 +3717,9 @@ const App: React.FC = () => {
                           : "",
                         obj.filters?.invert !== undefined
                           ? `invert(${obj.filters.invert})`
+                          : "",
+                        obj.filters?.grayscale !== undefined
+                          ? `grayscale(${obj.filters.grayscale})`
                           : "",
                       ]
                         .filter(Boolean)
@@ -3549,20 +3821,17 @@ const App: React.FC = () => {
                               : obj.locked
                                 ? "default"
                                 : "move",
+                            pointerEvents: obj.ignoreClicks ? "none" : undefined,
                             outline:
                               isSelected && !isPlaying
                                 ? "2px solid #34d399"
                                 : "none",
                             outlineOffset: "2px",
-                            backgroundColor: obj.isHitbox
-                              ? isPlaying
-                                ? "transparent"
-                                : project.globalSettings.showGhostOutlines
-                                  ? "rgba(239, 68, 68, 0.3)"
-                                  : "transparent"
-                              : "transparent",
+                            backgroundColor: (obj.isHitbox || obj.opacity === 0) && !isPlaying && project.globalSettings.showGhostOutlines
+                              ? "rgba(239, 68, 68, 0.3)"
+                              : "rgba(255, 255, 255, 0.01)",
                             border:
-                              obj.isHitbox &&
+                              (obj.isHitbox || obj.opacity === 0) &&
                               !isPlaying &&
                               project.globalSettings.showGhostOutlines
                                 ? "1px dashed #ef4444"
@@ -3633,16 +3902,16 @@ const App: React.FC = () => {
                             </div>
                           )}
 
-                          {(!obj.isHitbox ||
-                            (obj.isHitbox &&
+                          {(!obj.isHitbox && obj.opacity !== 0 ||
+                            ((obj.isHitbox || obj.opacity === 0) &&
                               !isPlaying &&
                               project.globalSettings.showGhostOutlines)) &&
                             !obj.isScript &&
                             !obj.isText && (
                               <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                                {obj.isHitbox && (
-                                  <span className="text-red-900/50 font-bold text-[10px] text-center leading-tight">
-                                    CLICK TARGET
+                                {(obj.isHitbox || obj.opacity === 0) && (
+                                  <span className="text-red-900/50 font-bold text-sm text-center leading-tight">
+                                    {obj.opacity === 0 && !obj.isHitbox ? "GHOST" : "CLICK TARGET"}
                                   </span>
                                 )}
                               </div>
@@ -3650,7 +3919,7 @@ const App: React.FC = () => {
                           {obj.isScript && !isPlaying && (
                             <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center bg-blue-500/20 border border-dashed border-blue-500 rounded">
                               <FileCode size={24} className="text-blue-400" />
-                              <span className="text-blue-400 font-bold text-[10px] mt-1 truncate w-full text-center px-1">
+                              <span className="text-blue-400 font-bold text-sm mt-1 truncate w-full text-center px-1">
                                 {obj.name}
                               </span>
                             </div>
@@ -3664,7 +3933,17 @@ const App: React.FC = () => {
                                     ? "4px double"
                                     : obj.uiBorderType === "bevel"
                                       ? "3px outset"
-                                      : "2px solid";
+                                      : obj.uiBorderType === "dashed"
+                                        ? "2px dashed"
+                                        : obj.uiBorderType === "dotted"
+                                          ? "2px dotted"
+                                          : obj.uiBorderType === "inset"
+                                            ? "3px inset"
+                                            : obj.uiBorderType === "groove"
+                                              ? "3px groove"
+                                              : obj.uiBorderType === "ridge"
+                                                ? "3px ridge"
+                                                : "2px solid";
 
                               if (obj.uiElementType === "panel") {
                                 return (
@@ -3888,7 +4167,7 @@ const App: React.FC = () => {
                             !obj.isUiElement &&
                             (obj.isVideo ? (
                               <video
-                                src={obj.src}
+                                src={obj.src || undefined}
                                 className="w-full h-full object-fill pointer-events-none"
                                 autoPlay
                                 loop
@@ -3900,7 +4179,7 @@ const App: React.FC = () => {
                               />
                             ) : (
                               <img
-                                src={obj.src}
+                                src={obj.src || undefined}
                                 alt={obj.name}
                                 className="w-full h-full object-fill pointer-events-none"
                                 draggable={false}
@@ -3992,17 +4271,33 @@ const App: React.FC = () => {
                                 <RotateCw size={12} strokeWidth={3} />
                               </div>
                               <div className="absolute -top-4 left-1/2 -translate-x-1/2 w-px h-4 bg-emerald-500 pointer-events-none" />
+                              {/* nw */}
+                              <div
+                                className="absolute -top-2 -left-2 w-4 h-4 bg-emerald-500 rounded-full cursor-nw-resize shadow-md transition-transform hover:scale-110"
+                                onPointerDown={(e) => handleResizePointerDown(e, obj, 'nw')}
+                              />
+                              {/* ne */}
+                              <div
+                                className="absolute -top-2 -right-2 w-4 h-4 bg-emerald-500 rounded-full cursor-ne-resize shadow-md transition-transform hover:scale-110"
+                                onPointerDown={(e) => handleResizePointerDown(e, obj, 'ne')}
+                              />
+                              {/* sw */}
+                              <div
+                                className="absolute -bottom-2 -left-2 w-4 h-4 bg-emerald-500 rounded-full cursor-sw-resize shadow-md transition-transform hover:scale-110"
+                                onPointerDown={(e) => handleResizePointerDown(e, obj, 'sw')}
+                              />
+                              {/* se */}
                               <div
                                 className="absolute -bottom-2 -right-2 w-4 h-4 bg-emerald-500 rounded-full cursor-se-resize shadow-md transition-transform hover:scale-110"
-                                onPointerDown={(e) =>
-                                  handleResizePointerDown(e, obj)
-                                }
+                                onPointerDown={(e) => handleResizePointerDown(e, obj, 'se')}
                               />
                             </>
                           )}
                         </div>
                       );
                     })}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Ghost Foreground UI for Stage Editing */}
@@ -4015,8 +4310,9 @@ const App: React.FC = () => {
                         key={`ghost-fg-ui-${uiMenu.id}`}
                         className="absolute pointer-events-none select-none z-[500]"
                         style={{
-                          left: "0px",
-                          top: "0px",
+                          left: "50%",
+                          top: "50%",
+                          transform: "translate(-50%, -50%)",
                           width:
                             uiMenu.width ||
                             project.globalSettings.stageWidth ||
@@ -4031,7 +4327,7 @@ const App: React.FC = () => {
                         {uiMenu.objects.map((obj) => (
                           <div
                             key={`ghost-fg-obj-${obj.id}`}
-                            className="absolute border border-dashed border-emerald-500/30 opacity-60 mix-blend-screen"
+                            className="absolute border border-dashed border-emerald-500/30 opacity-60 mix-blend-screen pointer-events-none"
                             style={{
                               left: obj.x,
                               top: obj.y,
@@ -4071,8 +4367,9 @@ const App: React.FC = () => {
                             uiMenu.height ||
                             project.globalSettings.stageHeight ||
                             600,
-                          left: "0px",
-                          top: "0px",
+                          left: "50%",
+                          top: "50%",
+                          transform: "translate(-50%, -50%)",
                           overflow: "visible",
                         }}
                       >
@@ -4093,9 +4390,14 @@ const App: React.FC = () => {
                             }
 
                             // Compute rendering properties similarly to stage objects, but no physics
-                            const renderX = obj.x;
-                            const renderY = obj.y;
+                            let renderX = obj.x;
+                            let renderY = obj.y;
                             const renderRot = obj.rotation;
+
+                            if (isPlaying && runtimeOverrides[obj.id]) {
+                              renderX = runtimeOverrides[obj.id].x;
+                              renderY = runtimeOverrides[obj.id].y;
+                            }
 
                             let animClass = "";
                             let animStyle: React.CSSProperties = {};
@@ -4138,6 +4440,9 @@ const App: React.FC = () => {
                               obj.filters?.invert !== undefined
                                 ? `invert(${obj.filters.invert})`
                                 : "",
+                              obj.filters?.grayscale !== undefined
+                                ? `grayscale(${obj.filters.grayscale})`
+                                : "",
                             ]
                               .filter(Boolean)
                               .join(" ");
@@ -4146,6 +4451,9 @@ const App: React.FC = () => {
                               <div
                                 key={`ui-obj-${obj.id}`}
                                 onClick={() => handleObjectClick(obj)}
+                                onPointerDown={(e) => handleObjectPointerDown(e, obj)}
+                                onPointerMove={handleObjectPointerMove}
+                                onPointerUp={handleObjectPointerUp}
                                 className={`absolute ${animClass}`}
                                 style={{
                                   ...animStyle,
@@ -4155,14 +4463,12 @@ const App: React.FC = () => {
                                   width: obj.width,
                                   height: obj.height,
                                   zIndex: obj.zIndex,
-                                  opacity: obj.opacity,
+                                  opacity: obj.opacity === 0 ? 0.01 : obj.opacity,
                                   transform: `rotate(${renderRot}deg)`,
                                   cursor: obj.cursor,
-                                  backgroundColor: obj.isHitbox
-                                    ? "transparent"
-                                    : "transparent",
+                                  backgroundColor: "rgba(255, 255, 255, 0.01)",
                                   mixBlendMode: obj.blendMode || "normal",
-                                  pointerEvents: "auto",
+                                  pointerEvents: obj.ignoreClicks ? "none" : undefined,
                                 }}
                               >
                                 {obj.isUiElement &&
@@ -4174,7 +4480,17 @@ const App: React.FC = () => {
                                           ? "4px double"
                                           : obj.uiBorderType === "bevel"
                                             ? "3px outset"
-                                            : "2px solid";
+                                            : obj.uiBorderType === "dashed"
+                                              ? "2px dashed"
+                                              : obj.uiBorderType === "dotted"
+                                                ? "2px dotted"
+                                                : obj.uiBorderType === "inset"
+                                                  ? "3px inset"
+                                                  : obj.uiBorderType === "groove"
+                                                    ? "3px groove"
+                                                    : obj.uiBorderType === "ridge"
+                                                      ? "3px ridge"
+                                                      : "2px solid";
 
                                     let boundValue = obj.uiValue || 0;
                                     let boundChecked = obj.uiChecked || false;
@@ -4490,7 +4806,7 @@ const App: React.FC = () => {
                                   !obj.isUiElement &&
                                   (obj.isVideo ? (
                                     <video
-                                      src={obj.src}
+                                      src={obj.src || undefined}
                                       className="w-full h-full object-fill pointer-events-none"
                                       autoPlay
                                       loop
@@ -4502,7 +4818,7 @@ const App: React.FC = () => {
                                     />
                                   ) : (
                                     <img
-                                      src={obj.src}
+                                      src={obj.src || undefined}
                                       alt={obj.name}
                                       className="w-full h-full object-fill pointer-events-none"
                                       draggable={false}
@@ -4591,13 +4907,11 @@ const App: React.FC = () => {
                       </div>
                     );
                   })}
-              </div>
-
               {/* Fullscreen Cutscene Player */}
               {isPlaying && activeCutscene && (
                 <div className="absolute inset-0 z-[1000] bg-black flex items-center justify-center">
                   <video
-                    src={activeCutscene.src}
+                    src={activeCutscene.src || undefined}
                     autoPlay
                     className="w-full h-full object-contain"
                     onEnded={() => {
@@ -4634,7 +4948,7 @@ const App: React.FC = () => {
                       }
                       setActiveCutscene(null);
                     }}
-                    className="absolute top-4 right-4 bg-black/50 text-white px-3 py-1 rounded text-xs hover:bg-white/20 transition backdrop-blur flex justify-center items-center gap-1"
+                    className="absolute top-4 right-4 bg-black/50 text-white px-3 py-1 rounded text-sm hover:bg-white/20 transition backdrop-blur flex justify-center items-center gap-1"
                   >
                     Skip <ArrowRight size={10} />
                   </button>
@@ -4655,7 +4969,8 @@ const App: React.FC = () => {
                       "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2";
                   return (
                     <div
-                      className={`absolute ${posClass} w-4/5 max-w-lg shadow-2xl backdrop-blur-sm pointer-events-none drop-shadow-2xl`}
+                      onClick={() => setPreviewDialogue(null)}
+                      className={`absolute ${posClass} w-4/5 max-w-lg max-h-[80%] overflow-y-auto custom-scrollbar shadow-2xl backdrop-blur-sm pointer-events-auto cursor-pointer drop-shadow-2xl hover:scale-[1.02] transition-transform z-[9000]`}
                       style={{
                         backgroundColor: `${uiBg}ee`,
                         border: `2px solid ${uiPrimary}80`,
@@ -4669,6 +4984,7 @@ const App: React.FC = () => {
                           text={previewDialogue}
                           speed={project.globalSettings.typewriterSpeed ?? 15}
                         />
+                        <div className="text-sm text-white/50 mt-2 animate-pulse">(Click to dismiss)</div>
                       </div>
                     </div>
                   );
@@ -4705,7 +5021,7 @@ const App: React.FC = () => {
 
                   return (
                     <div
-                      className={`absolute ${posClass} w-11/12 max-w-2xl text-neutral-100 z-[2000] shadow-2xl flex flex-col overflow-hidden backdrop-blur-md filter drop-shadow-2xl dialogue-box`}
+                      className={`absolute ${posClass} w-11/12 max-w-2xl max-h-[90%] text-neutral-100 z-[9000] shadow-2xl flex flex-col overflow-hidden backdrop-blur-md filter drop-shadow-2xl dialogue-box`}
                       style={{
                         backgroundColor: `${uiBg}ee`,
                         border: `2px solid ${uiPrimary}80`,
@@ -4736,7 +5052,7 @@ const App: React.FC = () => {
                               }}
                             >
                               <img
-                                src={speakerAsset.src}
+                                src={speakerAsset.src || undefined}
                                 alt={node.speaker}
                                 className="max-w-full max-h-full object-contain"
                               />
@@ -4757,7 +5073,7 @@ const App: React.FC = () => {
                             }}
                           >
                             <img
-                              src={speakerAsset.src}
+                              src={speakerAsset.src || undefined}
                               alt={node.speaker}
                               className="max-w-full max-h-full object-contain"
                             />
@@ -4857,7 +5173,7 @@ const App: React.FC = () => {
                       }}
                     >
                       <div
-                        className="text-xs font-bold mb-1 opacity-80"
+                        className="text-sm font-bold mb-1 opacity-80"
                         style={{ color: uiPrimary }}
                       >
                         NEEDS
@@ -4871,7 +5187,7 @@ const App: React.FC = () => {
                       ].map((need) => (
                         <div key={need} className="flex flex-col gap-1">
                           <div
-                            className="flex justify-between text-[10px] uppercase font-bold"
+                            className="flex justify-between text-sm uppercase font-bold"
                             style={{ color: "#e5e5e5" }}
                           >
                             <span>{need}</span>
@@ -4896,7 +5212,7 @@ const App: React.FC = () => {
                       ))}
                       {project.globalSettings.useDayNightCycle && (
                         <div
-                          className="mt-2 pt-2 border-t flex justify-between items-center text-[10px] font-bold"
+                          className="mt-2 pt-2 border-t flex justify-between items-center text-sm font-bold"
                           style={{
                             borderColor: `${uiPrimary}40`,
                             color: "#e5e5e5",
@@ -4912,6 +5228,77 @@ const App: React.FC = () => {
                         </div>
                       )}
                     </div>
+                  )}
+
+                  {/* Skills Tracker */}
+                  {project.globalSettings.enableTTRPGStats && (
+                    <div
+                      className="absolute top-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2"
+                      style={{
+                        right: project.globalSettings.enableNeeds ? "180px" : "16px",
+                        backgroundColor: `${uiBg}cc`,
+                        border: `1px solid ${uiPrimary}80`,
+                        borderRadius: uiRadius,
+                        fontFamily: uiFont,
+                        width: "150px",
+                      }}
+                    >
+                      <div
+                        className="text-sm font-bold mb-1 opacity-80"
+                        style={{ color: uiPrimary }}
+                      >
+                        SKILLS
+                      </div>
+                      {[
+                        "naturalist",
+                        "occultist",
+                        "scribal",
+                      ].map((skill) => (
+                        <div key={skill} className="flex flex-col gap-1">
+                          <div
+                            className="flex justify-between text-sm uppercase font-bold"
+                            style={{ color: "#e5e5e5" }}
+                          >
+                            <span>{skill}</span>
+                            <span>{playerSkills[skill] || 0}</span>
+                          </div>
+                          <div
+                            className="h-1.5 w-full overflow-hidden"
+                            style={{
+                              backgroundColor: "rgba(0,0,0,0.5)",
+                              borderRadius: "2px",
+                            }}
+                          >
+                            <div
+                              className="h-full transition-all"
+                              style={{
+                                width: `${Math.min(100, (playerSkills[skill] || 0) * 5)}%`,
+                                backgroundColor: uiPrimary,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Map Toggle Button */}
+                  {(project.maps && project.maps.length > 0) && (
+                    <button
+                      onClick={() => {
+                        setActiveFastTravelMapId(project.maps[0].id);
+                        setIsMapOpen(true);
+                      }}
+                      className={`absolute bottom-4 right-${project.globalSettings.hideDefaultInventoryBtn ? '4' : '20'} w-14 h-14 flex items-center justify-center shadow-xl backdrop-blur-sm z-[2000] transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110`}
+                      style={{
+                        backgroundColor: `${uiBg}ee`,
+                        borderColor: uiPrimary,
+                        borderRadius: uiRadius,
+                        color: uiPrimary,
+                      }}
+                    >
+                      <MapPin size={24} color={uiPrimary} />
+                    </button>
                   )}
 
                   {/* Backpack Toggle Button */}
@@ -4930,7 +5317,7 @@ const App: React.FC = () => {
                         <Backpack size={24} color={uiPrimary} />
                         {playerInventory.length > 0 && (
                           <div
-                            className="absolute -top-2 -right-2 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2"
+                            className="absolute -top-2 -right-2 text-white text-sm font-bold w-5 h-5 flex items-center justify-center rounded-full border-2"
                             style={{
                               backgroundColor: uiPrimary,
                               borderColor: uiBg,
@@ -4941,6 +5328,118 @@ const App: React.FC = () => {
                         )}
                       </div>
                     </button>
+                  )}
+
+                  {/* Map Modal */}
+                  {isMapOpen && activeFastTravelMapId && (
+                    <div
+                      className="absolute inset-0 bg-black/80 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+                      onClick={() => setIsMapOpen(false)}
+                    >
+                      <div
+                        className="max-w-4xl w-full h-[80%] flex flex-col shadow-2xl overflow-hidden border-2"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          backgroundColor: `${uiBg}ee`,
+                          borderColor: `${uiPrimary}80`,
+                          borderRadius: uiRadius,
+                          fontFamily: uiFont,
+                        }}
+                      >
+                        <div
+                          className="flex justify-between items-center p-4 border-b shrink-0 flex-col sm:flex-row gap-4"
+                          style={{
+                            backgroundColor: "rgba(0,0,0,0.3)",
+                            borderBottomColor: `${uiPrimary}50`,
+                          }}
+                        >
+                          <h2
+                            className="text-xl font-bold flex items-center gap-2"
+                            style={{ color: uiPrimary }}
+                          >
+                            <MapPin size={24} />
+                            Fast Travel Map
+                          </h2>
+                          <div className="flex gap-2 w-full sm:w-auto overflow-x-auto custom-scrollbar">
+                            {project.maps.map(m => (
+                               <button 
+                                 key={m.id}
+                                 onClick={() => setActiveFastTravelMapId(m.id)}
+                                 className={`px-3 py-1.5 rounded font-bold whitespace-nowrap transition-colors border`}
+                                  style={{
+                                    backgroundColor: activeFastTravelMapId === m.id ? "rgba(128,128,128,0.2)" : "transparent",
+                                    borderColor: activeFastTravelMapId === m.id ? uiPrimary : "transparent",
+                                    color: activeFastTravelMapId === m.id ? uiPrimary : "#e5e5e5",
+                                 }}
+                               >
+                                 {m.name}
+                               </button>
+                            ))}
+                          </div>
+                          <button
+                            onClick={() => setIsMapOpen(false)}
+                            style={{ color: uiPrimary }}
+                            className="opacity-70 hover:opacity-100 transition-opacity absolute top-4 right-4 sm:relative sm:top-0 sm:right-0"
+                          >
+                            <X size={24} />
+                          </button>
+                        </div>
+                        
+                        <div className="flex-1 relative overflow-auto bg-black bg-opacity-50">
+                           {(() => {
+                             const mapData = project.maps.find(m => m.id === activeFastTravelMapId);
+                             if (!mapData) return null;
+                             
+                             return (
+                               <div
+                                 className="relative w-full min-h-full"
+                                 style={{
+                                    minWidth: "800px", // arbitrary min size to ensure panning works if they want
+                                    backgroundImage: mapData.backgroundSrc ? `url(${mapData.backgroundSrc})` : 'none',
+                                    backgroundSize: 'contain',
+                                    backgroundPosition: 'center',
+                                    backgroundRepeat: 'no-repeat',
+                                 }}
+                               >
+                                   {mapData.nodes.map(node => {
+                                      const isUnlocked = node.unlockedByDefault || (node.requiredFlagId && (playerFlags || []).includes(node.requiredFlagId));
+                                      if (!isUnlocked) return null; // Hide locked nodes for mystery
+                                      return (
+                                        <div
+                                          key={node.id}
+                                          onClick={() => {
+                                             if (node.targetSceneId) {
+                                               setCurrentSceneId(node.targetSceneId);
+                                               setIsMapOpen(false);
+                                             }
+                                          }}
+                                          className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group transition-transform z-10 hover:z-20
+                                            ${node.targetSceneId ? 'cursor-pointer hover:scale-110' : 'cursor-default opacity-80'}
+                                          `}
+                                          style={{ left: `${node.x}%`, top: `${node.y}%` }}
+                                        >
+                                           <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-transform border-2
+                                              ${node.targetSceneId ? 'hover:brightness-125' : ''}
+                                           `} style={{ backgroundColor: uiBg, borderColor: uiPrimary, color: "#e5e5e5" }}>
+                                               {node.iconSrc ? (
+                                                  <img src={node.iconSrc || undefined} alt={node.name} className="w-8 h-8 object-contain drop-shadow" />
+                                               ) : (
+                                                  <MapPin className="w-6 h-6" />
+                                               )}
+                                           </div>
+                                           <div className={`mt-1 px-3 py-1 rounded shadow-lg text-xs font-bold whitespace-nowrap bg-black/80 backdrop-blur-sm border`}
+                                             style={{ color: uiPrimary, borderColor: `${uiPrimary}40` }}>
+                                             {node.name}
+                                           </div>
+                                        </div>
+                                      );
+                                   })}
+                               </div>
+                             );
+                           })()}
+                        </div>
+                      </div>
+                    </div>
                   )}
 
                   {/* Inventory Modal */}
@@ -5052,10 +5551,6 @@ const App: React.FC = () => {
                                             ? `(Item): ${item.description}`
                                             : `You look at: ${item.name}.`,
                                         );
-                                        setTimeout(
-                                          () => setPreviewDialogue(null),
-                                          4000,
-                                        );
                                       } else if (
                                         selectedInventoryItemId &&
                                         selectedInventoryItemId !== itemId
@@ -5127,18 +5622,10 @@ const App: React.FC = () => {
                                             combination.successMessage ||
                                               "Items combined successfully!",
                                           );
-                                          setTimeout(
-                                            () => setPreviewDialogue(null),
-                                            4000,
-                                          );
                                         } else {
                                           // Failed combination
                                           setPreviewDialogue(
                                             `These objects do not combine.`,
-                                          );
-                                          setTimeout(
-                                            () => setPreviewDialogue(null),
-                                            4000,
                                           );
                                           setSelectedInventoryItemId(null); // Deselect
                                         }
@@ -5150,7 +5637,7 @@ const App: React.FC = () => {
                                   >
                                     {isSelected && (
                                       <div
-                                        className="absolute top-1 left-1 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-lg backdrop-blur-md animate-pulse"
+                                        className="absolute top-1 left-1 text-sm font-bold px-1.5 py-0.5 rounded shadow-lg backdrop-blur-md animate-pulse"
                                         style={{
                                           backgroundColor: uiPrimary,
                                           color: uiBg,
@@ -5161,7 +5648,7 @@ const App: React.FC = () => {
                                     )}
                                     {hasSelection && !isSelected && (
                                       <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                                        <div className="text-white font-bold text-xs bg-black/80 px-2 py-1 rounded shadow-lg">
+                                        <div className="text-white font-bold text-sm bg-black/80 px-2 py-1 rounded shadow-lg">
                                           Combine?
                                         </div>
                                       </div>
@@ -5175,7 +5662,7 @@ const App: React.FC = () => {
                                     >
                                       {iconAsset ? (
                                         <img
-                                          src={iconAsset.src}
+                                          src={iconAsset.src || undefined}
                                           alt={item.name}
                                           className={`w-full h-full object-contain drop-shadow-lg transition-transform ${isSelected ? "scale-110" : "group-hover:scale-110"}`}
                                           draggable="false"
@@ -5201,7 +5688,7 @@ const App: React.FC = () => {
                                         {item.name}
                                       </h3>
                                       <p
-                                        className="text-[10px] line-clamp-3 leading-snug mb-2"
+                                        className="text-sm line-clamp-3 leading-snug mb-2"
                                         style={{ color: "#a1a1aa" }}
                                       >
                                         {item.description}
@@ -5209,7 +5696,7 @@ const App: React.FC = () => {
 
                                       {isSelected && item.isUsable && (
                                         <button
-                                          className="w-full py-1.5 mt-auto text-xs font-bold rounded shadow-lg hover:brightness-125 transition-all active:scale-95"
+                                          className="w-full py-1.5 mt-auto text-sm font-bold rounded shadow-lg hover:brightness-125 transition-all active:scale-95"
                                           style={{
                                             backgroundColor: uiPrimary,
                                             color: uiBg,
@@ -5278,10 +5765,6 @@ const App: React.FC = () => {
                                             setPreviewDialogue(
                                               item.useMessage ||
                                                 `You used ${item.name}.`,
-                                            );
-                                            setTimeout(
-                                              () => setPreviewDialogue(null),
-                                              4000,
                                             );
                                           }}
                                         >
@@ -5355,7 +5838,7 @@ const App: React.FC = () => {
                                           project.inventoryItems.find(
                                             (i) => i.id === craftSlot1,
                                           )?.iconAssetId,
-                                      )?.src
+                                      )?.src || undefined
                                     }
                                     alt="Slot 1"
                                     className="w-10 h-10 object-contain"
@@ -5366,7 +5849,7 @@ const App: React.FC = () => {
                                   >
                                     <X size={12} />
                                   </button>
-                                  <div className="text-[10px] w-full text-center truncate px-1">
+                                  <div className="text-sm w-full text-center truncate px-1">
                                     {
                                       project.inventoryItems.find(
                                         (i) => i.id === craftSlot1,
@@ -5403,7 +5886,7 @@ const App: React.FC = () => {
                                 </select>
                               )}
                               {!craftSlot1 && (
-                                <div className="text-[10px] text-white/50 text-center pointer-events-none">
+                                <div className="text-sm text-white/50 text-center pointer-events-none">
                                   Click to
                                   <br />
                                   Select Item
@@ -5430,7 +5913,7 @@ const App: React.FC = () => {
                                           project.inventoryItems.find(
                                             (i) => i.id === craftSlot2,
                                           )?.iconAssetId,
-                                      )?.src
+                                      )?.src || undefined
                                     }
                                     alt="Slot 2"
                                     className="w-10 h-10 object-contain"
@@ -5441,7 +5924,7 @@ const App: React.FC = () => {
                                   >
                                     <X size={12} />
                                   </button>
-                                  <div className="text-[10px] w-full text-center truncate px-1">
+                                  <div className="text-sm w-full text-center truncate px-1">
                                     {
                                       project.inventoryItems.find(
                                         (i) => i.id === craftSlot2,
@@ -5478,7 +5961,7 @@ const App: React.FC = () => {
                                 </select>
                               )}
                               {!craftSlot2 && (
-                                <div className="text-[10px] text-white/50 text-center pointer-events-none">
+                                <div className="text-sm text-white/50 text-center pointer-events-none">
                                   Click to
                                   <br />
                                   Select Item
@@ -5538,18 +6021,10 @@ const App: React.FC = () => {
                                     combination.successMessage ||
                                       "Crafting successful!",
                                   );
-                                  setTimeout(
-                                    () => setPreviewDialogue(null),
-                                    4000,
-                                  );
                                   setIsCraftingOpen(false);
                                 } else {
                                   setPreviewDialogue(
                                     "Nothing happens... These items can't be combined.",
-                                  );
-                                  setTimeout(
-                                    () => setPreviewDialogue(null),
-                                    4000,
                                   );
                                 }
                               }}
@@ -5561,7 +6036,7 @@ const App: React.FC = () => {
                                 setIsCraftingOpen(false);
                                 setIsInventoryOpen(true);
                               }}
-                              className="text-xs text-white/50 hover:text-white transition-colors underline"
+                              className="text-sm text-white/50 hover:text-white transition-colors underline"
                             >
                               Open Backpack Instead
                             </button>
@@ -5673,7 +6148,7 @@ const App: React.FC = () => {
                                   {totalObjs > 0 && (
                                     <div className="space-y-2">
                                       <div
-                                        className="text-xs font-bold uppercase tracking-wider mb-2"
+                                        className="text-sm font-bold uppercase tracking-wider mb-2"
                                         style={{ color: uiPrimary }}
                                       >
                                         Objectives
@@ -5746,6 +6221,8 @@ const App: React.FC = () => {
                 </>
               )}
 
+              </div>
+
               {/* Global styles for animations injected by Tailwind or custom */}
               <style>{`
             @keyframes wiggle {
@@ -5792,21 +6269,27 @@ const App: React.FC = () => {
               <div
                 className="absolute top-0 bottom-0 -left-[3px] w-[6px] cursor-col-resize z-[100] hover:bg-emerald-500/50"
                 onPointerDown={() =>
-                  document.body.classList.add("resizing-sidebar")
+                  document.body.classList.add("resizing-right-sidebar")
                 }
               />
               <div className="flex border-b border-neutral-800 bg-neutral-950">
                 <button
                   onClick={() => setRightSidebarTab("properties")}
-                  className={`flex-1 p-2 text-xs font-medium flex items-center justify-center gap-1 transition-colors ${rightSidebarTab === "properties" ? "text-emerald-400 border-b-2 border-emerald-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
+                  className={`flex-1 p-2 text-sm font-medium flex items-center justify-center gap-1 transition-colors ${rightSidebarTab === "properties" ? "text-emerald-400 border-b-2 border-emerald-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
                 >
                   <Settings size={14} /> Props
                 </button>
                 <button
                   onClick={() => setRightSidebarTab("layers")}
-                  className={`flex-1 p-2 text-xs font-medium flex items-center justify-center gap-1 transition-colors ${rightSidebarTab === "layers" ? "text-emerald-400 border-b-2 border-emerald-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
+                  className={`flex-1 p-2 text-sm font-medium flex items-center justify-center gap-1 transition-colors ${rightSidebarTab === "layers" ? "text-emerald-400 border-b-2 border-emerald-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
                 >
                   <Layers size={14} /> Layers
+                </button>
+                <button
+                  onClick={() => setRightSidebarTab("assets")}
+                  className={`flex-1 p-2 text-sm font-medium flex items-center justify-center gap-1 transition-colors ${rightSidebarTab === "assets" ? "text-emerald-400 border-b-2 border-emerald-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
+                >
+                  <FolderOpen size={14} /> Assets
                 </button>
               </div>
 
@@ -5814,12 +6297,12 @@ const App: React.FC = () => {
                 {rightSidebarTab === "layers" && (
                   <div className="flex flex-col gap-2">
                     <div className="flex justify-between items-center mb-2">
-                      <div className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                      <div className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
                         {editorMode === "ui_stage"
                           ? "UI Elements"
                           : "Stage Objects"}
                       </div>
-                      <span className="text-xs text-neutral-500">
+                      <span className="text-sm text-neutral-500">
                         {currentScene.objects.length}
                       </span>
                     </div>
@@ -5891,7 +6374,7 @@ const App: React.FC = () => {
 
                               // Re-assign z-indices cleanly, starting from highest
                               const total = sortedObjects.length;
-                              const isUI = editorMode === "ui_stage";
+                              const isUI = editorMode === "ui_stage" && !isPlaying;
                               const newProject = {
                                 ...project,
                                 [isUI ? "uiMenus" : "scenes"]: (
@@ -5987,7 +6470,7 @@ const App: React.FC = () => {
                                   </button>
                                 </div>
 
-                                <div className="text-[10px] uppercase text-neutral-500 font-bold bg-neutral-950 px-2 py-0.5 rounded border border-neutral-800">
+                                <div className="text-sm uppercase text-neutral-500 font-bold bg-neutral-950 px-2 py-0.5 rounded border border-neutral-800">
                                   Layer {obj.zIndex}
                                 </div>
 
@@ -6038,7 +6521,7 @@ const App: React.FC = () => {
                 {rightSidebarTab === "prefabs" && (
                   <div className="flex flex-col gap-2">
                     <div className="flex justify-between items-center mb-2">
-                      <div className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                      <div className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
                         Smart Prefabs
                       </div>
                     </div>
@@ -6251,11 +6734,88 @@ const App: React.FC = () => {
                   </div>
                 )}
 
+                {rightSidebarTab === "assets" && (
+                  <div className="flex flex-col gap-2 h-full overflow-hidden">
+                    <div className="flex justify-between items-center mb-1">
+                      <div className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
+                        Asset Palette
+                      </div>
+                    </div>
+                    <div className="text-xs text-neutral-500 mb-2">
+                      Drag assets onto the stage.
+                    </div>
+                    <div className="mb-2">
+                      <select 
+                        value={assetPaletteCategory}
+                        onChange={e => setAssetPaletteCategory(e.target.value)}
+                        className="w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1.5 text-sm text-neutral-200"
+                      >
+                        <option value="all">All Assets</option>
+                        <option value="type:image">Images</option>
+                        <option value="type:audio">Sounds / Music</option>
+                        {Array.from(new Set(project.assets.map(a => a.category).filter(c => c && c !== 'root'))).map(c => (
+                           <option key={`cat:${c}`} value={`cat:${c}`}>Category: {c}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 overflow-y-auto pb-8 custom-scrollbar">
+                      {project.assets.filter(a => {
+                        if (assetPaletteCategory === "all") return true;
+                        if (assetPaletteCategory === "type:image") return a.type === "image";
+                        if (assetPaletteCategory === "type:audio") return a.type === "audio";
+                        if (assetPaletteCategory.startsWith("cat:")) return a.category === assetPaletteCategory.substring(4);
+                        return true;
+                      }).map((asset) => (
+                        <div
+                          key={asset.id}
+                          className="group relative bg-neutral-900 border border-neutral-800 rounded-lg aspect-square flex flex-col items-center justify-center p-2 cursor-grab hover:border-emerald-500/50 hover:bg-neutral-800 transition-colors"
+                          draggable
+                          onDragStart={(e) => handleDragStartAsset(e, asset)}
+                        >
+                          <div className="flex-1 w-full flex items-center justify-center overflow-hidden mb-1">
+                            {asset.type === "script" ? (
+                              <div className="text-neutral-500 font-bold text-xs uppercase tracking-wider border border-neutral-700 p-2 rounded bg-neutral-950">Script</div>
+                            ) : asset.type === "audio" ? (
+                              <Music size={24} className="text-emerald-500" />
+                            ) : asset.type === "hitbox" ? (
+                              <div className="w-12 h-12 border-2 border-dashed border-red-500 rounded flex items-center justify-center">
+                                <span className="text-[10px] text-red-500 font-bold">HITBOX</span>
+                              </div>
+                            ) : asset.type === "text" ? (
+                              <div className="text-neutral-300 font-serif italic text-lg tracking-wider">Aa</div>
+                            ) : asset.type === "video" ? (
+                              <video
+                                src={asset.src || undefined}
+                                className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md"
+                              />
+                            ) : (
+                              <img
+                                src={asset.src || undefined}
+                                alt={asset.name}
+                                className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md"
+                                loading="lazy"
+                              />
+                            )}
+                          </div>
+                          <span className="text-[10px] text-neutral-400 font-medium truncate w-full text-center">
+                            {asset.name}
+                          </span>
+                        </div>
+                      ))}
+                      {project.assets.length === 0 && (
+                        <div className="col-span-2 text-sm text-neutral-600 text-center py-8">
+                          No assets yet.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {rightSidebarTab === "properties" &&
                   (!selectedObject ? (
                     <div className="space-y-6">
                       <div className="space-y-3">
-                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                        <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
                           Stage Settings
                         </h3>
                         <div className="grid grid-cols-2 gap-2">
@@ -6309,7 +6869,7 @@ const App: React.FC = () => {
                             {project.globalSettings.customCursorAssetId ? (
                               <div className="relative w-10 h-10 bg-neutral-800 border border-neutral-700 rounded">
                                 <img
-                                  src={project.assets.find(a => a.id === project.globalSettings.customCursorAssetId)?.src || ''}
+                                  src={project.assets.find(a => a.id === project.globalSettings.customCursorAssetId)?.src || undefined}
                                   className="w-full h-full object-contain p-1"
                                 />
                                 <button className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5" onClick={() => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, customCursorAssetId: undefined }}))}><X size={10} /></button>
@@ -6323,7 +6883,7 @@ const App: React.FC = () => {
                                   },
                                   filterType: "image"
                                 })}
-                                className="px-3 py-1 bg-neutral-800 border border-neutral-700 text-neutral-300 text-xs rounded hover:bg-neutral-700"
+                                className="px-3 py-1 bg-neutral-800 border border-neutral-700 text-neutral-300 text-sm rounded hover:bg-neutral-700"
                               >
                                 Select Image
                               </button>
@@ -6333,7 +6893,7 @@ const App: React.FC = () => {
                       </div>
 
                       <div className="space-y-3">
-                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                        <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
                           UI Theme Settings
                         </h3>
 
@@ -6495,18 +7055,17 @@ const App: React.FC = () => {
                           >
                             <option value="sans-serif">System Sans</option>
                             <option value="serif">System Serif</option>
-                            <option value="'Courier New', monospace">
-                              Terminal (Courier)
-                            </option>
-                            <option value="'Comic Sans MS', cursive">
-                              Bubbly (Comic Sans)
-                            </option>
-                            <option value="'Press Start 2P', monospace">
-                              Retro 8-bit
-                            </option>
-                            <option value="Papyrus, fantasy">
-                              Ancient (Papyrus)
-                            </option>
+                            <option value="'Courier New', monospace">Terminal (Courier)</option>
+                            <option value="Helvetica, Arial, sans-serif">Helvetica / Arial</option>
+                            <option value="'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif">Trebuchet MS</option>
+                            <option value="Verdana, Geneva, sans-serif">Verdana</option>
+                            <option value="'Times New Roman', Times, serif">Times New Roman</option>
+                            <option value="Georgia, serif">Georgia</option>
+                            <option value="Garamond, serif">Garamond</option>
+                            <option value="'Comic Sans MS', cursive">Bubbly (Comic Sans)</option>
+                            <option value="'Brush Script MT', cursive">Brush Script</option>
+                            <option value="'Press Start 2P', monospace">Retro 8-bit</option>
+                            <option value="Papyrus, fantasy">Ancient (Papyrus)</option>
                           </select>
                         </div>
 
@@ -6564,7 +7123,7 @@ const App: React.FC = () => {
                         </div>
 
                         <details className="mt-4">
-                          <summary className="text-xs font-bold text-neutral-400 uppercase tracking-wider cursor-pointer hover:text-emerald-400 transition-colors">
+                          <summary className="text-sm font-bold text-neutral-400 uppercase tracking-wider cursor-pointer hover:text-emerald-400 transition-colors">
                             Advanced CSS Override
                           </summary>
                           <textarea
@@ -6578,14 +7137,14 @@ const App: React.FC = () => {
                                 },
                               }))
                             }
-                            className="w-full h-48 bg-neutral-900 border border-neutral-700 rounded p-2 mt-2 text-xs font-mono text-neutral-300 focus:border-emerald-500 focus:outline-none custom-scrollbar whitespace-pre"
+                            className="w-full h-48 bg-neutral-900 border border-neutral-700 rounded p-2 mt-2 text-sm font-mono text-neutral-300 focus:border-emerald-500 focus:outline-none custom-scrollbar whitespace-pre"
                             placeholder={`/* Your custom CSS classes run in Preview/Export */\n.dialogue-box {\n  ...\n}`}
                           />
                         </details>
                       </div>
 
                       <div className="space-y-3 mt-6">
-                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                        <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
                           Gameplay Settings
                         </h3>
 
@@ -6611,7 +7170,7 @@ const App: React.FC = () => {
                               Enable Day/Night Cycle
                             </span>
                           </label>
-                          <p className="text-[10px] text-neutral-500 mt-1">
+                          <p className="text-sm text-neutral-500 mt-1">
                             Applies global lighting filters based on in-game
                             time.
                           </p>
@@ -6636,7 +7195,7 @@ const App: React.FC = () => {
                               Enable "Sim" Needs System
                             </span>
                           </label>
-                          <p className="text-[10px] text-neutral-500 mt-1">
+                          <p className="text-sm text-neutral-500 mt-1">
                             Shows a HUD tracking hunger, energy, etc.
                           </p>
                         </div>
@@ -6662,7 +7221,7 @@ const App: React.FC = () => {
                               Enable TTRPG Stats/Skills
                             </span>
                           </label>
-                          <p className="text-[10px] text-neutral-500 mt-1">
+                          <p className="text-sm text-neutral-500 mt-1">
                             Enables rolling dice for interactions based on
                             skills.
                           </p>
@@ -6670,10 +7229,24 @@ const App: React.FC = () => {
                       </div>
                     </div>
                   ) : (
-                    <>
+                    <div className="space-y-6">
+                      <div className="space-y-3">
+                        <LabelWithHelp 
+                          label="Object Name"
+                          helpText="A unique name to identify this object in the Layers panel."
+                        />
+                        <input
+                          type="text"
+                          value={selectedObject.name || ""}
+                          onChange={(e) => updateObject(selectedObject.id, { name: e.target.value })}
+                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm font-medium focus:outline-none focus:border-emerald-500"
+                          placeholder="e.g. Hero Character"
+                        />
+                      </div>
+                      
                       {selectedObject.isUiElement && (
                         <>
-                          <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">
+                          <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-wider mb-2">
                             HUD / UI Properties
                           </h3>
 
@@ -6707,7 +7280,7 @@ const App: React.FC = () => {
                                         uiColorPrimary: e.target.value,
                                       })
                                     }
-                                    className="w-full bg-neutral-800 border-b border-neutral-700 rounded-none px-1 py-0.5 text-xs focus:outline-none"
+                                    className="w-full bg-neutral-800 border-b border-neutral-700 rounded-none px-1 py-0.5 text-sm focus:outline-none"
                                   />
                                 </div>
                               </div>
@@ -6745,7 +7318,7 @@ const App: React.FC = () => {
                                         uiColorSecondary: e.target.value,
                                       })
                                     }
-                                    className="w-full bg-neutral-800 border-b border-neutral-700 rounded-none px-1 py-0.5 text-xs focus:outline-none"
+                                    className="w-full bg-neutral-800 border-b border-neutral-700 rounded-none px-1 py-0.5 text-sm focus:outline-none"
                                   />
                                 </div>
                               </div>
@@ -6775,10 +7348,16 @@ const App: React.FC = () => {
                                     <option value="solid">Solid Line</option>
                                     <option value="double">Double Line</option>
                                     <option value="bevel">Beveled (3D)</option>
+                                    <option value="dashed">Dashed Line</option>
+                                    <option value="dotted">Dotted Line</option>
+                                    <option value="inset">Inset (Sunken)</option>
+                                    <option value="outset">Outset (Raised)</option>
+                                    <option value="groove">Groove</option>
+                                    <option value="ridge">Ridge</option>
                                   </select>
                                 </div>
                                 <div>
-                                  <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+                                  <div className="flex justify-between items-center text-sm text-neutral-500 mb-1">
                                     <LabelWithHelp
                                       label="Border Radius"
                                       helpText="How rounded the corners are. 0 is a sharp square."
@@ -6874,7 +7453,7 @@ const App: React.FC = () => {
                                   }
                                   className="w-full mt-1 accent-emerald-500"
                                 />
-                                <div className="text-right text-xs text-neutral-400">
+                                <div className="text-right text-sm text-neutral-400">
                                   {selectedObject.uiValue || 0}%
                                 </div>
                               </div>
@@ -6902,11 +7481,11 @@ const App: React.FC = () => {
                               <LabelWithHelp
                                 label="Make it Smart (Auto-Update)"
                                 helpText="Make this UI element update automatically based on player health, inventory, etc."
-                                className="text-xs font-bold uppercase text-neutral-400"
+                                className="text-sm font-bold uppercase text-neutral-400"
                               />
 
                               <div>
-                                <label className="text-xs text-neutral-500 block mb-1">
+                                <label className="text-sm text-neutral-500 block mb-1">
                                   What should this show?
                                 </label>
                                 <select
@@ -6945,7 +7524,7 @@ const App: React.FC = () => {
 
                               {selectedObject.uiBindingType === "need" && (
                                 <div>
-                                  <label className="text-xs text-neutral-500 block mb-1">
+                                  <label className="text-sm text-neutral-500 block mb-1">
                                     Which stat?
                                   </label>
                                   <input
@@ -6964,7 +7543,7 @@ const App: React.FC = () => {
                               {selectedObject.uiBindingType ===
                                 "inventory_count" && (
                                 <div>
-                                  <label className="text-xs text-neutral-500 block mb-1">
+                                  <label className="text-sm text-neutral-500 block mb-1">
                                     Which Item?
                                   </label>
                                   <select
@@ -6987,7 +7566,7 @@ const App: React.FC = () => {
                               )}
                               {selectedObject.uiBindingType === "flag" && (
                                 <div>
-                                  <label className="text-xs text-neutral-500 block mb-1">
+                                  <label className="text-sm text-neutral-500 block mb-1">
                                     Which Story Event?
                                   </label>
                                   <select
@@ -7016,8 +7595,19 @@ const App: React.FC = () => {
                       <>
                         {/* Transform Standard */}
                           <div className="space-y-3">
-                            <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
-                              Transform
+                            <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider flex justify-between items-center">
+                              <span>Transform</span>
+                              {editorMode === "ui_stage" && (
+                                <div className="flex gap-1">
+                                  <button onClick={() => updateObject(selectedObject.id, { x: 0, y: 0 })} className="p-1 bg-neutral-800 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white" title="Top Left">↖</button>
+                                  <button onClick={() => updateObject(selectedObject.id, { x: (currentScene?.width || project.globalSettings.stageWidth || 800) / 2 - selectedObject.width / 2, y: 0 })} className="p-1 bg-neutral-800 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white" title="Top Center">⬆</button>
+                                  <button onClick={() => updateObject(selectedObject.id, { x: (currentScene?.width || project.globalSettings.stageWidth || 800) - selectedObject.width, y: 0 })} className="p-1 bg-neutral-800 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white" title="Top Right">↗</button>
+                                  <button onClick={() => updateObject(selectedObject.id, { x: (currentScene?.width || project.globalSettings.stageWidth || 800) / 2 - selectedObject.width / 2, y: (currentScene?.height || project.globalSettings.stageHeight || 600) / 2 - selectedObject.height / 2 })} className="p-1 bg-neutral-800 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white" title="Center">⏺</button>
+                                  <button onClick={() => updateObject(selectedObject.id, { x: 0, y: (currentScene?.height || project.globalSettings.stageHeight || 600) - selectedObject.height })} className="p-1 bg-neutral-800 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white" title="Bottom Left">↙</button>
+                                  <button onClick={() => updateObject(selectedObject.id, { x: (currentScene?.width || project.globalSettings.stageWidth || 800) / 2 - selectedObject.width / 2, y: (currentScene?.height || project.globalSettings.stageHeight || 600) - selectedObject.height })} className="p-1 bg-neutral-800 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white" title="Bottom Center">⬇</button>
+                                  <button onClick={() => updateObject(selectedObject.id, { x: (currentScene?.width || project.globalSettings.stageWidth || 800) - selectedObject.width, y: (currentScene?.height || project.globalSettings.stageHeight || 600) - selectedObject.height })} className="p-1 bg-neutral-800 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white" title="Bottom Right">↘</button>
+                                </div>
+                              )}
                             </h3>
                             <div className="grid grid-cols-2 gap-2">
                               <div>
@@ -7103,7 +7693,7 @@ const App: React.FC = () => {
                                 />
                               </div>
                               <div className="flex items-end gap-2 pb-1">
-                                <label className="flex items-center gap-1 text-xs text-neutral-300 cursor-pointer">
+                                <label className="flex items-center gap-1 text-sm text-neutral-300 cursor-pointer">
                                   <input
                                     type="checkbox"
                                     checked={!!selectedObject.flipX}
@@ -7116,7 +7706,7 @@ const App: React.FC = () => {
                                   />
                                   Flip X
                                 </label>
-                                <label className="flex items-center gap-1 text-xs text-neutral-300 cursor-pointer">
+                                <label className="flex items-center gap-1 text-sm text-neutral-300 cursor-pointer">
                                   <input
                                     type="checkbox"
                                     checked={!!selectedObject.flipY}
@@ -7136,7 +7726,7 @@ const App: React.FC = () => {
 
                       {selectedObject.isText && !selectedObject.isUiElement && (
                         <div className="space-y-3 pt-4 border-t border-neutral-800">
-                          <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                          <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
                             Text Styling
                           </h3>
 
@@ -7181,7 +7771,7 @@ const App: React.FC = () => {
                                       textColor: e.target.value,
                                     })
                                   }
-                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs"
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
                                 />
                               </div>
                             </div>
@@ -7225,18 +7815,17 @@ const App: React.FC = () => {
                                 <option value="sans-serif">Sans Serif</option>
                                 <option value="serif">Serif</option>
                                 <option value="monospace">Monospace</option>
-                                <option value="'Courier New', Courier, monospace">
-                                  Courier New
-                                </option>
-                                <option value="'Comic Sans MS', 'Comic Sans', cursive">
-                                  Comic Sans
-                                </option>
-                                <option value="'Impact', sans-serif">
-                                  Impact
-                                </option>
-                                <option value="system-ui">
-                                  System Default
-                                </option>
+                                <option value="'Courier New', Courier, monospace">Courier New</option>
+                                <option value="Helvetica, Arial, sans-serif">Helvetica / Arial</option>
+                                <option value="'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif">Trebuchet MS</option>
+                                <option value="Verdana, Geneva, sans-serif">Verdana</option>
+                                <option value="'Times New Roman', Times, serif">Times New Roman</option>
+                                <option value="Georgia, serif">Georgia</option>
+                                <option value="Garamond, serif">Garamond</option>
+                                <option value="'Comic Sans MS', 'Comic Sans', cursive">Comic Sans</option>
+                                <option value="'Brush Script MT', cursive">Brush Script</option>
+                                <option value="'Impact', sans-serif">Impact</option>
+                                <option value="system-ui">System Default</option>
                               </select>
                             </div>
                             <div>
@@ -7382,14 +7971,14 @@ const App: React.FC = () => {
                                 }
                                 className="bg-neutral-900 border-neutral-700 text-emerald-500 rounded focus:ring-emerald-500"
                               />
-                              <span className="text-xs text-neutral-400 font-medium">
+                              <span className="text-sm text-neutral-400 font-medium">
                                 Text Outline Stroke
                               </span>
                             </label>
 
                             {selectedObject.textOutline && (
                               <div>
-                                <label className="text-[10px] text-neutral-500 block mb-1">
+                                <label className="text-sm text-neutral-500 block mb-1">
                                   Outline Color
                                 </label>
                                 <div className="flex gap-2 items-center">
@@ -7417,7 +8006,7 @@ const App: React.FC = () => {
                                         textOutlineColor: e.target.value,
                                       })
                                     }
-                                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs"
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
                                   />
                                 </div>
                               </div>
@@ -7428,7 +8017,7 @@ const App: React.FC = () => {
 
                       {/* Layering */}
                       <div className="space-y-3">
-                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                        <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
                           Layering
                         </h3>
                         <div className="flex items-center justify-between">
@@ -7490,7 +8079,7 @@ const App: React.FC = () => {
                               label="Opacity"
                               helpText="How transparent the object is. 100% is fully visible, 0% is invisible."
                             />
-                            <span className="text-xs text-neutral-500">
+                            <span className="text-sm text-neutral-500">
                               {Math.round(selectedObject.opacity * 100)}%
                             </span>
                           </div>
@@ -7508,13 +8097,29 @@ const App: React.FC = () => {
                             className="w-full accent-emerald-500"
                           />
                         </div>
+                        <div className="flex items-center gap-2 mt-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedObject.ignoreClicks || false}
+                            onChange={(e) =>
+                              updateObject(selectedObject.id, {
+                                ignoreClicks: e.target.checked,
+                              })
+                            }
+                            className="accent-emerald-500 w-4 h-4 cursor-pointer"
+                            id="ignoreClicksToggle"
+                          />
+                          <label htmlFor="ignoreClicksToggle" className="text-sm font-bold text-neutral-300 select-none cursor-pointer">
+                            Ignore Clicks (Pass-through)
+                          </label>
+                        </div>
                         <div>
                           <div className="flex justify-between items-center">
                             <LabelWithHelp
                               label="Parallax"
                               helpText="Scroll speed. 1 is normal, <1 is background, >1 is foreground."
                             />
-                            <span className="text-xs text-neutral-500">
+                            <span className="text-sm text-neutral-500">
                               {selectedObject.parallaxSpeed !== undefined
                                 ? selectedObject.parallaxSpeed.toFixed(1)
                                 : "1.0"}
@@ -7575,7 +8180,7 @@ const App: React.FC = () => {
                       {!selectedObject.isUiElement && (
                         <div className="space-y-3">
                           <div className="flex items-center justify-between">
-                            <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                            <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
                               Appearance
                             </h3>
                             {!selectedObject.isHitbox &&
@@ -7589,7 +8194,7 @@ const App: React.FC = () => {
                                       )?.id || null,
                                     )
                                   }
-                                  className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded hover:bg-emerald-500/30 flex items-center gap-1 font-bold"
+                                  className="text-sm bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded hover:bg-emerald-500/30 flex items-center gap-1 font-bold"
                                   title="Open Image Editor to remove background, crop, or recolor"
                                 >
                                   <Wand2 size={10} /> Edit Image
@@ -7614,15 +8219,24 @@ const App: React.FC = () => {
                               <option value="multiply">Multiply</option>
                               <option value="screen">Screen</option>
                               <option value="overlay">Overlay</option>
+                              <option value="darken">Darken</option>
+                              <option value="lighten">Lighten</option>
                               <option value="color-dodge">Color Dodge</option>
+                              <option value="color-burn">Color Burn</option>
+                              <option value="hard-light">Hard Light</option>
+                              <option value="soft-light">Soft Light</option>
                               <option value="difference">Difference</option>
+                              <option value="exclusion">Exclusion</option>
+                              <option value="hue">Hue</option>
+                              <option value="saturation">Saturation</option>
+                              <option value="color">Color</option>
                               <option value="luminosity">Luminosity</option>
                             </select>
                           </div>
 
                           <div className="space-y-2 pt-2 border-t border-neutral-800">
                             <div>
-                              <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+                              <div className="flex justify-between items-center text-sm text-neutral-500 mb-1">
                                 <span>Brightness</span>
                                 <span>
                                   {Math.round(
@@ -7650,7 +8264,7 @@ const App: React.FC = () => {
                               />
                             </div>
                             <div>
-                              <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+                              <div className="flex justify-between items-center text-sm text-neutral-500 mb-1">
                                 <span>Contrast</span>
                                 <span>
                                   {Math.round(
@@ -7678,7 +8292,7 @@ const App: React.FC = () => {
                               />
                             </div>
                             <div>
-                              <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+                              <div className="flex justify-between items-center text-sm text-neutral-500 mb-1">
                                 <span>Saturation</span>
                                 <span>
                                   {Math.round(
@@ -7706,7 +8320,7 @@ const App: React.FC = () => {
                               />
                             </div>
                             <div>
-                              <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+                              <div className="flex justify-between items-center text-sm text-neutral-500 mb-1">
                                 <span>Hue Shift</span>
                                 <span>
                                   {selectedObject.filters?.hueRotate ?? 0}°
@@ -7730,7 +8344,7 @@ const App: React.FC = () => {
                               />
                             </div>
                             <div>
-                              <div className="flex justify-between items-center text-xs text-neutral-500 mb-1">
+                              <div className="flex justify-between items-center text-sm text-neutral-500 mb-1">
                                 <span>Blur</span>
                                 <span>
                                   {selectedObject.filters?.blur ?? 0}px
@@ -7755,7 +8369,7 @@ const App: React.FC = () => {
                             </div>
 
                             <div className="flex items-center gap-4 pt-2">
-                              <label className="flex items-center gap-1 text-xs text-neutral-300 cursor-pointer">
+                              <label className="flex items-center gap-1 text-sm text-neutral-300 cursor-pointer">
                                 <input
                                   type="checkbox"
                                   checked={
@@ -7773,7 +8387,7 @@ const App: React.FC = () => {
                                 />
                                 Sepia
                               </label>
-                              <label className="flex items-center gap-1 text-xs text-neutral-300 cursor-pointer">
+                              <label className="flex items-center gap-1 text-sm text-neutral-300 cursor-pointer">
                                 <input
                                   type="checkbox"
                                   checked={
@@ -7798,11 +8412,39 @@ const App: React.FC = () => {
                                     filters: undefined,
                                   })
                                 }
-                                className="ml-auto text-[10px] text-red-400 hover:text-red-300 px-2 py-0.5 border border-red-500/30 rounded bg-red-500/10"
+                                className="ml-auto text-sm text-red-400 hover:text-red-300 px-2 py-0.5 border border-red-500/30 rounded bg-red-500/10"
                                 title="Reset Filters"
                               >
                                 Reset
                               </button>
+                            </div>
+                            
+                            <div>
+                              <div className="flex justify-between items-center text-sm text-neutral-500 mb-1">
+                                <span>Grayscale</span>
+                                <span>
+                                  {Math.round(
+                                    (selectedObject.filters?.grayscale ?? 0) * 100,
+                                  )}
+                                  %
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.05"
+                                value={selectedObject.filters?.grayscale ?? 0}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    filters: {
+                                      ...selectedObject.filters,
+                                      grayscale: Number(e.target.value),
+                                    },
+                                  })
+                                }
+                                className="w-full accent-emerald-500 h-1"
+                              />
                             </div>
                           </div>
                         </div>
@@ -7812,7 +8454,7 @@ const App: React.FC = () => {
                       {!selectedObject.isUiElement &&
                         !selectedObject.isText && (
                           <div className="space-y-3 pt-3 border-t border-neutral-800">
-                            <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                            <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
                               Physics
                             </h3>
                             <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-white">
@@ -7829,18 +8471,80 @@ const App: React.FC = () => {
                               Enable Physics
                             </label>
                             {selectedObject.hasPhysics && (
-                              <p className="text-[10px] text-neutral-500 leading-snug">
-                                Objects with physics will fall to the ground and
-                                can be dragged around with the mouse while the
-                                game is playing.
-                              </p>
+                              <div className="space-y-3 mt-2 pl-6">
+                                <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-white">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!selectedObject.physicsStatic}
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        physicsStatic: e.target.checked,
+                                      })
+                                    }
+                                    className="rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500"
+                                  />
+                                  Is Static Object
+                                </label>
+                                
+                                <div>
+                                  <div className="flex justify-between text-sm text-neutral-500 mb-1">
+                                    <span>Bounciness</span>
+                                    <span>{selectedObject.physicsBounciness ?? 0.6}</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min="0"
+                                    max="1.5"
+                                    step="0.1"
+                                    value={selectedObject.physicsBounciness ?? 0.6}
+                                    onChange={(e) => updateObject(selectedObject.id, { physicsBounciness: parseFloat(e.target.value) })}
+                                    className="w-full accent-emerald-500 h-1"
+                                  />
+                                </div>
+                                
+                                <div>
+                                  <div className="flex justify-between text-sm text-neutral-500 mb-1">
+                                    <span>Friction</span>
+                                    <span>{selectedObject.physicsFriction ?? 0.1}</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min="0"
+                                    max="1"
+                                    step="0.05"
+                                    value={selectedObject.physicsFriction ?? 0.1}
+                                    onChange={(e) => updateObject(selectedObject.id, { physicsFriction: parseFloat(e.target.value) })}
+                                    className="w-full accent-emerald-500 h-1"
+                                  />
+                                </div>
+                                
+                                <div>
+                                  <div className="flex justify-between text-sm text-neutral-500 mb-1">
+                                    <span>Density</span>
+                                    <span>{selectedObject.physicsDensity ?? 0.05}</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min="0.01"
+                                    max="1"
+                                    step="0.01"
+                                    value={selectedObject.physicsDensity ?? 0.05}
+                                    onChange={(e) => updateObject(selectedObject.id, { physicsDensity: parseFloat(e.target.value) })}
+                                    className="w-full accent-emerald-500 h-1"
+                                  />
+                                </div>
+                                
+                                <p className="text-sm text-neutral-500 leading-snug pt-1">
+                                  Drag objects around with the mouse while playing!
+                                </p>
+                              </div>
                             )}
                           </div>
                         )}
 
                       {/* Interaction */}
                       <div className="space-y-3">
-                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                        <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
                           Action On Click
                         </h3>
                         <div>
@@ -7865,6 +8569,27 @@ const App: React.FC = () => {
                             <option value="zoom-in">Eye (Look)</option>
                           </select>
                         </div>
+
+                        <label className="flex items-center gap-2 cursor-pointer mt-4 mb-2 bg-neutral-900 p-2 rounded">
+                          <input
+                            type="checkbox"
+                            checked={selectedObject.isDraggable || false}
+                            onChange={(e) =>
+                              updateObject(selectedObject.id, {
+                                isDraggable: e.target.checked,
+                              })
+                            }
+                            className="bg-neutral-800 border-neutral-700 rounded w-4 h-4 text-emerald-500 focus:ring-emerald-500 text-sm cursor-pointer"
+                          />
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium text-white">
+                              Draggable in-game
+                            </span>
+                            <span className="text-xs text-neutral-400">
+                              Player can drag this object during gameplay.
+                            </span>
+                          </div>
+                        </label>
 
                         <div>
                           <LabelWithHelp
@@ -7899,7 +8624,7 @@ const App: React.FC = () => {
                             selectedObject.animation !== "glow" && (
                               <div className="grid grid-cols-2 gap-2">
                                 <div>
-                                  <label className="text-[10px] text-neutral-500 uppercase tracking-wider">
+                                  <label className="text-sm text-neutral-500 uppercase tracking-wider">
                                     Duration (s)
                                   </label>
                                   <input
@@ -7925,7 +8650,7 @@ const App: React.FC = () => {
                                   />
                                 </div>
                                 <div>
-                                  <label className="text-[10px] text-neutral-500 uppercase tracking-wider">
+                                  <label className="text-sm text-neutral-500 uppercase tracking-wider">
                                     Easing
                                   </label>
                                   <select
@@ -8032,11 +8757,16 @@ const App: React.FC = () => {
                             <option value="toggle_inventory">
                               Toggle Inventory
                             </option>
+                            <option value="restart_scene">Restart Current Scene</option>
+                            <option value="restart_game">Restart Full Game</option>
+                            <option value="toggle_fullscreen">Toggle Fullscreen</option>
+                            <option value="toggle_mute">Toggle Mute Audio</option>
+                            <option value="exit_game">Exit / Close Game</option>
                           </select>
 
                           {selectedObject.interaction !== "none" && (
                             <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-neutral-800">
-                              <label className="flex items-center gap-2 text-xs text-neutral-400 cursor-pointer hover:text-white">
+                              <label className="flex items-center gap-2 text-sm text-neutral-400 cursor-pointer hover:text-white">
                                 <input
                                   type="checkbox"
                                   checked={!!selectedObject.triggerOnEnter}
@@ -8051,7 +8781,7 @@ const App: React.FC = () => {
                                   Trigger on Mouse Enter (Hover / Map Trigger)
                                 </span>
                               </label>
-                              <label className="flex items-center gap-2 text-xs text-neutral-400 cursor-pointer hover:text-white">
+                              <label className="flex items-center gap-2 text-sm text-neutral-400 cursor-pointer hover:text-white">
                                 <input
                                   type="checkbox"
                                   checked={!!selectedObject.triggerOnce}
@@ -8070,7 +8800,7 @@ const App: React.FC = () => {
 
                         {selectedObject.interaction === "sound" && (
                           <div>
-                            <label className="text-xs text-neutral-500">
+                            <label className="text-sm text-neutral-500">
                               Audio Asset
                             </label>
                             <select
@@ -8097,7 +8827,7 @@ const App: React.FC = () => {
                         {selectedObject.interaction === "play_cutscene" && (
                           <div className="space-y-3">
                             <div>
-                              <label className="text-xs text-neutral-500">
+                              <label className="text-sm text-neutral-500">
                                 Video Asset
                               </label>
                               <select
@@ -8120,7 +8850,7 @@ const App: React.FC = () => {
                               </select>
                             </div>
                             <div>
-                                <label className="text-xs text-neutral-500">
+                                <label className="text-sm text-neutral-500">
                                   Jump to Scene after video (Optional)
                                 </label>
                                 <select
@@ -8145,7 +8875,7 @@ const App: React.FC = () => {
 
                         {selectedObject.interaction === "set_flag" && (
                           <div>
-                            <label className="text-xs text-neutral-500">
+                            <label className="text-sm text-neutral-500">
                               Select Story Event
                             </label>
                             <select
@@ -8169,7 +8899,7 @@ const App: React.FC = () => {
 
                         {selectedObject.interaction === "start-dialogue" && (
                           <div>
-                            <label className="text-xs text-neutral-500">
+                            <label className="text-sm text-neutral-500">
                               Dialogue Tree
                             </label>
                             <select
@@ -8192,7 +8922,7 @@ const App: React.FC = () => {
                         )}
 
                         <div className="pt-4 border-t border-neutral-800">
-                          <h4 className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-3 flex items-center gap-2">
+                          <h4 className="text-sm uppercase tracking-wider text-neutral-500 font-bold mb-3 flex items-center gap-2">
                             <Eye size={12} />
                             Visibility Conditions
                           </h4>
@@ -8245,7 +8975,7 @@ const App: React.FC = () => {
                         </div>
 
                         <div className="pt-4 border-t border-neutral-800">
-                          <h4 className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-3 flex items-center gap-2">
+                          <h4 className="text-sm uppercase tracking-wider text-neutral-500 font-bold mb-3 flex items-center gap-2">
                             <Backpack size={12} />
                             Inventory Requirements
                           </h4>
@@ -8290,7 +9020,7 @@ const App: React.FC = () => {
                                     };
                                     pushHistory(newProject);
                                   }}
-                                  className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded hover:bg-emerald-500/30 line-clamp-1 truncate"
+                                  className="text-sm bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded hover:bg-emerald-500/30 line-clamp-1 truncate"
                                 >
                                   + Add New
                                 </button>
@@ -8314,7 +9044,7 @@ const App: React.FC = () => {
                                 ))}
                               </select>
                               {selectedObject.requireItemId && (
-                                <label className="flex items-center gap-2 mt-2 text-xs text-neutral-400 cursor-pointer hover:text-white">
+                                <label className="flex items-center gap-2 mt-2 text-sm text-neutral-400 cursor-pointer hover:text-white">
                                   <input
                                     type="checkbox"
                                     checked={
@@ -8337,7 +9067,7 @@ const App: React.FC = () => {
                               <div className="space-y-3">
                                 <div>
                                   <div className="flex justify-between items-center">
-                                    <label className="text-xs text-neutral-500">
+                                    <label className="text-sm text-neutral-500">
                                       Item to Give
                                     </label>
                                     <button
@@ -8380,7 +9110,7 @@ const App: React.FC = () => {
                                         };
                                         pushHistory(newProject);
                                       }}
-                                      className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded hover:bg-emerald-500/30"
+                                      className="text-sm bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded hover:bg-emerald-500/30"
                                     >
                                       + Quick Create
                                     </button>
@@ -8402,14 +9132,14 @@ const App: React.FC = () => {
                                     ))}
                                   </select>
                                   {!selectedObject.giveItemId && (
-                                    <p className="text-[10px] text-amber-500 mt-1">
+                                    <p className="text-sm text-amber-500 mt-1">
                                       ⚠️ You must select an item for it to
                                       appear in the inventory block.
                                     </p>
                                   )}
                                 </div>
                                 <div>
-                                  <label className="text-xs text-neutral-500">
+                                  <label className="text-sm text-neutral-500">
                                     Collection Message
                                   </label>
                                   <textarea
@@ -8430,7 +9160,7 @@ const App: React.FC = () => {
 
                         {selectedObject.interaction === "run_script" && (
                           <div>
-                            <label className="text-xs text-neutral-500">
+                            <label className="text-sm text-neutral-500">
                               Script Asset
                             </label>
                             <select
@@ -8458,7 +9188,7 @@ const App: React.FC = () => {
                           selectedObject.interaction,
                         ) && (
                           <div>
-                            <label className="text-xs text-neutral-500">
+                            <label className="text-sm text-neutral-500">
                               {selectedObject.interaction === "skill_check"
                                 ? "Success Dialogue"
                                 : "Action Data"}
@@ -8484,7 +9214,7 @@ const App: React.FC = () => {
 
                         {selectedObject.interaction === "scene_change" && (
                           <div>
-                            <label className="text-xs text-neutral-500">
+                            <label className="text-sm text-neutral-500">
                               Target Scene
                             </label>
                             <select
@@ -8512,7 +9242,7 @@ const App: React.FC = () => {
                         {(selectedObject.interaction === "open_ui" ||
                           selectedObject.interaction === "close_ui") && (
                           <div>
-                            <label className="text-xs text-neutral-500">
+                            <label className="text-sm text-neutral-500">
                               {selectedObject.interaction === "open_ui"
                                 ? "Target UI Menu"
                                 : "Menu to Close (Optional)"}
@@ -8598,7 +9328,7 @@ const App: React.FC = () => {
                       {/* RPG / Sim Elements */}
                       {!selectedObject.isUiElement && (
                         <div className="space-y-3">
-                          <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                          <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
                             RPG & Sim Logic
                           </h3>
                           <div>
@@ -8647,7 +9377,7 @@ const App: React.FC = () => {
                                   </select>
                                 </div>
                                 <div>
-                                  <label className="text-xs text-neutral-500">
+                                  <label className="text-sm text-neutral-500">
                                     Difficulty (DC)
                                   </label>
                                   <input
@@ -8691,8 +9421,48 @@ const App: React.FC = () => {
                                   } catch (err) {} // Ignore invalid JSON while typing
                                 }}
                                 placeholder='{"rest": 10, "hunger": -5}'
-                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 font-mono text-xs"
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 font-mono text-sm"
                               />
+                            </div>
+                          )}
+
+                          {project.globalSettings.enableTTRPGStats && (
+                            <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-neutral-800">
+                              <div>
+                                <LabelWithHelp
+                                  label="Grant Skill XP"
+                                  helpText="What skill does the player gain experience in when interacting?"
+                                />
+                                <select
+                                  value={selectedObject.grantSkill || "none"}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      grantSkill: e.target.value as any,
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                                >
+                                  <option value="none">None</option>
+                                  <option value="naturalist">Naturalist</option>
+                                  <option value="occultist">Occultist</option>
+                                  <option value="scribal">Scribal</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-sm text-neutral-500">
+                                  Amount XP
+                                </label>
+                                <input
+                                  type="number"
+                                  value={selectedObject.grantSkillValue || 1}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      grantSkillValue: Number(e.target.value),
+                                    })
+                                  }
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                                />
+                              </div>
                             </div>
                           )}
                         </div>
@@ -8731,7 +9501,7 @@ const App: React.FC = () => {
                           <Trash2 size={14} /> Delete
                         </button>
                       </div>
-                    </>
+                    </div>
                   ))}
               </div>
             </aside>
@@ -8739,8 +9509,17 @@ const App: React.FC = () => {
         )}
 
         {editorMode === "dialogue" && (
-          <div className="flex-1 flex gap-6 p-6 bg-neutral-950 overflow-hidden">
-            <div className="w-64 flex flex-col gap-4 border-r border-neutral-800 pr-6">
+          <div className="flex-1 flex gap-6 p-6 bg-neutral-950 overflow-hidden relative">
+            <div 
+              className="flex flex-col gap-4 border-r border-neutral-800 pr-6 relative flex-shrink-0"
+              style={{ width: leftSidebarWidth }}
+            >
+              <div
+                className="absolute top-0 bottom-0 -right-[3px] w-[6px] cursor-col-resize z-[100] hover:bg-emerald-500/50"
+                onPointerDown={() =>
+                  document.body.classList.add("resizing-left-sidebar")
+                }
+              />
               <button
                 onClick={() => {
                   const newTree: DialogueTree = {
@@ -8771,7 +9550,7 @@ const App: React.FC = () => {
                       className={`p-3 rounded cursor-pointer border ${isActive ? "bg-neutral-800 border-emerald-500" : "bg-neutral-900 border-neutral-800 hover:border-neutral-700"}`}
                     >
                       <div className="font-medium text-sm">{tree.name}</div>
-                      <div className="text-xs text-neutral-500">
+                      <div className="text-sm text-neutral-500">
                         {(tree.nodes || []).length} nodes
                       </div>
                     </div>
@@ -8779,11 +9558,11 @@ const App: React.FC = () => {
                 })}
               </div>
               <div className="pt-4 border-t border-neutral-800 space-y-3">
-                <h3 className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">
+                <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">
                   Dialogue Styling
                 </h3>
                 <div>
-                  <label className="text-xs text-neutral-400 block mb-1">
+                  <label className="text-sm text-neutral-400 block mb-1">
                     Position
                   </label>
                   <select
@@ -8800,7 +9579,7 @@ const App: React.FC = () => {
                         },
                       }))
                     }
-                    className="w-full bg-neutral-900 border border-neutral-700 text-neutral-200 text-xs rounded px-2 py-1.5 focus:border-emerald-500 focus:outline-none"
+                    className="w-full bg-neutral-900 border border-neutral-700 text-neutral-200 text-sm rounded px-2 py-1.5 focus:border-emerald-500 focus:outline-none"
                   >
                     <option value="top">Top</option>
                     <option value="center">Center</option>
@@ -8808,7 +9587,7 @@ const App: React.FC = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-neutral-400 block mb-1">
+                  <label className="text-sm text-neutral-400 block mb-1">
                     Text Speed (ms/char) 0=Instant
                   </label>
                   <input
@@ -8826,7 +9605,7 @@ const App: React.FC = () => {
                         },
                       }))
                     }
-                    className="w-full bg-neutral-900 border border-neutral-700 text-neutral-200 text-xs rounded px-2 py-1.5 focus:border-emerald-500 focus:outline-none"
+                    className="w-full bg-neutral-900 border border-neutral-700 text-neutral-200 text-sm rounded px-2 py-1.5 focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
               </div>
@@ -8897,7 +9676,7 @@ const App: React.FC = () => {
                             <div className="flex justify-between mb-3">
                               <div className="flex items-center gap-3">
                                 {tree.startNodeId === node.id && (
-                                  <span className="text-[10px] uppercase tracking-wider bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">
+                                  <span className="text-sm uppercase tracking-wider bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">
                                     Start Node
                                   </span>
                                 )}
@@ -8940,7 +9719,7 @@ const App: React.FC = () => {
                                         src={
                                           (project.assets || []).find(
                                             (a) => a.id === node.speakerAssetId,
-                                          )?.src
+                                          )?.src || undefined
                                         }
                                         alt="Portrait"
                                         className="w-6 h-6 object-cover rounded bg-neutral-800"
@@ -8971,7 +9750,7 @@ const App: React.FC = () => {
                                             dialogueTrees: newTrees,
                                           });
                                         }}
-                                        className="text-red-400 hover:text-red-300 px-1 text-xs"
+                                        className="text-red-400 hover:text-red-300 px-1 text-sm"
                                         title="Remove Portrait"
                                       >
                                         <X size={12} />
@@ -9010,7 +9789,7 @@ const App: React.FC = () => {
                                           filterType: "image",
                                         })
                                       }
-                                      className="bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded px-2 py-1 text-xs text-neutral-300"
+                                      className="bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded px-2 py-1 text-sm text-neutral-300"
                                     >
                                       + Portrait
                                     </button>
@@ -9045,7 +9824,7 @@ const App: React.FC = () => {
                                           dialogueTrees: newTrees,
                                         });
                                       }}
-                                      className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs ml-1 focus:outline-none"
+                                      className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm ml-1 focus:outline-none"
                                     >
                                       <option value="left">Left</option>
                                       <option value="right">Right</option>
@@ -9069,7 +9848,7 @@ const App: React.FC = () => {
                                         dialogueTrees: newTrees,
                                       });
                                     }}
-                                    className="text-xs text-neutral-400 hover:text-emerald-400"
+                                    className="text-sm text-neutral-400 hover:text-emerald-400"
                                   >
                                     Set as Start
                                   </button>
@@ -9093,7 +9872,7 @@ const App: React.FC = () => {
                                       dialogueTrees: newTrees,
                                     });
                                   }}
-                                  className="text-xs text-red-400 hover:text-red-300"
+                                  className="text-sm text-red-400 hover:text-red-300"
                                 >
                                   <Trash2 size={14} />
                                 </button>
@@ -9173,7 +9952,7 @@ const App: React.FC = () => {
                                       placeholder="Choice text..."
                                     />
 
-                                    <span className="text-neutral-500 text-xs">
+                                    <span className="text-neutral-500 text-sm">
                                       →
                                     </span>
 
@@ -9263,28 +10042,28 @@ const App: React.FC = () => {
                                   {/* Story Events for Choice */}
                                   <div className="flex gap-2">
                                     <div className="flex-1 flex items-center gap-1">
-                                      <span className="text-[10px] uppercase font-bold text-neutral-500">Only Show If:</span>
+                                      <span className="text-sm uppercase font-bold text-neutral-500">Only Show If:</span>
                                       <select
                                         value={choice.requiredGameFlag || ""}
                                         onChange={(e) => {
                                           const newTrees = (project.dialogueTrees || []).map((t) => t.id === tree.id ? { ...t, nodes: (t.nodes || []).map((n) => n.id === node.id ? { ...n, choices: (n.choices || []).map((c, i) => i === cIdx ? { ...c, requiredGameFlag: e.target.value || undefined } : c) } : n) } : t);
                                           pushHistory({ ...project, dialogueTrees: newTrees });
                                         }}
-                                        className="flex-1 bg-neutral-900 border border-neutral-800 rounded px-1 py-0.5 text-xs text-neutral-400"
+                                        className="flex-1 bg-neutral-900 border border-neutral-800 rounded px-1 py-0.5 text-sm text-neutral-400"
                                       >
                                         <option value="">(Always Show)</option>
                                         {(project.gameFlags || []).map(f => <option key={f} value={f}>{f}</option>)}
                                       </select>
                                     </div>
                                     <div className="flex-1 flex items-center gap-1">
-                                      <span className="text-[10px] uppercase font-bold text-emerald-800">Trigger Event:</span>
+                                      <span className="text-sm uppercase font-bold text-emerald-800">Trigger Event:</span>
                                       <select
                                         value={choice.setGameFlag || ""}
                                         onChange={(e) => {
                                           const newTrees = (project.dialogueTrees || []).map((t) => t.id === tree.id ? { ...t, nodes: (t.nodes || []).map((n) => n.id === node.id ? { ...n, choices: (n.choices || []).map((c, i) => i === cIdx ? { ...c, setGameFlag: e.target.value || undefined } : c) } : n) } : t);
                                           pushHistory({ ...project, dialogueTrees: newTrees });
                                         }}
-                                        className="flex-1 bg-neutral-900 border border-neutral-800 rounded px-1 py-0.5 text-xs text-emerald-300"
+                                        className="flex-1 bg-neutral-900 border border-neutral-800 rounded px-1 py-0.5 text-sm text-emerald-300"
                                       >
                                         <option value="">(None)</option>
                                         {(project.gameFlags || []).map(f => <option key={f} value={f}>{f}</option>)}
@@ -9325,7 +10104,7 @@ const App: React.FC = () => {
                                     dialogueTrees: newTrees,
                                   });
                                 }}
-                                className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 mt-2"
+                                className="text-sm text-emerald-400 hover:text-emerald-300 flex items-center gap-1 mt-2"
                               >
                                 <Plus size={12} /> Add Choice
                               </button>
@@ -9422,7 +10201,7 @@ const App: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="flex gap-4 text-xs text-neutral-400 font-mono">
+                  <div className="flex gap-4 text-sm text-neutral-400 font-mono">
                     <div className="flex flex-col gap-1">
                       <LabelWithHelp
                         label="Width"
@@ -9492,7 +10271,7 @@ const App: React.FC = () => {
                     <LabelWithHelp
                       label="Background Music (BGM)"
                       helpText="The music track that plays on loop when the player enters this scene."
-                      className="uppercase font-bold mb-1 block text-[10px] mt-2"
+                      className="uppercase font-bold mb-1 block text-sm mt-2"
                     />
                     <select
                       value={scene.bgmAssetId || ""}
@@ -9520,7 +10299,7 @@ const App: React.FC = () => {
                   </div>
 
                   <div className="pt-4 border-t border-neutral-800 flex justify-between items-center">
-                    <span className="text-xs text-neutral-500">
+                    <span className="text-sm text-neutral-500">
                       {scene.objects.length} Objects
                     </span>
                     <button
@@ -9528,7 +10307,7 @@ const App: React.FC = () => {
                         setProject((p) => ({ ...p, currentSceneId: scene.id }));
                         setEditorMode("stage");
                       }}
-                      className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs rounded transition-colors"
+                      className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-sm rounded transition-colors"
                     >
                       {project.currentSceneId === scene.id
                         ? "Viewing Stage"
@@ -9619,7 +10398,7 @@ const App: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="flex flex-col gap-4 text-xs text-neutral-400 font-mono">
+                  <div className="flex flex-col gap-4 text-sm text-neutral-400 font-mono">
                     <div className="flex gap-4">
                       <div className="flex flex-col gap-1 w-full">
                         <LabelWithHelp
@@ -9697,7 +10476,7 @@ const App: React.FC = () => {
                               ),
                             })
                           }
-                          className="px-2 py-1 bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 rounded text-xs text-neutral-400"
+                          className="px-2 py-1 bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 rounded text-sm text-neutral-400"
                         >
                           Clear
                         </button>
@@ -9748,7 +10527,7 @@ const App: React.FC = () => {
                   </div>
 
                   <div className="pt-4 border-t border-neutral-800 flex justify-between items-center">
-                    <span className="text-xs text-neutral-500">
+                    <span className="text-sm text-neutral-500">
                       {scene.objects.length} Objects
                     </span>
                     <button
@@ -9759,7 +10538,7 @@ const App: React.FC = () => {
                         }));
                         setEditorMode("ui_stage");
                       }}
-                      className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs rounded transition-colors"
+                      className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-sm rounded transition-colors"
                     >
                       {project.currentUiMenuId === scene.id
                         ? "Viewing UI Stage"
@@ -9773,8 +10552,17 @@ const App: React.FC = () => {
         )}
 
         {editorMode === "rpg_systems" && (
-          <div className="flex-1 flex p-6 gap-6 bg-neutral-950 overflow-hidden">
-            <div className="w-80 flex flex-col gap-4 border-r border-neutral-800 pr-6 overflow-y-auto custom-scrollbar">
+          <div className="flex-1 flex p-6 gap-6 bg-neutral-950 overflow-hidden relative">
+            <div 
+              className="flex flex-col gap-4 border-r border-neutral-800 pr-6 overflow-y-auto custom-scrollbar relative flex-shrink-0"
+              style={{ width: leftSidebarWidth }}
+            >
+              <div
+                className="absolute top-0 bottom-0 -right-[3px] w-[6px] cursor-col-resize z-[100] hover:bg-emerald-500/50"
+                onPointerDown={() =>
+                  document.body.classList.add("resizing-left-sidebar")
+                }
+              />
               <h2 className="text-xl font-bold text-white mb-2">Quests</h2>
               <button
                 onClick={() => {
@@ -9804,7 +10592,7 @@ const App: React.FC = () => {
                     className={`p-3 rounded-lg cursor-pointer transition-all border ${activeQuestId === quest.id ? "bg-emerald-500/20 border-emerald-500 text-emerald-400" : "bg-neutral-900 border-neutral-800 text-neutral-300 hover:bg-neutral-800"}`}
                   >
                     <div className="font-bold">{quest.name}</div>
-                    <div className="text-xs text-neutral-500 truncate mr-2">
+                    <div className="text-sm text-neutral-500 truncate mr-2">
                       {quest.description || "No description"}
                     </div>
                   </div>
@@ -9849,7 +10637,7 @@ const App: React.FC = () => {
                   {(Array.isArray(project.gameFlags) ? project.gameFlags : []).map((flag) => (
                     <div
                       key={flag}
-                      className="flex items-center gap-1 bg-neutral-800 border border-neutral-700 px-2 py-1 rounded text-xs text-neutral-300"
+                      className="flex items-center gap-1 bg-neutral-800 border border-neutral-700 px-2 py-1 rounded text-sm text-neutral-300"
                     >
                       <span>{flag}</span>
                       <button
@@ -9869,7 +10657,7 @@ const App: React.FC = () => {
                     </div>
                   ))}
                   {(Array.isArray(project.gameFlags) ? project.gameFlags : []).length === 0 && (
-                    <div className="text-xs text-neutral-500 italic">
+                    <div className="text-sm text-neutral-500 italic">
                       No story events created yet.
                     </div>
                   )}
@@ -9973,7 +10761,7 @@ const App: React.FC = () => {
                               );
                               pushHistory({ ...project, quests: updated });
                             }}
-                            className="text-emerald-400 text-xs hover:text-emerald-300 font-bold flex items-center gap-1"
+                            className="text-emerald-400 text-sm hover:text-emerald-300 font-bold flex items-center gap-1"
                           >
                             + Add Objective
                           </button>
@@ -10264,7 +11052,7 @@ const App: React.FC = () => {
                           src={
                             project.assets.find(
                               (a) => a.id === item.iconAssetId,
-                            )!.src
+                            )?.src || undefined
                           }
                           className="w-full h-full object-contain"
                         />
@@ -10291,7 +11079,7 @@ const App: React.FC = () => {
                     <LabelWithHelp
                       label="Name"
                       helpText="The primary name of this item. E.g. 'Rusty Key'."
-                      className="text-[10px] uppercase font-bold"
+                      className="text-sm uppercase font-bold"
                     />
                     <input
                       type="text"
@@ -10312,7 +11100,7 @@ const App: React.FC = () => {
                     <LabelWithHelp
                       label="RPG Category"
                       helpText="What kind of item is this?"
-                      className="text-[10px] uppercase font-bold"
+                      className="text-sm uppercase font-bold"
                     />
                     <select
                       value={item.category || "normal"}
@@ -10344,7 +11132,7 @@ const App: React.FC = () => {
                     <LabelWithHelp
                       label="Description"
                       helpText="The text shown to the player when they inspect this item in their inventory."
-                      className="text-[10px] uppercase font-bold"
+                      className="text-sm uppercase font-bold"
                     />
                     <textarea
                       value={item.description}
@@ -10366,7 +11154,7 @@ const App: React.FC = () => {
                     <LabelWithHelp
                       label="Icon Asset"
                       helpText="The image displayed for this item in menus. Click to choose."
-                      className="text-[10px] uppercase font-bold mb-1 block"
+                      className="text-sm uppercase font-bold mb-1 block"
                     />
                     <button
                       onClick={() =>
@@ -10423,7 +11211,7 @@ const App: React.FC = () => {
                     </label>
                     {item.isUsable && (
                       <div className="mt-2 pl-4 border-l-2 border-neutral-800 flex flex-col gap-2">
-                        <label className="flex items-center gap-2 text-xs text-neutral-400">
+                        <label className="flex items-center gap-2 text-sm text-neutral-400">
                           <input
                             type="checkbox"
                             className="rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-900"
@@ -10446,7 +11234,7 @@ const App: React.FC = () => {
                           <LabelWithHelp
                             label="Use Message"
                             helpText="Message shown when used."
-                            className="text-[10px] uppercase font-bold"
+                            className="text-sm uppercase font-bold"
                           />
                           <input
                             type="text"
@@ -10469,7 +11257,7 @@ const App: React.FC = () => {
                           <LabelWithHelp
                             label="Use Sound"
                             helpText="Sound to play."
-                            className="text-[10px] uppercase font-bold text-neutral-500"
+                            className="text-sm uppercase font-bold text-neutral-500"
                           />
                           <select
                             value={item.useSoundAssetId || ""}
@@ -10504,7 +11292,7 @@ const App: React.FC = () => {
                             <LabelWithHelp
                               label="Stat Effects"
                               helpText="Does this restore health or hunger?"
-                              className="text-[10px] uppercase font-bold text-neutral-500"
+                              className="text-sm uppercase font-bold text-neutral-500"
                             />
                             <button
                               onClick={() => {
@@ -10524,7 +11312,7 @@ const App: React.FC = () => {
                                   ),
                                 });
                               }}
-                              className="text-[10px] text-emerald-400 font-bold"
+                              className="text-sm text-emerald-400 font-bold"
                             >
                               + Add
                             </button>
@@ -10550,10 +11338,10 @@ const App: React.FC = () => {
                                     ),
                                   });
                                 }}
-                                className="flex-1 min-w-0 bg-neutral-800 border border-neutral-700 rounded px-1 py-1 text-[10px]"
+                                className="flex-1 min-w-0 bg-neutral-800 border border-neutral-700 rounded px-1 py-1 text-sm"
                                 placeholder="e.g. hunger (use Needs tool words)"
                               />
-                              <span className="text-[10px]">+</span>
+                              <span className="text-sm">+</span>
                               <input
                                 type="number"
                                 value={restore.amount}
@@ -10571,7 +11359,7 @@ const App: React.FC = () => {
                                     ),
                                   });
                                 }}
-                                className="w-12 bg-neutral-800 border border-neutral-700 rounded px-1 py-1 text-[10px]"
+                                className="w-12 bg-neutral-800 border border-neutral-700 rounded px-1 py-1 text-sm"
                               />
                               <button
                                 onClick={() => {
@@ -10603,7 +11391,7 @@ const App: React.FC = () => {
                       <LabelWithHelp
                         label="Combinations"
                         helpText="Items that can be combined with this one."
-                        className="text-[10px] uppercase font-bold"
+                        className="text-sm uppercase font-bold"
                       />
                       <button
                         onClick={() => {
@@ -10628,7 +11416,7 @@ const App: React.FC = () => {
                             ),
                           });
                         }}
-                        className="text-xs text-emerald-400 hover:text-emerald-300 font-bold"
+                        className="text-sm text-emerald-400 hover:text-emerald-300 font-bold"
                       >
                         + Add
                       </button>
@@ -10637,7 +11425,7 @@ const App: React.FC = () => {
                       (comb: any, cIdx: number) => (
                         <div
                           key={cIdx}
-                          className="bg-neutral-950 p-2 rounded mb-2 border border-neutral-800 text-xs flex flex-col gap-2 relative group"
+                          className="bg-neutral-950 p-2 rounded mb-2 border border-neutral-800 text-sm flex flex-col gap-2 relative group"
                         >
                           <button
                             onClick={() => {
@@ -10739,12 +11527,12 @@ const App: React.FC = () => {
                                   ),
                                 });
                               }}
-                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-1 py-1 mt-0.5 text-[10px]"
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-1 py-1 mt-0.5 text-sm"
                               placeholder="Items combined successfully!"
                             />
                           </div>
                           <div className="flex flex-col gap-1 mt-1">
-                            <label className="flex items-center gap-1 text-[10px]">
+                            <label className="flex items-center gap-1 text-sm">
                               <input
                                 type="checkbox"
                                 className="rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950 h-3 w-3"
@@ -10767,7 +11555,7 @@ const App: React.FC = () => {
                               />{" "}
                               Destroy This Item
                             </label>
-                            <label className="flex items-center gap-1 text-[10px]">
+                            <label className="flex items-center gap-1 text-sm">
                               <input
                                 type="checkbox"
                                 className="rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950 h-3 w-3"
@@ -10805,6 +11593,20 @@ const App: React.FC = () => {
               )}
             </div>
           </div>
+        )}
+
+        {editorMode === "assets" && (
+          <AssetLibraryManager
+            project={project}
+            updateProject={(updates) => pushHistory({ ...project, ...updates })}
+          />
+        )}
+
+        {editorMode === "map_maker" && (
+          <MapMaker
+            project={project}
+            updateProject={(updates) => pushHistory({ ...project, ...updates })}
+          />
         )}
       </div>
 
@@ -10859,7 +11661,7 @@ const App: React.FC = () => {
                         <span className="text-white font-bold mb-2">
                           Overwrite Project?
                         </span>
-                        <span className="bg-red-500 hover:bg-red-400 text-white text-xs px-3 py-1 rounded shadow-lg transition-colors">
+                        <span className="bg-red-500 hover:bg-red-400 text-white text-sm px-3 py-1 rounded shadow-lg transition-colors">
                           Click again to confirm
                         </span>
                       </div>
@@ -10867,7 +11669,7 @@ const App: React.FC = () => {
                     <h3 className="font-bold text-lg text-emerald-400 mb-2">
                       {temp.name}
                     </h3>
-                    <ul className="text-xs text-neutral-400 space-y-1 mb-4">
+                    <ul className="text-sm text-neutral-400 space-y-1 mb-4">
                       <li>• {temp.scenes.length} Scene(s)</li>
                       <li>• {temp.dialogueTrees.length} Dialogue Tree(s)</li>
                       <li>• {temp.inventoryItems.length} Item(s)</li>
@@ -10904,7 +11706,7 @@ const App: React.FC = () => {
             >
               {!obj ? (
                 <>
-                  <div className="px-3 py-1.5 text-xs font-bold text-neutral-500 uppercase tracking-wider border-b border-neutral-800 mb-1">
+                  <div className="px-3 py-1.5 text-sm font-bold text-neutral-500 uppercase tracking-wider border-b border-neutral-800 mb-1">
                     Scene Options
                   </div>
                   <button
@@ -10926,6 +11728,12 @@ const App: React.FC = () => {
                       }
                       setContextMenu(null);
                       setIsPlaying(true);
+                      setTriggeredObjects(new Set());
+                      setPlayerInventory([]);
+                      setCollectedObjects([]);
+                      setPlayerFlags([]);
+                      setActiveUiMenus([]);
+                      setDialogueQueue([]);
                     }}
                   >
                     <Play size={14} /> Play from Here
@@ -10985,7 +11793,7 @@ const App: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <div className="px-3 py-1.5 text-xs font-bold text-neutral-500 uppercase tracking-wider border-b border-neutral-800 mb-1">
+                  <div className="px-3 py-1.5 text-sm font-bold text-neutral-500 uppercase tracking-wider border-b border-neutral-800 mb-1">
                     {obj.name}
                   </div>
 
@@ -11231,6 +12039,14 @@ const App: React.FC = () => {
           }}
           onClose={() => setAssetPickerCb(null)}
           filterType={assetPickerCb.filterType}
+        />
+      )}
+
+      {showAIAssistant && (
+        <AIAssistant
+          project={project}
+          updateProject={(updates) => setProject((p) => ({ ...p, ...updates }))}
+          onClose={() => setShowAIAssistant(false)}
         />
       )}
     </div>
