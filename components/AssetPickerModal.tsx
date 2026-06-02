@@ -1,24 +1,33 @@
 import React, { useState } from 'react';
-import { Folder, Image as ImageIcon, Music, Search, X, Video } from 'lucide-react';
+import { Folder, Image as ImageIcon, Music, Search, X, Video, Star, Info } from 'lucide-react';
 import { Asset } from '../types';
 
 interface AssetPickerModalProps {
   assets: Asset[];
   onSelect: (assetId: string) => void;
   onClose: () => void;
-  filterType?: 'image' | 'audio' | 'video';
+  filterType?: 'image' | 'audio' | 'video' | 'script' | 'text' | 'ui_element' | 'hitbox';
   recentAssetIds?: string[];
   canvasAssetIds?: string[];
+  onToggleFavorite?: (assetId: string) => void;
+  onUpdateAsset?: (assetId: string, updates: Partial<Asset>) => void;
 }
 
-export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSelect, onClose, filterType, recentAssetIds = [], canvasAssetIds = [] }) => {
+export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSelect, onClose, filterType, recentAssetIds = [], canvasAssetIds = [], onToggleFavorite, onUpdateAsset }) => {
   const [activeBin, setActiveBin] = useState<string>('all');
   const [assetSearch, setAssetSearch] = useState('');
+  const [editingInfoId, setEditingInfoId] = useState<string | null>(null);
 
   const filteredAssets = assets.filter(a => {
     if (filterType && a.type !== filterType) return false;
-    if (assetSearch) return a.name.toLowerCase().includes(assetSearch.toLowerCase());
+    if (assetSearch) {
+      if (a.name.toLowerCase().includes(assetSearch.toLowerCase())) return true;
+      if (a.description && a.description.toLowerCase().includes(assetSearch.toLowerCase())) return true;
+      if (a.tags && a.tags.some(t => t.toLowerCase().includes(assetSearch.toLowerCase()))) return true;
+      return false;
+    }
     if (activeBin === 'all') return true;
+    if (activeBin === 'favorites') return a.isFavorite;
     if (activeBin === 'recent') return recentAssetIds.includes(a.id);
     if (activeBin === 'canvas') return canvasAssetIds.includes(a.id);
     const cat = a.category === 'root' ? '' : a.category;
@@ -82,12 +91,14 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSe
               <div className="flex-1 flex items-center gap-1 text-sm text-neutral-400 overflow-x-auto pb-1 custom-scrollbar">
                 <button onClick={() => setActiveBin('recent')} className={`hover:text-white whitespace-nowrap ${activeBin === 'recent' ? 'text-emerald-400 font-medium' : ''}`}>Recent</button>
                 <span className="text-neutral-600">|</span>
+                <button onClick={() => setActiveBin('favorites')} className={`hover:text-white whitespace-nowrap ${activeBin === 'favorites' ? 'text-emerald-400 font-medium' : ''}`}>Favorites</button>
+                <span className="text-neutral-600">|</span>
                 <button onClick={() => setActiveBin('canvas')} className={`hover:text-white whitespace-nowrap ${activeBin === 'canvas' ? 'text-emerald-400 font-medium' : ''}`}>In Canvas</button>
                 <span className="text-neutral-600">|</span>
                 <button onClick={() => setActiveBin('all')} className={`hover:text-white whitespace-nowrap ${activeBin === 'all' ? 'text-emerald-400 font-medium' : ''}`}>All</button>
                 <span className="text-neutral-600">/</span>
                 <button onClick={() => setActiveBin('')} className={`hover:text-white whitespace-nowrap ${activeBin === '' ? 'text-emerald-400 font-medium' : ''}`}>Root</button>
-                {activeBin !== 'all' && activeBin !== 'recent' && activeBin !== 'canvas' && activeBin !== '' && activeBin.split('/').filter(Boolean).map((part, i, arr) => (
+                {activeBin !== 'all' && activeBin !== 'recent' && activeBin !== 'favorites' && activeBin !== 'canvas' && activeBin !== '' && activeBin.split('/').filter(Boolean).map((part, i, arr) => (
                   <React.Fragment key={i}>
                     <span className="text-neutral-600">/</span>
                     <button 
@@ -119,23 +130,90 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSe
               )}
 
               {/* Assets */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 pb-12">
                 {filteredAssets.map(asset => (
                   <div 
                     key={asset.id}
-                    onClick={() => onSelect(asset.id)}
-                    className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg group cursor-pointer hover:border-emerald-500 transition-colors flex flex-col hover:z-50 relative"
+                    className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg group hover:border-emerald-500 transition-colors flex flex-col hover:z-50 relative"
                   >
-                    <div className="h-32 bg-neutral-900 flex items-center justify-center p-2 relative rounded-t-lg">
+                    <div 
+                      onClick={() => onSelect(asset.id)}
+                      className="h-32 bg-neutral-900 flex items-center justify-center p-2 relative rounded-t-lg cursor-pointer overflow-hidden"
+                    >
                       {asset.type === 'audio' ? (
                         <Music size={32} className="text-emerald-500 group-hover:scale-110 transition-transform" />
                       ) : (
-                        <img src={asset.src} alt={asset.name} className="max-w-full max-h-full object-contain pointer-events-none group-hover:scale-150 transition-transform relative z-10" loading="lazy" />
+                        <img src={asset.src} alt={asset.name} className="max-w-full max-h-full object-contain pointer-events-none group-hover:scale-125 transition-transform relative z-10" loading="lazy" />
+                      )}
+                      {onToggleFavorite && (
+                         <div 
+                           className={`absolute top-2 right-2 p-1.5 rounded-md backdrop-blur-md z-20 
+                                       ${asset.isFavorite ? 'bg-yellow-500/20 text-yellow-400 opacity-100' : 'bg-black/40 text-neutral-400 opacity-0 group-hover:opacity-100'} 
+                                       hover:bg-yellow-500/40 hover:text-yellow-300 transition-all`}
+                           onClick={(e) => { e.stopPropagation(); onToggleFavorite(asset.id); }}
+                         >
+                           <Star size={14} className={asset.isFavorite ? "fill-yellow-400" : ""} />
+                         </div>
+                      )}
+                      {onUpdateAsset && (
+                        <div 
+                           className={`absolute top-2 left-2 p-1.5 rounded-md backdrop-blur-md z-20 bg-black/40 text-neutral-400 opacity-0 group-hover:opacity-100 hover:bg-neutral-700 hover:text-white transition-all`}
+                           onClick={(e) => { e.stopPropagation(); setEditingInfoId(editingInfoId === asset.id ? null : asset.id); }}
+                         >
+                           <Info size={14} />
+                         </div>
                       )}
                     </div>
-                    <div className="p-2 border-t border-neutral-700/50">
-                      <p className="text-xs text-neutral-300 truncate font-medium group-hover:text-emerald-400 transition-colors" title={asset.name}>{asset.name}</p>
-                    </div>
+                    {editingInfoId === asset.id ? (
+                      <div className="p-3 border-t border-neutral-700/50 flex flex-col gap-2 bg-neutral-900 absolute top-full left-0 right-0 z-[100] rounded-b-lg shadow-xl shadow-black/50 border-x border-b border-emerald-500 max-h-64 overflow-y-auto">
+                        <input 
+                           type="text" 
+                           value={asset.name} 
+                           onChange={e => onUpdateAsset!(asset.id, { name: e.target.value })} 
+                           className="w-full bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-sm text-neutral-200 outline-none focus:border-emerald-500" 
+                           placeholder="Asset Name"
+                        />
+                        <textarea 
+                           className="w-full bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-300 outline-none focus:border-emerald-500 flex-1 resize-none min-h-[4rem]" 
+                           value={asset.description || ''}
+                           onChange={e => onUpdateAsset!(asset.id, { description: e.target.value })}
+                           placeholder="Description/notes..."
+                        />
+                        <input 
+                           type="text" 
+                           value={(asset.tags || []).join(', ')} 
+                           onChange={e => onUpdateAsset!(asset.id, { tags: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                           className="w-full bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-emerald-400 font-mono outline-none focus:border-emerald-500 outline-none" 
+                           placeholder="tags, comma, separated"
+                        />
+                        {(asset.type === 'audio' || asset.type === 'video') && (
+                          <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-neutral-800">
+                             <div className="text-[10px] uppercase font-bold text-neutral-500">Trim / Volume Edit</div>
+                             <div className="flex gap-2">
+                               <input type="number" step="0.1" value={asset.trimStart || 0} onChange={e => onUpdateAsset!(asset.id, { trimStart: Math.max(0, parseFloat(e.target.value) || 0)})} className="w-1/2 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-200 outline-none focus:border-emerald-500" placeholder="Start (s)" title="Trim Start (seconds)" />
+                               <input type="number" step="0.1" value={asset.trimEnd || ''} onChange={e => onUpdateAsset!(asset.id, { trimEnd: e.target.value ? Math.max(0, parseFloat(e.target.value) || 0) : undefined})} className="w-1/2 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-200 outline-none focus:border-emerald-500" placeholder="End (s)" title="Trim End (seconds)" />
+                             </div>
+                             <div className="flex items-center gap-2">
+                               <span className="text-xs text-neutral-400">Vol:</span>
+                               <input type="range" min="0" max="2" step="0.1" value={asset.volume ?? 1} onChange={e => onUpdateAsset!(asset.id, { volume: parseFloat(e.target.value) })} className="flex-1 accent-emerald-500 h-1 bg-neutral-800 rounded-full appearance-none outline-none" />
+                               <span className="text-xs text-neutral-400 w-6 text-right">{asset.volume ?? 1}x</span>
+                             </div>
+                          </div>
+                        )}
+                        <button onClick={() => setEditingInfoId(null)} className="w-full py-1 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 text-xs font-semibold rounded mt-1">Done</button>
+                      </div>
+                    ) : (
+                      <div className="p-2 border-t border-neutral-700/50 cursor-pointer" onClick={() => onSelect(asset.id)}>
+                        <p className="text-xs text-neutral-300 truncate font-medium group-hover:text-emerald-400 transition-colors" title={asset.name}>{asset.name}</p>
+                        {asset.tags && asset.tags.length > 0 && (
+                          <div className="flex gap-1 overflow-hidden mt-1 mt-1">
+                            {asset.tags.slice(0, 3).map(t => (
+                              <span key={t} className="text-[9px] bg-neutral-900 text-emerald-400/80 px-1 rounded border border-emerald-500/20 whitespace-nowrap">{t}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {filteredAssets.length === 0 && (

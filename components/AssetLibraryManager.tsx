@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { Plus, Trash2, Edit2, Play, Music, Video, Image as ImageIcon, Search } from "lucide-react";
+import { Plus, Trash2, Edit2, Play, Music, Video, Image as ImageIcon, Search, Star } from "lucide-react";
 import { Project, Asset } from "../types";
 import { v4 as uuidv4 } from "uuid";
 
@@ -59,15 +59,26 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
   );
 
   const filteredAssets = project.assets.filter((a) => {
-    if (activeCategory !== "all" && a.category !== activeCategory) return false;
-    if (searchTerm) return a.name.toLowerCase().includes(searchTerm.toLowerCase());
+    if (activeCategory === "favorites" && !a.isFavorite) return false;
+    if (activeCategory !== "all" && activeCategory !== "favorites" && a.category !== activeCategory) return false;
+    if (searchTerm) {
+       if (a.name.toLowerCase().includes(searchTerm.toLowerCase())) return true;
+       if (a.description && a.description.toLowerCase().includes(searchTerm.toLowerCase())) return true;
+       if (a.tags && a.tags.some(t => t.toLowerCase().includes(searchTerm.toLowerCase()))) return true;
+       return false;
+    }
     return true;
   });
 
   return (
     <div className="flex-1 flex flex-col bg-neutral-900 border-l border-neutral-800 h-full overflow-hidden">
       <div className="p-4 border-b border-neutral-800 bg-neutral-950 flex gap-4 items-center justify-between">
-        <h2 className="text-xl font-bold text-neural-200">Asset Library</h2>
+        <h2 className="text-xl font-bold flex flex-col gap-1 text-white">
+          <span>Asset Manager</span>
+          <span className="text-[10px] text-neutral-400 font-normal">
+            (This tab is for uploading files. Return to <strong>Stage</strong> or <strong>UI</strong> mode and use the left Sidebar <strong>Library</strong> to place these in your game.)
+          </span>
+        </h2>
         <div className="flex gap-2">
           <button
             onClick={() => uploadInputRef.current?.click()}
@@ -110,6 +121,20 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
             >
               All Assets ({project.assets.length})
             </button>
+            <button
+              onClick={() => setActiveCategory("favorites")}
+              className={`w-full text-left px-3 py-2 rounded text-sm font-medium flex items-center justify-between ${
+                activeCategory === "favorites" ? "bg-yellow-600/50 text-yellow-100" : "text-neutral-400 hover:bg-neutral-800 focus:outline-none"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Star size={14} className={activeCategory === "favorites" ? "text-yellow-300" : "text-neutral-500"} />
+                Favorites
+              </div>
+              <span className="text-xs opacity-70">
+                {project.assets.filter((a) => a.isFavorite).length}
+              </span>
+            </button>
             <div className="h-px bg-neutral-800 my-2 mx-2"></div>
             {categories.map((c) => (
               <button
@@ -136,43 +161,57 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
         </div>
 
         {/* Main Asset Grid */}
-        <div className="flex-1 overflow-y-auto p-6 bg-neutral-900">
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
+        <div className="flex-1 overflow-y-auto p-8 bg-neutral-900/50">
+          <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-8 gap-6">
             {filteredAssets.map((asset) => (
               <div
                 key={asset.id}
-                className="group relative bg-neutral-950 border border-neutral-800 rounded-lg overflow-hidden flex flex-col"
+                className="group relative bg-neutral-900 border border-neutral-800/80 rounded-xl overflow-hidden flex flex-col shadow-lg transition-transform hover:-translate-y-1 hover:shadow-xl hover:border-indigo-500/50"
               >
-                <div className="aspect-square flex items-center justify-center p-2 relative">
+                <div className="aspect-square flex items-center justify-center p-4 relative bg-black/40">
                   {asset.type === "image" ? (
-                    <img src={asset.src} className="max-w-full max-h-full object-contain pointer-events-none" />
+                    <img src={asset.src} className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md" />
                   ) : asset.type === "audio" ? (
-                    <div className="flex flex-col items-center justify-center pointer-events-none text-emerald-500">
-                      <Music size={32} />
+                    <div className="flex flex-col items-center justify-center pointer-events-none text-indigo-400 w-full h-full relative">
+                      <Music size={40} className="mb-2 opacity-80" />
                     </div>
                   ) : asset.type === "video" ? (
-                    <div className="flex flex-col items-center justify-center pointer-events-none text-purple-500">
-                      <Video size={32} />
-                    </div>
+                    <video src={asset.src} controls className="max-w-full max-h-full object-contain drop-shadow-md" />
                   ) : (
-                    <div className="text-neutral-500 tracking-wider font-bold">
+                    <div className="text-neutral-500 tracking-widest font-black text-xl opacity-50">
                        {asset.type.toUpperCase()}
                     </div>
                   )}
 
                   {asset.type === "audio" && (
                     <button 
-                       className="absolute inset-0 m-auto w-10 h-10 bg-emerald-500/80 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                       className="absolute inset-0 m-auto w-12 h-12 bg-indigo-500/90 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity translate-y-2 group-hover:translate-y-0 duration-200 z-10"
                        onClick={() => {
-                         const audio = new Audio(asset.src);
+                         const mediaFragment = asset.trimStart || asset.trimEnd ? `#t=${asset.trimStart || 0}${asset.trimEnd ? ',' + asset.trimEnd : ''}` : '';
+                         const audio = new Audio(asset.src + mediaFragment);
+                         audio.volume = asset.volume ?? 1;
                          audio.play();
                        }}
                     >
-                       <Play size={20} className="text-white ml-1" />
+                       <Play size={24} className="text-white ml-1 pl-0.5" />
                     </button>
                   )}
+                  
+                  <button 
+                    className={`absolute top-2 right-2 p-1.5 rounded-md backdrop-blur-md z-20 
+                                ${asset.isFavorite ? 'bg-yellow-500/80 text-yellow-100 opacity-100' : 'bg-black/40 text-neutral-400 opacity-0 group-hover:opacity-100'} 
+                                transition-all cursor-pointer`}
+                    onClick={(e) => {
+                       e.stopPropagation();
+                       updateProject({
+                         assets: project.assets.map(a => a.id === asset.id ? { ...a, isFavorite: !a.isFavorite } : a)
+                       });
+                    }}
+                  >
+                     <Star size={16} className={asset.isFavorite ? "fill-yellow-100" : ""} />
+                  </button>
                 </div>
-                <div className="bg-neutral-900 p-2 border-t border-neutral-800 flex flex-col flex-1">
+                <div className="bg-neutral-900 p-3 flex flex-col flex-1 border-t border-neutral-800 space-y-2">
                   <input
                     type="text"
                     value={asset.name}
@@ -181,28 +220,64 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                         assets: project.assets.map((a) => (a.id === asset.id ? { ...a, name: e.target.value } : a)),
                       });
                     }}
-                    className="bg-transparent text-xs text-white font-medium outline-none border-b border-transparent focus:border-emerald-500 mb-1 w-full"
+                    className="bg-neutral-950/50 border border-transparent focus:border-indigo-500 rounded px-2 py-1 text-sm text-white font-semibold outline-none w-full transition-colors"
+                    placeholder="Asset Name"
                   />
-                  <select
-                    value={asset.category || "root"}
-                    onChange={(e) => {
-                      updateProject({
-                        assets: project.assets.map((a) => (a.id === asset.id ? { ...a, category: e.target.value } : a)),
-                      });
-                    }}
-                    className="bg-neutral-800 text-[10px] text-neutral-400 p-0.5 rounded outline-none w-full mb-2"
-                  >
-                    <option value="root">Uncategorized</option>
-                    {categories.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                    {/* Allow moving to activeCategory if it's new */}
-                    {!categories.includes(activeCategory) && activeCategory !== "all" && (
-                       <option value={activeCategory}>{activeCategory}</option>
-                    )}
-                  </select>
+                  <textarea 
+                     value={asset.description || ""}
+                     onChange={(e) => {
+                       updateProject({
+                         assets: project.assets.map(a => a.id === asset.id ? { ...a, description: e.target.value } : a)
+                       });
+                     }}
+                     className="bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-300 outline-none focus:border-indigo-500 flex-1 min-h-[3rem] resize-none"
+                     placeholder="Notes/Description..."
+                  />
+                  <input 
+                     value={(asset.tags || []).join(', ')}
+                     onChange={(e) => {
+                        const newTags = e.target.value.split(',').map(t => t.trim()).filter(Boolean);
+                        updateProject({
+                          assets: project.assets.map(a => a.id === asset.id ? { ...a, tags: newTags } : a)
+                        });
+                     }}
+                     className="bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-indigo-400 font-mono outline-none focus:border-indigo-500 w-full"
+                     placeholder="tags, separated, by, commas"
+                  />
                   
-                  <div className="mt-auto flex justify-end">
+                  {(asset.type === 'audio' || asset.type === 'video') && (
+                     <div className="flex flex-col gap-1 pt-2 border-t border-neutral-800 pb-1">
+                        <div className="text-[10px] uppercase font-bold text-neutral-500">Trim & Volume</div>
+                        <div className="flex gap-2">
+                           <input type="number" step="0.1" value={asset.trimStart || 0} onChange={e => updateProject({ assets: project.assets.map(a => a.id === asset.id ? { ...a, trimStart: Math.max(0, parseFloat(e.target.value) || 0) } : a)})} className="w-1/2 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-200 outline-none focus:border-indigo-500" placeholder="Start (s)" />
+                           <input type="number" step="0.1" value={asset.trimEnd || ''} onChange={e => updateProject({ assets: project.assets.map(a => a.id === asset.id ? { ...a, trimEnd: e.target.value ? Math.max(0, parseFloat(e.target.value) || 0) : undefined } : a)})} className="w-1/2 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-200 outline-none focus:border-indigo-500" placeholder="End (s)" />
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs text-neutral-500">Vol</span>
+                          <input type="range" min="0" max="2" step="0.1" value={asset.volume ?? 1} onChange={e => updateProject({ assets: project.assets.map(a => a.id === asset.id ? { ...a, volume: parseFloat(e.target.value) } : a)})} className="flex-1 accent-indigo-500 h-1 bg-neutral-800 rounded-full appearance-none outline-none" />
+                          <span className="text-[10px] text-neutral-400 w-6 text-right">{asset.volume ?? 1}x</span>
+                        </div>
+                     </div>
+                  )}
+
+                  <div className="flex justify-between items-center pt-2 mt-auto">
+                    <select
+                      value={asset.category || "root"}
+                      onChange={(e) => {
+                        updateProject({
+                          assets: project.assets.map((a) => (a.id === asset.id ? { ...a, category: e.target.value } : a)),
+                        });
+                      }}
+                      className="bg-neutral-950 border border-neutral-800 text-xs text-neutral-400 p-1 rounded outline-none flex-1 mr-2 focus:border-indigo-500"
+                    >
+                      <option value="root">Root Form</option>
+                      {categories.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                      {!categories.includes(activeCategory) && activeCategory !== "all" && activeCategory !== "favorites" && (
+                         <option value={activeCategory}>{activeCategory}</option>
+                      )}
+                    </select>
                     <button
                       onClick={() => {
                         if (confirm(`Delete ${asset.name}?`)) {
@@ -211,9 +286,10 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                           });
                         }
                       }}
-                      className="p-1 hover:bg-red-500/20 text-neutral-500 hover:text-red-500 rounded"
+                      className="p-1.5 hover:bg-rose-500/20 text-neutral-500 hover:text-rose-400 rounded-md transition-colors"
+                      title="Delete Asset"
                     >
-                      <Trash2 size={12} />
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
@@ -221,14 +297,17 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
             ))}
           </div>
           {filteredAssets.length === 0 && (
-             <div className="flex flex-col items-center justify-center py-20 text-neutral-500">
-               <ImageIcon size={48} className="mb-4 opacity-20" />
-               <p>No assets found in this category.</p>
+             <div className="flex flex-col items-center justify-center h-full text-neutral-500">
+               <div className="w-24 h-24 border-2 border-dashed border-neutral-700 rounded-full flex items-center justify-center mb-6 bg-neutral-950/50">
+                 <ImageIcon size={32} className="opacity-40" />
+               </div>
+               <h3 className="text-xl font-bold text-neutral-300 mb-2">No assets found</h3>
+               <p className="text-sm opacity-70 max-w-sm text-center mb-6">Your asset library is looking a little empty. Upload images, audio, or video files to get started.</p>
                <button 
                  onClick={() => uploadInputRef.current?.click()}
-                 className="mt-4 text-emerald-500 hover:underline"
+                 className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg shadow-lg flex items-center gap-2 transition-all hover:-translate-y-0.5"
                >
-                 Upload some files
+                 <Plus size={18} /> Upload Files
                </button>
              </div>
           )}

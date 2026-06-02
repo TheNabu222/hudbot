@@ -1,0 +1,139 @@
+1026-            ? "🎵"
+1027-            : asset.type === "ui_element" && asset.uiElementType === "tooltip"
+1028-              ? "Tooltip text"
+1029-              : undefined,
+1030-      textColor: "#ffffff",
+1031-      textFontSize: 24,
+1032-      textFontFamily: "sans-serif",
+1033-      blendMode: "normal",
+1034-      parallaxSpeed: 1,
+1035-      hasPhysics: false,
+1036:      scriptAssetId: asset.type === "script" ? asset.id : undefined,
+1037-      ...objDefaults,
+1038-    };
+1039-
+1040-    if (editorMode === "ui_stage") {
+1041-      const currentUi = project.uiMenus.find(
+1042-        (m) => m.id === project.currentUiMenuId,
+1043-      );
+1044-      if (currentUi) {
+1045-        updateUiMenu(currentUi.id, { objects: [...currentUi.objects, newObj] });
+1046-      }
+--
+1210-                : asset.type === "ui_element" &&
+1211-                    asset.uiElementType === "tooltip"
+1212-                  ? "Tooltip text"
+1213-                  : undefined,
+1214-          textColor: "#ffffff",
+1215-          textFontSize: 24,
+1216-          textFontFamily: "sans-serif",
+1217-          blendMode: "normal",
+1218-          parallaxSpeed: 1,
+1219-          hasPhysics: false,
+1220:          scriptAssetId: asset.type === "script" ? asset.id : undefined,
+1221-          ...objDefaults,
+1222-        };
+1223-
+1224-        updateScene({ objects: [...currentScene.objects, newObj] });
+1225-        setSelectedObjectId(newObj.id);
+1226-      }
+1227-    } catch (err) {
+1228-      console.error("Drop error", err);
+1229-    }
+1230-  };
+--
+2449-
+2450-      setPreviewDialogue(resultText);
+2451-    } else if (obj.interaction === "sound" && obj.interactionData) {
+2452-      const audioAsset = project.assets.find(
+2453-        (a) => a.id === obj.interactionData,
+2454-      );
+2455-      if (audioAsset) {
+2456-        const audio = new Audio(audioAsset.src);
+2457-        audio.play().catch((e) => console.error("SFX playback failed", e));
+2458-      }
+2459:    } else if (obj.interaction === "run_script" && obj.scriptAssetId) {
+2460-      const scriptAsset = project.assets.find(
+2461:        (a) => a.id === obj.scriptAssetId,
+2462-      );
+2463-      if (scriptAsset && scriptAsset.src) {
+2464-        fetch(scriptAsset.src)
+2465-          .then((res) => res.text())
+2466-          .then((code) => {
+2467-            try {
+2468-              const context = {
+2469-                project,
+2470-                setProject,
+2471-                playerInventory,
+--
+2484-            console.error("Failed to fetch script", err);
+2485-          });
+2486-      }
+2487-    } else if (obj.interaction === "play_cutscene" && obj.interactionData) {
+2488-      const videoAsset = project.assets.find(
+2489-        (a) => a.id === obj.interactionData,
+2490-      );
+2491-      if (videoAsset) {
+2492-        setActiveCutscene({
+2493-          src: videoAsset.src,
+2494:          targetSceneId: obj.scriptAssetId || undefined,
+2495-        });
+2496-      }
+2497-    }
+2498-  };
+2499-
+2500-  const usedAssetSrcs = new Set(
+2501-    project.scenes.flatMap((s) => s.objects.map((o) => o.src)),
+2502-  );
+2503-  const sortedImageAssets = [
+2504-    ...project.assets.filter((a) => a.type === "image"),
+--
+10791-                                      {a.name}
+10792-                                    </option>
+10793-                                  ))}
+10794-                              </select>
+10795-                            </div>
+10796-                            <div>
+10797-                              <label className="text-sm text-neutral-500">
+10798-                                Jump to Scene after video (Optional)
+10799-                              </label>
+10800-                              <select
+10801:                                value={selectedObject.scriptAssetId || ""}
+10802-                                onChange={(e) =>
+10803-                                  updateObject(selectedObject.id, {
+10804:                                    scriptAssetId: e.target.value,
+10805-                                  })
+10806-                                }
+10807-                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+10808-                              >
+10809-                                <option value="">
+10810-                                  None / Stay on current scene
+10811-                                </option>
+10812-                                {(project.scenes || []).map((s) => (
+10813-                                  <option key={s.id} value={s.id}>
+10814-                                    {s.name}
+--
+11130-                            )}
+11131-                          </div>
+11132-                        </div>
+11133-
+11134-                        {selectedObject.interaction === "run_script" && (
+11135-                          <div>
+11136-                            <label className="text-sm text-neutral-500">
+11137-                              Script Asset
+11138-                            </label>
+11139-                            <select
+11140:                              value={selectedObject.scriptAssetId || ""}
+11141-                              onChange={(e) =>
+11142-                                updateObject(selectedObject.id, {
+11143:                                  scriptAssetId: e.target.value,
+11144-                                })
+11145-                              }
+11146-                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+11147-                            >
+11148-                              <option value="">Select a script...</option>
+11149-                              {project.assets
+11150-                                .filter((a) => a.type === "script")
+11151-                                .map((s) => (
+11152-                                  <option key={s.id} value={s.id}>
+11153-                                    {s.name}

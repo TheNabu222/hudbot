@@ -146,25 +146,19 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
              <div className="flex-1 flex overflow-hidden relative">
                <div className="flex-1 overflow-auto bg-neutral-800 relative select-none">
                  <div
-                   className="relative"
-                   style={{
-                     width: "1200px",
-                     height: "800px",
-                     backgroundImage: activeMap.backgroundSrc ? `url(${activeMap.backgroundSrc})` : 'none',
-                     backgroundSize: 'contain',
-                     backgroundPosition: 'center',
-                     backgroundRepeat: 'no-repeat',
-                   }}
+                   className="relative inline-block min-w-full"
                    onClick={(e) => {
-                     if (e.target !== e.currentTarget) return; // Only clicks on the map background
+                     if (e.target !== e.currentTarget && (e.target as HTMLElement).tagName !== 'IMG') return; // Only clicks on the map background
                      const rect = e.currentTarget.getBoundingClientRect();
                      const x = ((e.clientX - rect.left) / rect.width) * 100;
                      const y = ((e.clientY - rect.top) / rect.height) * 100;
                      addNode(x, y);
                    }}
                  >
-                    {!activeMap.backgroundSrc && (
-                       <div className="absolute inset-0 flex items-center justify-center text-neutral-600 pointer-events-none">
+                    {activeMap.backgroundSrc ? (
+                       <img src={activeMap.backgroundSrc} alt="Map Background" className="block w-full h-auto min-h-[400px] pointer-events-none" />
+                    ) : (
+                       <div style={{ width: "1200px", height: "800px" }} className="flex items-center justify-center text-neutral-600 pointer-events-none">
                           <p>Click anywhere to place a node</p>
                        </div>
                     )}

@@ -1,0 +1,517 @@
+195:  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+196:  const [selectedMultiIds, setSelectedMultiIds] = useState<string[]>([]);
+197:  const [selectionBox, setSelectionBox] = useState<{
+203:  const [selectionStart, setSelectionStart] = useState<{
+256:  const [selectedInventoryItemId, setSelectedInventoryItemId] = useState<
+856:  const selectedObject = currentScene?.objects.find(
+857:    (o) => o.id === selectedObjectId,
+1114:              'Loot Chest dropped! Remember to select it and assign the "Item to Give" in the Interaction settings.',
+1282:      if (selectedMultiIds.includes(obj.id)) {
+1286:        if (!selectedMultiIds.includes(selectedObjectId || "")) {
+1288:            selectedObjectId ? [selectedObjectId, obj.id] : [obj.id],
+1296:      // If we click an object already in multi-selection, don't clear.
+1298:      if (!selectedMultiIds.includes(obj.id)) {
+1439:    if (selectionStart && stageRef.current) {
+1444:        x: selectionStart.x,
+1445:        y: selectionStart.y,
+1446:        w: mx - selectionStart.x,
+1447:        h: my - selectionStart.y,
+1466:    if (selectedMultiIds.length > 1 && selectedMultiIds.includes(draggingId)) {
+1499:                      selectedMultiIds,
+1503:                      !selectedMultiIds.includes(o.id) &&
+1584:    if (selectionBox) {
+1585:      const bx = Math.min(selectionBox.x, selectionBox.x + selectionBox.w);
+1586:      const by = Math.min(selectionBox.y, selectionBox.y + selectionBox.h);
+1587:      const bw = Math.abs(selectionBox.w);
+1588:      const bh = Math.abs(selectionBox.h);
+1590:      const selectedIds = currentScene.objects
+1602:      setSelectedMultiIds(selectedIds);
+1603:      if (selectedIds.length > 0) setSelectedObjectId(selectedIds[0]);
+1620:        // make sure this object is the only selected one.
+1621:        // If holding shift, it stays in the multi-select array (added in pointerdown).
+1670:          selectedMultiIds.length > 0
+1671:            ? selectedMultiIds
+1672:            : selectedObjectId
+1673:              ? [selectedObjectId]
+1684:          selectedMultiIds.length > 0
+1685:            ? selectedMultiIds
+1686:            : selectedObjectId
+1687:              ? [selectedObjectId]
+1724:    selectedObjectId,
+1725:    selectedMultiIds,
+1732:      if ((!selectedObjectId && selectedMultiIds.length === 0) || isPlaying)
+1742:        selectedMultiIds.length > 0
+1743:          ? selectedMultiIds
+1744:          : selectedObjectId
+1745:            ? [selectedObjectId]
+1862:  }, [selectedObjectId, selectedMultiIds, currentScene.objects, isPlaying, clipboard]);
+3345:                              uiElementType: "selection",
+3661:                        <select
+3731:                        </select>
+3821:                        <select
+3870:                        </select>
+3929:                if (isPlaying && selectedInventoryItemId) {
+3937:                if (isPlaying && selectedInventoryItemId) {
+4004:                      <select
+4025:                      </select>
+4037:                      <select
+4065:                      </select>
+4102:                        className="absolute pointer-events-none select-none opacity-80 z-0 ring-1 ring-neutral-700/50"
+4159:                      if (selectedInventoryItemId) {
+4191:                      if (selectedInventoryItemId) {
+4230:                      {/* Draw selection box */}
+4231:                      {selectionBox && !isPlaying && (
+4236:                              selectionBox.w >= 0
+4237:                                ? selectionBox.x
+4238:                                : selectionBox.x + selectionBox.w,
+4240:                              selectionBox.h >= 0
+4241:                                ? selectionBox.y
+4242:                                : selectionBox.y + selectionBox.h,
+4243:                            width: Math.abs(selectionBox.w),
+4244:                            height: Math.abs(selectionBox.h),
+4278:                            (obj.id === selectedObjectId ||
+4279:                              selectedMultiIds.includes(obj.id)) &&
+4424:                                    (input as HTMLInputElement).select();
+4844:                                  if (obj.uiElementType === "selection") {
+5020:                        className="absolute pointer-events-none select-none z-[500]"
+5510:                                    if (obj.uiElementType === "selection") {
+6617:                                    selectedInventoryItemId === itemId;
+6619:                                    selectedInventoryItemId !== null;
+6655:                                          selectedInventoryItemId === itemId
+6657:                                          // Deselect or do default inspect
+6666:                                          selectedInventoryItemId &&
+6667:                                          selectedInventoryItemId !== itemId
+6675:                                                selectedInventoryItemId &&
+6679:                                                  selectedInventoryItemId),
+6725:                                            setSelectedInventoryItemId(null); // Deselect
+7353:                                  <select
+7378:                                  </select>
+7428:                                  <select
+7453:                                  </select>
+7503:                                  <select
+7528:                                  </select>
+7982:                            className={`flex flex-col gap-2 p-2 rounded cursor-pointer border transition-colors ${selectedObject?.id === obj.id ? "bg-emerald-500/10 border-emerald-500/50" : "bg-neutral-800 border-neutral-700/50 hover:bg-neutral-700"}`}
+8019:                            {selectedObject?.id === obj.id && (
+8177:                  (!selectedObject ? (
+8296:                          <select
+8366:                          </select>
+8430:                          <select
+8477:                          </select>
+8925:                          value={selectedObject.name || ""}
+8927:                            updateObject(selectedObject.id, {
+8936:                      {!selectedObject.isUiElement &&
+8937:                        !selectedObject.isScript &&
+8938:                        selectedObject.interaction === "none" && (
+8948:                                  updateObject(selectedObject.id, {
+8959:                                  updateObject(selectedObject.id, {
+8970:                                  updateObject(selectedObject.id, {
+8981:                                  updateObject(selectedObject.id, {
+8992:                                  updateObject(selectedObject.id, {
+9005:                      {selectedObject.isUiElement && (
+9022:                                      selectedObject.uiColorPrimary || "#10b981"
+9025:                                      updateObject(selectedObject.id, {
+9034:                                      selectedObject.uiColorPrimary || "#10b981"
+9037:                                      updateObject(selectedObject.id, {
+9048:                                    selectedObject.uiElementType === "tooltip"
+9058:                                      selectedObject.uiColorSecondary ||
+9062:                                      updateObject(selectedObject.id, {
+9071:                                      selectedObject.uiColorSecondary ||
+9075:                                      updateObject(selectedObject.id, {
+9085:                            {(selectedObject.uiElementType === "panel" ||
+9086:                              selectedObject.uiElementType === "progress" ||
+9087:                              selectedObject.uiElementType === "button") && (
+9094:                                  <select
+9096:                                      selectedObject.uiBorderType || "solid"
+9099:                                      updateObject(selectedObject.id, {
+9119:                                  </select>
+9128:                                      {selectedObject.uiBorderRadius || 0}px
+9136:                                    value={selectedObject.uiBorderRadius || 0}
+9138:                                      updateObject(selectedObject.id, {
+9148:                            {(selectedObject.uiElementType === "button" ||
+9149:                              selectedObject.uiElementType === "tooltip") && (
+9157:                                  value={selectedObject.textContent || ""}
+9159:                                    updateObject(selectedObject.id, {
+9168:                            {selectedObject.uiElementType === "icon" && (
+9174:                                <select
+9175:                                  value={selectedObject.uiIconType || "check"}
+9177:                                    updateObject(selectedObject.id, {
+9196:                                </select>
+9200:                            {selectedObject.uiElementType === "progress" && (
+9210:                                  value={selectedObject.uiValue || 0}
+9212:                                    updateObject(selectedObject.id, {
+9219:                                  {selectedObject.uiValue || 0}%
+9224:                            {selectedObject.uiElementType === "toggle" && (
+9228:                                  checked={selectedObject.uiChecked || false}
+9230:                                    updateObject(selectedObject.id, {
+9253:                                <select
+9254:                                  value={selectedObject.uiBindingType || "none"}
+9256:                                    updateObject(selectedObject.id, {
+9266:                                  {selectedObject.uiElementType ===
+9272:                                  {selectedObject.uiElementType === "button" ||
+9273:                                  selectedObject.uiElementType === "tooltip" ? (
+9278:                                  {selectedObject.uiElementType ===
+9284:                                </select>
+9287:                              {selectedObject.uiBindingType === "need" && (
+9294:                                    value={selectedObject.uiBindingId || ""}
+9296:                                      updateObject(selectedObject.id, {
+9305:                              {selectedObject.uiBindingType ===
+9311:                                  <select
+9312:                                    value={selectedObject.uiBindingId || ""}
+9314:                                      updateObject(selectedObject.id, {
+9326:                                  </select>
+9329:                              {selectedObject.uiBindingType === "flag" && (
+9334:                                  <select
+9335:                                    value={selectedObject.uiBindingId || ""}
+9337:                                      updateObject(selectedObject.id, {
+9349:                                  </select>
+9366:                                    updateObject(selectedObject.id, {
+9378:                                    updateObject(selectedObject.id, {
+9384:                                        selectedObject.width / 2,
+9395:                                    updateObject(selectedObject.id, {
+9399:                                          800) - selectedObject.width,
+9410:                                    updateObject(selectedObject.id, {
+9416:                                        selectedObject.width / 2,
+9422:                                        selectedObject.height / 2,
+9432:                                    updateObject(selectedObject.id, {
+9437:                                          600) - selectedObject.height,
+9447:                                    updateObject(selectedObject.id, {
+9453:                                        selectedObject.width / 2,
+9457:                                          600) - selectedObject.height,
+9467:                                    updateObject(selectedObject.id, {
+9471:                                          800) - selectedObject.width,
+9475:                                          600) - selectedObject.height,
+9494:                                value={Math.round(selectedObject.x)}
+9496:                                  updateObject(selectedObject.id, {
+9510:                                value={Math.round(selectedObject.y)}
+9512:                                  updateObject(selectedObject.id, {
+9526:                                value={Math.round(selectedObject.width)}
+9528:                                  updateObject(selectedObject.id, {
+9542:                                value={Math.round(selectedObject.height)}
+9544:                                  updateObject(selectedObject.id, {
+9558:                                value={Math.round(selectedObject.rotation || 0)}
+9560:                                  updateObject(selectedObject.id, {
+9571:                                  checked={!!selectedObject.flipX}
+9573:                                    updateObject(selectedObject.id, {
+9584:                                  checked={!!selectedObject.flipY}
+9586:                                    updateObject(selectedObject.id, {
+9599:                      {selectedObject.isText && !selectedObject.isUiElement && (
+9611:                              value={selectedObject.textContent || ""}
+9613:                                updateObject(selectedObject.id, {
+9630:                                  value={selectedObject.textColor || "#ffffff"}
+9632:                                    updateObject(selectedObject.id, {
+9640:                                  value={selectedObject.textColor || "#ffffff"}
+9642:                                    updateObject(selectedObject.id, {
+9659:                                value={selectedObject.textFontSize || 24}
+9661:                                  updateObject(selectedObject.id, {
+9676:                              <select
+9678:                                  selectedObject.textFontFamily || "sans-serif"
+9681:                                  updateObject(selectedObject.id, {
+9721:                              </select>
+9728:                              <select
+9729:                                value={selectedObject.textWeight || "normal"}
+9731:                                  updateObject(selectedObject.id, {
+9744:                              </select>
+9759:                                value={selectedObject.textLineHeight || 1.2}
+9761:                                  updateObject(selectedObject.id, {
+9778:                                value={selectedObject.textLetterSpacing || 0}
+9780:                                  updateObject(selectedObject.id, {
+9795:                              <select
+9796:                                value={selectedObject.textAlign || "left"}
+9798:                                  updateObject(selectedObject.id, {
+9807:                              </select>
+9816:                                value={selectedObject.textShadow || ""}
+9818:                                  updateObject(selectedObject.id, {
+9833:                            <select
+9834:                              value={selectedObject.textStyle || "plain"}
+9836:                                updateObject(selectedObject.id, {
+9851:                            </select>
+9858:                                checked={selectedObject.textOutline || false}
+9860:                                  updateObject(selectedObject.id, {
+9871:                            {selectedObject.textOutline && (
+9880:                                      selectedObject.textOutlineColor ||
+9884:                                      updateObject(selectedObject.id, {
+9893:                                      selectedObject.textOutlineColor ||
+9897:                                      updateObject(selectedObject.id, {
+9921:                            : {selectedObject.zIndex}
+9929:                                updateObject(selectedObject.id, {
+9939:                              onClick={() => moveZIndex(selectedObject.id, -1)}
+9946:                              onClick={() => moveZIndex(selectedObject.id, 1)}
+9957:                                updateObject(selectedObject.id, {
+9975:                              {Math.round(selectedObject.opacity * 100)}%
+9983:                            value={selectedObject.opacity}
+9985:                              updateObject(selectedObject.id, {
+9995:                            checked={selectedObject.ignoreClicks || false}
+9997:                              updateObject(selectedObject.id, {
+10006:                            className="text-sm font-bold text-neutral-300 select-none cursor-pointer"
+10018:                              {selectedObject.parallaxSpeed !== undefined
+10019:                                ? selectedObject.parallaxSpeed.toFixed(1)
+10030:                              selectedObject.parallaxSpeed !== undefined
+10031:                                ? selectedObject.parallaxSpeed
+10035:                              updateObject(selectedObject.id, {
+10045:                            checked={selectedObject.locked}
+10047:                              updateObject(selectedObject.id, {
+10062:                            value={selectedObject.customCssClasses || ""}
+10064:                              updateObject(selectedObject.id, {
+10075:                      {!selectedObject.isUiElement && (
+10081:                            {!selectedObject.isHitbox &&
+10082:                              !selectedObject.isText &&
+10083:                              !selectedObject.isScript && (
+10088:                                        (a) => a.src === selectedObject.src,
+10104:                            <select
+10105:                              value={selectedObject.blendMode || "normal"}
+10107:                                updateObject(selectedObject.id, {
+10129:                            </select>
+10138:                                    (selectedObject.filters?.brightness ?? 1) *
+10149:                                value={selectedObject.filters?.brightness ?? 1}
+10151:                                  updateObject(selectedObject.id, {
+10153:                                      ...selectedObject.filters,
+10166:                                    (selectedObject.filters?.contrast ?? 1) *
+10177:                                value={selectedObject.filters?.contrast ?? 1}
+10179:                                  updateObject(selectedObject.id, {
+10181:                                      ...selectedObject.filters,
+10194:                                    (selectedObject.filters?.saturate ?? 1) *
+10205:                                value={selectedObject.filters?.saturate ?? 1}
+10207:                                  updateObject(selectedObject.id, {
+10209:                                      ...selectedObject.filters,
+10221:                                  {selectedObject.filters?.hueRotate ?? 0}°
+10229:                                value={selectedObject.filters?.hueRotate ?? 0}
+10231:                                  updateObject(selectedObject.id, {
+10233:                                      ...selectedObject.filters,
+10245:                                  {selectedObject.filters?.blur ?? 0}px
+10253:                                value={selectedObject.filters?.blur ?? 0}
+10255:                                  updateObject(selectedObject.id, {
+10257:                                      ...selectedObject.filters,
+10271:                                    (selectedObject.filters?.sepia ?? 0) > 0
+10274:                                    updateObject(selectedObject.id, {
+10276:                                        ...selectedObject.filters,
+10289:                                    (selectedObject.filters?.invert ?? 0) > 0
+10292:                                    updateObject(selectedObject.id, {
+10294:                                        ...selectedObject.filters,
+10306:                                  updateObject(selectedObject.id, {
+10322:                                    (selectedObject.filters?.grayscale ?? 0) *
+10333:                                value={selectedObject.filters?.grayscale ?? 0}
+10335:                                  updateObject(selectedObject.id, {
+10337:                                      ...selectedObject.filters,
+10350:                      {!selectedObject.isUiElement &&
+10351:                        !selectedObject.isText && (
+10359:                                checked={!!selectedObject.hasPhysics}
+10361:                                  updateObject(selectedObject.id, {
+10369:                            {selectedObject.hasPhysics && (
+10374:                                    checked={!!selectedObject.physicsStatic}
+10376:                                      updateObject(selectedObject.id, {
+10389:                                      {selectedObject.physicsBounciness ?? 0.6}
+10398:                                      selectedObject.physicsBounciness ?? 0.6
+10401:                                      updateObject(selectedObject.id, {
+10415:                                      {selectedObject.physicsFriction ?? 0.1}
+10424:                                      selectedObject.physicsFriction ?? 0.1
+10427:                                      updateObject(selectedObject.id, {
+10441:                                      {selectedObject.physicsDensity ?? 0.05}
+10450:                                      selectedObject.physicsDensity ?? 0.05
+10453:                                      updateObject(selectedObject.id, {
+10482:                          <select
+10483:                            value={selectedObject.cursor}
+10485:                              updateObject(selectedObject.id, {
+10497:                          </select>
+10503:                            checked={selectedObject.isDraggable || false}
+10505:                              updateObject(selectedObject.id, {
+10526:                          <select
+10527:                            value={selectedObject.animation}
+10529:                              updateObject(selectedObject.id, {
+10548:                          </select>
+10550:                          {selectedObject.animation !== "none" &&
+10551:                            selectedObject.animation !== "glow" && (
+10562:                                      selectedObject.animationDuration ||
+10563:                                      (selectedObject.animation === "pulse"
+10565:                                        : selectedObject.animation === "float"
+10570:                                      updateObject(selectedObject.id, {
+10583:                                  <select
+10585:                                      selectedObject.animationEasing ||
+10589:                                      updateObject(selectedObject.id, {
+10602:                                  </select>
+10613:                          <select
+10614:                            value={selectedObject.audioSrc || ""}
+10616:                              updateObject(selectedObject.id, {
+10630:                          </select>
+10636:                          <select
+10637:                            value={selectedObject.interaction}
+10639:                              updateObject(selectedObject.id, {
+10716:                          </select>
+10718:                          {selectedObject.interaction !== "none" && (
+10723:                                  checked={!!selectedObject.triggerOnEnter}
+10725:                                    updateObject(selectedObject.id, {
+10738:                                  checked={!!selectedObject.triggerOnce}
+10740:                                    updateObject(selectedObject.id, {
+10752:                        {selectedObject.interaction === "sound" && (
+10757:                            <select
+10758:                              value={selectedObject.interactionData || ""}
+10760:                                updateObject(selectedObject.id, {
+10774:                            </select>
+10778:                        {selectedObject.interaction === "play_cutscene" && (
+10786:                                  onSelect: (id) => updateObject(selectedObject.id, { interactionData: id }),
+10792:                                  {selectedObject.interactionData
+10793:                                    ? project.assets.find((a) => a.id === selectedObject.interactionData)?.name || "Unknown Video"
+10803:                              <select
+10804:                                value={selectedObject.scriptAssetId || ""}
+10806:                                  updateObject(selectedObject.id, {
+10820:                              </select>
+10825:                        {(selectedObject.interaction === "start_quest" ||
+10826:                          selectedObject.interaction === "complete_quest") && (
+10831:                            <select
+10832:                              value={selectedObject.interactionData || ""}
+10834:                                updateObject(selectedObject.id, {
+10846:                            </select>
+10850:                        {selectedObject.interaction === "set_flag" && (
+10855:                            <select
+10856:                              value={selectedObject.interactionData || ""}
+10858:                                updateObject(selectedObject.id, {
+10870:                            </select>
+10874:                        {selectedObject.interaction === "dialogue" && (
+10879:                            <select
+10880:                              value={selectedObject.dialogueTreeId || ""}
+10882:                                updateObject(selectedObject.id, {
+10896:                            </select>
+10911:                              <select
+10912:                                value={selectedObject.showIfFlag || ""}
+10914:                                  updateObject(selectedObject.id, {
+10926:                              </select>
+10933:                              <select
+10934:                                value={selectedObject.hideIfFlag || ""}
+10936:                                  updateObject(selectedObject.id, {
+10948:                              </select>
+10986:                                                o.id === selectedObject.id
+11004:                              <select
+11005:                                value={selectedObject.requireItemId || ""}
+11007:                                  updateObject(selectedObject.id, {
+11021:                              </select>
+11022:                              {selectedObject.requireItemId && (
+11027:                                      !!selectedObject.consumeRequiredItem
+11030:                                      updateObject(selectedObject.id, {
+11041:                            {(selectedObject.interaction === "give-item" ||
+11042:                              selectedObject.interaction === "collect") && (
+11055:                                            selectedObject.name || "New Item",
+11057:                                          iconAssetId: selectedObject.src
+11060:                                                  a.src === selectedObject.src,
+11076:                                                    o.id === selectedObject.id
+11094:                                  <select
+11095:                                    value={selectedObject.giveItemId || ""}
+11097:                                      updateObject(selectedObject.id, {
+11101:                                    className={`w-full bg-neutral-800 border ${!selectedObject.giveItemId ? "border-amber-500/50 ring-1 ring-amber-500/20" : "border-neutral-700"} rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none`}
+11109:                                  </select>
+11110:                                  {!selectedObject.giveItemId && (
+11112:                                      ⚠️ You must select an item for it to
+11122:                                    value={selectedObject.interactionData || ""}
+11124:                                      updateObject(selectedObject.id, {
+11137:                        {selectedObject.interaction === "run_script" && (
+11144:                                  onSelect: (id) => updateObject(selectedObject.id, { scriptAssetId: id }),
+11150:                                  {selectedObject.scriptAssetId
+11151:                                    ? project.assets.find((a) => a.id === selectedObject.scriptAssetId)?.name || "Unknown Script"
+11160:                          selectedObject.interaction,
+11164:                              {selectedObject.interaction === "skill_check"
+11169:                              value={selectedObject.interactionData || ""}
+11171:                                updateObject(selectedObject.id, {
+11176:                                selectedObject.interaction === "dialogue"
+11178:                                  : selectedObject.interaction === "link"
+11187:                        {selectedObject.interaction === "scene_change" && (
+11192:                            <select
+11193:                              value={selectedObject.interactionData || ""}
+11195:                                updateObject(selectedObject.id, {
+11210:                            </select>
+11214:                        {(selectedObject.interaction === "open_ui" ||
+11215:                          selectedObject.interaction === "close_ui") && (
+11218:                              {selectedObject.interaction === "open_ui"
+11222:                            <select
+11223:                              value={selectedObject.targetUiId || ""}
+11225:                                updateObject(selectedObject.id, {
+11232:                                {selectedObject.interaction === "open_ui"
+11241:                            </select>
+11245:                        {selectedObject.interaction === "modify_number" && (
+11252:                              <select
+11253:                                value={selectedObject.targetUiId || ""}
+11255:                                  updateObject(selectedObject.id, {
+11278:                              </select>
+11287:                                value={selectedObject.interactionData || 0}
+11289:                                  updateObject(selectedObject.id, {
+11301:                      {!selectedObject.isUiElement && (
+11312:                              <select
+11313:                                value={selectedObject.parentObjectId || ""}
+11315:                                  updateObject(selectedObject.id, {
+11323:                                  .filter((o) => o.id !== selectedObject.id)
+11330:                              </select>
+11339:                                value={selectedObject.affinityId || ""}
+11341:                                  updateObject(selectedObject.id, {
+11354:                      {!selectedObject.isUiElement && (
+11366:                              value={selectedObject.flavorText || ""}
+11368:                                updateObject(selectedObject.id, {
+11378:                            selectedObject.interaction === "skill_check" && (
+11385:                                  <select
+11387:                                      selectedObject.requiredSkill || "none"
+11390:                                      updateObject(selectedObject.id, {
+11408:                                  </select>
+11417:                                      selectedObject.skillCheckDifficulty || 10
+11420:                                      updateObject(selectedObject.id, {
+11440:                                  selectedObject.needsEffect
+11441:                                    ? JSON.stringify(selectedObject.needsEffect)
+11449:                                    updateObject(selectedObject.id, {
+11467:                                <select
+11468:                                  value={selectedObject.grantSkill || "none"}
+11470:                                    updateObject(selectedObject.id, {
+11488:                                </select>
+11496:                                  value={selectedObject.grantSkillValue || 1}
+11498:                                    updateObject(selectedObject.id, {
+11515:                              ...selectedObject,
+11517:                              x: selectedObject.x + 20,
+11518:                              y: selectedObject.y + 20,
+11538:                                (o) => o.id !== selectedObject.id,
+11612:                  <select
+11631:                  </select>
+11842:                                    <select
+11875:                                    </select>
+12004:                                    <select
+12060:                                    </select>
+12104:                                      <select
+12150:                                      </select>
+12156:                                      <select
+12202:                                      </select>
+12210:                                      <select
+12256:                                      </select>
+12262:                                      <select
+12308:                                      </select>
+12317:                                      <select
+12365:                                      </select>
+12371:                                      <select
+12417:                                      </select>
+13670:                                      <select
+13708:                                      </select>
+13717:                                        <select
+13756:                                        </select>
+13759:                                        <select
+13798:                                        </select>
+13801:                                        <select
+13838:                                        </select>
+13938:                                  <select
+13952:                                  </select>
+13958:                                  <select
+13972:                                  </select>
+13980:                                <select
+13994:                                </select>
+14209:                      <select
+14234:                      </select>
+14572:                              <select
+14599:                              </select>
+14605:                              <select
+14631:                              </select>
+14732:                        <select
+14753:                        </select>
+14784:                        <select
+14805:                        </select>
+14836:                        <select
+14857:                        </select>
+14888:                        <select
+14909:                        </select>
+15239:                        selectedMultiIds.length > 1 &&
+15240:                        selectedMultiIds.includes(obj.id)
+15243:                          selectedMultiIds.includes(o.id),
+15258:                        selectedMultiIds.length > 1 &&
+15259:                        selectedMultiIds.includes(obj.id)
+15262:                          selectedMultiIds.includes(o.id),
+15439:                          (input as HTMLInputElement).select();

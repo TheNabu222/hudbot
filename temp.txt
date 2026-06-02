@@ -1,6 +1,41 @@
-      data-interaction="scene_change"
-      data-interaction="start-dialogue"
-      data-interaction="scene_change"
-      data-interaction="scene_change"
-      data-interaction="scene_change"
-      data-interaction="set_flag"
+336-      return defFactions;
+337-    },
+338-  );
+339-  const [gameTime, setGameTime] = useState<number>(8); // 0-24
+340-
+341:  const [assetPickerCb, setAssetPickerCb] = useState<{
+342-    onSelect: (id: string) => void;
+343-    filterType?: "image" | "audio";
+344-    onlyOnCanvas?: boolean;
+345-  } | null>(null);
+346-
+--
+15478-          }}
+15479-          onClose={() => setEditingAssetId(null)}
+15480-        />
+15481-      )}
+15482-
+15483:      {assetPickerCb && (
+15484-        <AssetPickerModal
+15485-          assets={
+15486:            assetPickerCb.onlyOnCanvas
+15487-              ? project.assets.filter((a) => usedAssetSrcs.has(a.src))
+15488-              : project.assets
+15489-          }
+15490-          canvasAssetIds={Array.from(
+15491-            new Set(
+--
+15497-          recentAssetIds={recentAssetIds}
+15498-          onSelect={(id) => {
+15499-            setRecentAssetIds((prev) =>
+15500-              [id, ...prev.filter((i) => i !== id)].slice(0, 20),
+15501-            );
+15502:            assetPickerCb.onSelect(id);
+15503-          }}
+15504-          onClose={() => setAssetPickerCb(null)}
+15505:          filterType={assetPickerCb.filterType}
+15506-        />
+15507-      )}
+15508-
+15509-      {showAIAssistant && (
+15510-        <AIAssistant

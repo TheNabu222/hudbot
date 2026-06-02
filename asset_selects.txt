@@ -1,0 +1,538 @@
+222-  const [activeQuestId, setActiveQuestId] = useState<string | null>(null);
+223-  const [activeCompanionId, setActiveCompanionId] = useState<string | null>(null);
+224-  const [newEventText, setNewEventText] = useState("");
+225-  const [newSkillText, setNewSkillText] = useState("");
+226-  const [newNeedText, setNewNeedText] = useState("");
+227:  const [recentAssetIds, setRecentAssetIds] = useState<string[]>([]);
+228-
+229-  const [editorMode, setEditorMode] = useState<
+230-    | "stage"
+231-    | "dialogue"
+232-    | "items"
+--
+372-  } | null>(null);
+373-  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+374-  const [confirmTemplateId, setConfirmTemplateId] = useState<string | null>(
+375-    null,
+376-  );
+377:  const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+378-
+379-  const didDragRef = useRef(false);
+380-
+381-  const [isInventoryOpen, setIsInventoryOpen] = useState(false);
+382-  const [isCraftingOpen, setIsCraftingOpen] = useState(false);
+--
+652-
+653-  useEffect(() => {
+654-    const currentScene = project.scenes.find(
+655-      (s) => s.id === project.currentSceneId,
+656-    );
+657:    if (isPlaying && currentScene?.bgmAssetId) {
+658-      const audioAsset = project.assets.find(
+659:        (a) => a.id === currentScene.bgmAssetId,
+660-      );
+661-      if (audioAsset) {
+662-        if (!bgmRef.current) {
+663-          bgmRef.current = new Audio(audioAsset.src);
+664-          bgmRef.current.loop = true;
+--
+1031-      textFontSize: 24,
+1032-      textFontFamily: "sans-serif",
+1033-      blendMode: "normal",
+1034-      parallaxSpeed: 1,
+1035-      hasPhysics: false,
+1036:      scriptAssetId: asset.type === "script" ? asset.id : undefined,
+1037-      ...objDefaults,
+1038-    };
+1039-
+1040-    if (editorMode === "ui_stage") {
+1041-      const currentUi = project.uiMenus.find(
+--
+1215-          textFontSize: 24,
+1216-          textFontFamily: "sans-serif",
+1217-          blendMode: "normal",
+1218-          parallaxSpeed: 1,
+1219-          hasPhysics: false,
+1220:          scriptAssetId: asset.type === "script" ? asset.id : undefined,
+1221-          ...objDefaults,
+1222-        };
+1223-
+1224-        updateScene({ objects: [...currentScene.objects, newObj] });
+1225-        setSelectedObjectId(newObj.id);
+--
+2454-      );
+2455-      if (audioAsset) {
+2456-        const audio = new Audio(audioAsset.src);
+2457-        audio.play().catch((e) => console.error("SFX playback failed", e));
+2458-      }
+2459:    } else if (obj.interaction === "run_script" && obj.scriptAssetId) {
+2460-      const scriptAsset = project.assets.find(
+2461:        (a) => a.id === obj.scriptAssetId,
+2462-      );
+2463-      if (scriptAsset && scriptAsset.src) {
+2464-        fetch(scriptAsset.src)
+2465-          .then((res) => res.text())
+2466-          .then((code) => {
+--
+2489-        (a) => a.id === obj.interactionData,
+2490-      );
+2491-      if (videoAsset) {
+2492-        setActiveCutscene({
+2493-          src: videoAsset.src,
+2494:          targetSceneId: obj.scriptAssetId || undefined,
+2495-        });
+2496-      }
+2497-    }
+2498-  };
+2499-
+--
+2940-                            ...project.uiMenus.flatMap((s) =>
+2941-                              s.objects.map((o) => o.src),
+2942-                            ),
+2943-                            ...project.inventoryItems
+2944-                              .map((i) =>
+2945:                                i.iconAssetId
+2946-                                  ? project.assets.find(
+2947:                                      (a) => a.id === i.iconAssetId,
+2948-                                    )?.src
+2949-                                  : null,
+2950-                              )
+2951-                              .filter(Boolean),
+2952-                          ]);
+--
+3565-                                </button>
+3566-                                {asset.type === "image" && (
+3567-                                  <button
+3568-                                    onClick={(e) => {
+3569-                                      e.stopPropagation();
+3570:                                      setEditingAssetId(asset.id);
+3571-                                    }}
+3572-                                    className="p-1.5 bg-neutral-950/80 hover:bg-emerald-500/80 text-white rounded"
+3573-                                    title="Edit Image"
+3574-                                  >
+3575-                                    <Wand2 size={12} />
+--
+4075-                    currentScene.height ||
+4076-                    project.globalSettings.stageHeight ||
+4077-                    600,
+4078-                  cursor:
+4079-                    (isPlaying || true) &&
+4080:                    project.globalSettings.customCursorAssetId
+4081:                      ? `url('${project.assets.find((a) => a.id === project.globalSettings.customCursorAssetId)?.src}'), auto`
+4082-                      : undefined,
+4083-                }}
+4084-              >
+4085-                {/* Ghost Background Stage for UI Editing */}
+4086-                {editorMode === "ui_stage" &&
+--
+5781-                      posClass = "top-8 left-1/2 -translate-x-1/2";
+5782-                    if (dPos === "center")
+5783-                      posClass =
+5784-                        "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2";
+5785-
+5786:                    const speakerAsset = node.speakerAssetId
+5787:                      ? project.assets.find((a) => a.id === node.speakerAssetId)
+5788-                      : null;
+5789-
+5790-                    return (
+5791-                      <div
+5792-                        className={`absolute ${posClass} w-11/12 max-w-2xl max-h-[90%] text-neutral-100 z-[9000] shadow-2xl flex flex-col overflow-hidden backdrop-blur-md filter drop-shadow-2xl dialogue-box`}
+--
+5950-                                        );
+5951-                                        if (idx !== -1) next.splice(idx, 1);
+5952-                                        return next;
+5953-                                      });
+5954-                                    }
+5955:                                    if (choice.playSoundAssetId) {
+5956-                                      const sound = project.assets.find(
+5957:                                        (a) => a.id === choice.playSoundAssetId,
+5958-                                      );
+5959-                                      if (sound) {
+5960-                                        new Audio(sound.src)
+5961-                                          .play()
+5962-                                          .catch((e) => console.error(e));
+--
+6599-                                {playerInventory.map((itemId, idx) => {
+6600-                                  const item = project.inventoryItems.find(
+6601-                                    (i) => i.id === itemId,
+6602-                                  );
+6603-                                  if (!item) return null;
+6604:                                  const iconAsset = item.iconAssetId
+6605-                                    ? project.assets.find(
+6606:                                        (a) => a.id === item.iconAssetId,
+6607-                                      )
+6608-                                    : null;
+6609-                                  const isSelected =
+6610-                                    selectedInventoryItemId === itemId;
+6611-                                  const hasSelection =
+--
+6803-                                                });
+6804-                                              }
+6805-                                              setIsInventoryOpen(false);
+6806-                                              setSelectedInventoryItemId(null);
+6807-
+6808:                                              if (item.useSoundAssetId) {
+6809-                                                const sound =
+6810-                                                  project.assets.find(
+6811-                                                    (a) =>
+6812-                                                      a.id ===
+6813:                                                      item.useSoundAssetId,
+6814-                                                  );
+6815-                                                if (sound) {
+6816-                                                  const audio = new Audio(
+6817-                                                    sound.src,
+6818-                                                  );
+--
+7320-                                        project.assets.find(
+7321-                                          (a) =>
+7322-                                            a.id ===
+7323-                                            project.inventoryItems.find(
+7324-                                              (i) => i.id === craftSlot1,
+7325:                                            )?.iconAssetId,
+7326-                                        )?.src || undefined
+7327-                                      }
+7328-                                      alt="Slot 1"
+7329-                                      className="w-10 h-10 object-contain"
+7330-                                    />
+--
+7395-                                        project.assets.find(
+7396-                                          (a) =>
+7397-                                            a.id ===
+7398-                                            project.inventoryItems.find(
+7399-                                              (i) => i.id === craftSlot2,
+7400:                                            )?.iconAssetId,
+7401-                                        )?.src || undefined
+7402-                                      }
+7403-                                      alt="Slot 2"
+7404-                                      className="w-10 h-10 object-contain"
+7405-                                    />
+--
+7470-                                        project.assets.find(
+7471-                                          (a) =>
+7472-                                            a.id ===
+7473-                                            project.inventoryItems.find(
+7474-                                              (i) => i.id === craftSlot3,
+7475:                                            )?.iconAssetId,
+7476-                                        )?.src || undefined
+7477-                                      }
+7478-                                      alt="Slot 3"
+7479-                                      className="w-10 h-10 object-contain"
+7480-                                    />
+--
+8219-                          <LabelWithHelp
+8220-                            label="Custom Global Cursor"
+8221-                            helpText="Replace the default mouse pointer for your entire game."
+8222-                          />
+8223-                          <div className="flex items-center gap-2 mt-1">
+8224:                            {project.globalSettings.customCursorAssetId ? (
+8225-                              <div className="relative w-10 h-10 bg-neutral-800 border border-neutral-700 rounded">
+8226-                                <img
+8227-                                  src={
+8228-                                    project.assets.find(
+8229-                                      (a) =>
+8230-                                        a.id ===
+8231-                                        project.globalSettings
+8232:                                          .customCursorAssetId,
+8233-                                    )?.src || undefined
+8234-                                  }
+8235-                                  className="w-full h-full object-contain p-1"
+8236-                                />
+8237-                                <button
+--
+8239-                                  onClick={() =>
+8240-                                    setProject((p) => ({
+8241-                                      ...p,
+8242-                                      globalSettings: {
+8243-                                        ...p.globalSettings,
+8244:                                        customCursorAssetId: undefined,
+8245-                                      },
+8246-                                    }))
+8247-                                  }
+8248-                                >
+8249-                                  <X size={10} />
+--
+8256-                                    onSelect: (id) => {
+8257-                                      pushHistory({
+8258-                                        ...project,
+8259-                                        globalSettings: {
+8260-                                          ...project.globalSettings,
+8261:                                          customCursorAssetId: id,
+8262-                                        },
+8263-                                      });
+8264-                                      setAssetPickerCb(null);
+8265-                                    },
+8266-                                    filterType: "image",
+--
+10074-                            {!selectedObject.isHitbox &&
+10075-                              !selectedObject.isText &&
+10076-                              !selectedObject.isScript && (
+10077-                                <button
+10078-                                  onClick={() =>
+10079:                                    setEditingAssetId(
+10080-                                      project.assets.find(
+10081-                                        (a) => a.src === selectedObject.src,
+10082-                                      )?.id || null,
+10083-                                    )
+10084-                                  }
+--
+10796-                            <div>
+10797-                              <label className="text-sm text-neutral-500">
+10798-                                Jump to Scene after video (Optional)
+10799-                              </label>
+10800-                              <select
+10801:                                value={selectedObject.scriptAssetId || ""}
+10802-                                onChange={(e) =>
+10803-                                  updateObject(selectedObject.id, {
+10804:                                    scriptAssetId: e.target.value,
+10805-                                  })
+10806-                                }
+10807-                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+10808-                              >
+10809-                                <option value="">
+--
+10965-                                    if (!currentScene) return;
+10966-                                    const newItem = {
+10967-                                      id: uuidv4(),
+10968-                                      name: "New Required Item",
+10969-                                      description: "",
+10970:                                      iconAssetId: null,
+10971-                                    };
+10972-                                    const newProject = {
+10973-                                      ...project,
+10974-                                      inventoryItems: [
+10975-                                        ...project.inventoryItems,
+--
+11049-                                        const newItem = {
+11050-                                          id: uuidv4(),
+11051-                                          name:
+11052-                                            selectedObject.name || "New Item",
+11053-                                          description: "",
+11054:                                          iconAssetId: selectedObject.src
+11055-                                            ? project.assets.find(
+11056-                                                (a) =>
+11057-                                                  a.src === selectedObject.src,
+11058-                                              )?.id || null
+11059-                                            : null,
+--
+11135-                          <div>
+11136-                            <label className="text-sm text-neutral-500">
+11137-                              Script Asset
+11138-                            </label>
+11139-                            <select
+11140:                              value={selectedObject.scriptAssetId || ""}
+11141-                              onChange={(e) =>
+11142-                                updateObject(selectedObject.id, {
+11143:                                  scriptAssetId: e.target.value,
+11144-                                })
+11145-                              }
+11146-                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+11147-                            >
+11148-                              <option value="">Select a script...</option>
+--
+11753-                                  }}
+11754-                                  className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm font-bold w-32"
+11755-                                  placeholder="Speaker"
+11756-                                />
+11757-                                <div className="flex gap-1 items-center border-l border-neutral-700 pl-3">
+11758:                                  {node.speakerAssetId &&
+11759-                                  (project.assets || []).find(
+11760:                                    (a) => a.id === node.speakerAssetId,
+11761-                                  ) ? (
+11762-                                    <div className="flex gap-2 items-center">
+11763-                                      <img
+11764-                                        src={
+11765-                                          (project.assets || []).find(
+11766:                                            (a) => a.id === node.speakerAssetId,
+11767-                                          )?.src || undefined
+11768-                                        }
+11769-                                        alt="Portrait"
+11770-                                        className="w-6 h-6 object-cover rounded bg-neutral-800"
+11771-                                      />
+--
+11780-                                                  nodes: (t.nodes || []).map(
+11781-                                                    (n) =>
+11782-                                                      n.id === node.id
+11783-                                                        ? {
+11784-                                                            ...n,
+11785:                                                            speakerAssetId:
+11786-                                                              undefined,
+11787-                                                          }
+11788-                                                        : n,
+11789-                                                  ),
+11790-                                                }
+--
+11815-                                                    nodes: (t.nodes || []).map(
+11816-                                                      (n) =>
+11817-                                                        n.id === node.id
+11818-                                                          ? {
+11819-                                                              ...n,
+11820:                                                              speakerAssetId:
+11821-                                                                id,
+11822-                                                            }
+11823-                                                          : n,
+11824-                                                    ),
+11825-                                                  }
+--
+11837-                                      className="bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded px-2 py-1 text-sm text-neutral-300"
+11838-                                    >
+11839-                                      + Portrait
+11840-                                    </button>
+11841-                                  )}
+11842:                                  {node.speakerAssetId && (
+11843-                                    <select
+11844-                                      value={node.portraitPosition || "left"}
+11845-                                      onChange={(e) => {
+11846-                                        const newTrees = (
+11847-                                          project.dialogueTrees || []
+--
+12645-                      label="Background Music (BGM)"
+12646-                      helpText="The music track that plays on loop when the player enters this scene."
+12647-                      className="uppercase font-bold mb-1 block text-sm mt-2"
+12648-                    />
+12649-                    <select
+12650:                      value={scene.bgmAssetId || ""}
+12651-                      onChange={(e) =>
+12652-                        pushHistory({
+12653-                          ...project,
+12654-                          scenes: (project.scenes || []).map((s) =>
+12655-                            s.id === scene.id
+12656:                              ? { ...s, bgmAssetId: e.target.value }
+12657-                              : s,
+12658-                          ),
+12659-                        })
+12660-                      }
+12661-                      className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm"
+--
+14086-                  onClick={() => {
+14087-                    const newItem: InventoryItem = {
+14088-                      id: uuidv4(),
+14089-                      name: "New Item",
+14090-                      description: "",
+14091:                      iconAssetId: null,
+14092-                    };
+14093-                    pushHistory({
+14094-                      ...project,
+14095-                      inventoryItems: [...project.inventoryItems, newItem],
+14096-                    });
+--
+14134-                    key={item.id}
+14135-                    className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 flex flex-col gap-3"
+14136-                  >
+14137-                    <div className="flex justify-between items-start">
+14138-                      <div className="w-16 h-16 bg-neutral-800 rounded border border-neutral-700 flex items-center justify-center overflow-hidden shrink-0">
+14139:                        {item.iconAssetId &&
+14140-                        project.assets.find(
+14141:                          (a) => a.id === item.iconAssetId,
+14142-                        ) ? (
+14143-                          <img
+14144-                            src={
+14145-                              project.assets.find(
+14146:                                (a) => a.id === item.iconAssetId,
+14147-                              )?.src || undefined
+14148-                            }
+14149-                            className="w-full h-full object-contain"
+14150-                          />
+14151-                        ) : (
+--
+14257-                              pushHistory({
+14258-                                ...project,
+14259-                                inventoryItems: project.inventoryItems.map(
+14260-                                  (i) =>
+14261-                                    i.id === item.id
+14262:                                      ? { ...i, iconAssetId: id }
+14263-                                      : i,
+14264-                                ),
+14265-                              });
+14266-                              setAssetPickerCb(null);
+14267-                            },
+--
+14269-                          })
+14270-                        }
+14271-                        className="w-full bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 hover:border-neutral-500 rounded px-3 py-2 text-sm flex items-center justify-between transition-colors"
+14272-                      >
+14273-                        <span className="text-neutral-300 truncate pr-2">
+14274:                          {item.iconAssetId &&
+14275:                          project.assets.find((a) => a.id === item.iconAssetId)
+14276-                            ? project.assets.find(
+14277:                                (a) => a.id === item.iconAssetId,
+14278-                              )!.name
+14279-                            : "No Icon Selected"}
+14280-                        </span>
+14281-                        <ImageIcon
+14282-                          size={16}
+--
+14356-                              label="Use Sound"
+14357-                              helpText="Sound to play."
+14358-                              className="text-sm uppercase font-bold text-neutral-500"
+14359-                            />
+14360-                            <select
+14361:                              value={item.useSoundAssetId || ""}
+14362-                              onChange={(e) =>
+14363-                                pushHistory({
+14364-                                  ...project,
+14365-                                  inventoryItems: project.inventoryItems.map(
+14366-                                    (i) =>
+14367-                                      i.id === item.id
+14368-                                        ? {
+14369-                                            ...i,
+14370:                                            useSoundAssetId: e.target.value,
+14371-                                          }
+14372-                                        : i,
+14373-                                  ),
+14374-                                })
+14375-                              }
+--
+15445-          }}
+15446-        />
+15447-      )}
+15448-
+15449-      {/* Image Editor Modal */}
+15450:      {editingAssetId && (
+15451-        <ImageEditorModal
+15452:          asset={project.assets.find((a) => a.id === editingAssetId)!}
+15453-          onSave={(newSrc, isNew) => {
+15454-            const originalAsset = project.assets.find(
+15455:              (a) => a.id === editingAssetId,
+15456-            );
+15457-
+15458-            if (isNew && originalAsset) {
+15459-              const newAsset: Asset = {
+15460-                ...originalAsset,
+--
+15468-              }));
+15469-            } else {
+15470-              setProject((p) => ({
+15471-                ...p,
+15472-                assets: p.assets.map((a) =>
+15473:                  a.id === editingAssetId ? { ...a, src: newSrc } : a,
+15474-                ),
+15475-              }));
+15476-            }
+15477:            setEditingAssetId(null);
+15478-          }}
+15479:          onClose={() => setEditingAssetId(null)}
+15480-        />
+15481-      )}
+15482-
+15483-      {assetPickerCb && (
+15484-        <AssetPickerModal
+15485-          assets={
+15486-            assetPickerCb.onlyOnCanvas
+15487-              ? project.assets.filter((a) => usedAssetSrcs.has(a.src))
+15488-              : project.assets
+15489-          }
+15490:          canvasAssetIds={Array.from(
+15491-            new Set(
+15492-              project.assets
+15493-                .filter((a) => usedAssetSrcs.has(a.src))
+15494-                .map((a) => a.id),
+15495-            ),
+15496-          )}
+15497:          recentAssetIds={recentAssetIds}
+15498-          onSelect={(id) => {
+15499:            setRecentAssetIds((prev) =>
+15500-              [id, ...prev.filter((i) => i !== id)].slice(0, 20),
+15501-            );
+15502-            assetPickerCb.onSelect(id);
+15503-          }}
+15504-          onClose={() => setAssetPickerCb(null)}

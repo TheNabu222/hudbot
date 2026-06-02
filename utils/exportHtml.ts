@@ -63,15 +63,10 @@ export function generateExportHtml(project: Project): string {
   if (project.globalSettings?.hudOverlay) {
     const overlay = project.globalSettings.hudOverlay;
     if (overlay.assetId) {
-      const w = exportWidth / (overlay.screenRect?.w || 1);
-      const h = exportHeight / (overlay.screenRect?.h || 1);
-      const x = -(w * (overlay.screenRect?.x || 0));
-      const y = -(h * (overlay.screenRect?.y || 0));
-
-      if (x < boundMinX) boundMinX = x;
-      if (y < boundMinY) boundMinY = y;
-      if (x + w > boundMaxX) boundMaxX = x + w;
-      if (y + h > boundMaxY) boundMaxY = y + h;
+      if (0 < boundMinX) boundMinX = 0;
+      if (0 < boundMinY) boundMinY = 0;
+      if (exportWidth > boundMaxX) boundMaxX = exportWidth;
+      if (exportHeight > boundMaxY) boundMaxY = exportHeight;
     }
   }
 
@@ -125,7 +120,6 @@ export function generateExportHtml(project: Project): string {
       position: absolute;
       user-select: none;
       transform-origin: center center;
-      pointer-events: auto;
       touch-action: none;
       background-color: rgba(255, 255, 255, 0.01);
     }
@@ -281,6 +275,32 @@ export function generateExportHtml(project: Project): string {
       filter: brightness(1.1);
     }
     #inv-toggle-btn:active {
+      transform: scale(0.95);
+    }
+    #quest-toggle-btn {
+      position: absolute;
+      bottom: 86px;
+      right: 20px;
+      width: 56px;
+      height: 56px;
+      background-color: color-mix(in srgb, var(--ui-bg) 95%, transparent);
+      border: 2px solid var(--ui-primary);
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: auto;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(4px);
+      transition: transform 0.1s;
+      z-index: 20000;
+    }
+    #quest-toggle-btn:hover {
+      transform: scale(1.05);
+      filter: brightness(1.1);
+    }
+    #quest-toggle-btn:active {
       transform: scale(0.95);
     }
     .inv-badge {
@@ -501,7 +521,7 @@ export function generateExportHtml(project: Project): string {
       animStyle = `animation: ${obj.animation} ${duration}s ${easing} infinite;`;
     }
 
-    const pe = obj.ignoreClicks ? "none" : "auto";
+    const peStr = obj.ignoreClicks ? "pointer-events: none;" : "";
 
     const style = `
       left: ${obj.x}px;
@@ -513,7 +533,7 @@ export function generateExportHtml(project: Project): string {
       transform: rotate(${obj.rotation || 0}deg);
       cursor: ${obj.cursor || "pointer"};
       mix-blend-mode: ${obj.blendMode || "normal"};
-      pointer-events: ${pe};
+      ${peStr}
       ${animStyle}
     `;
 
@@ -678,7 +698,7 @@ export function generateExportHtml(project: Project): string {
       const filters = obj.filters
         ? `brightness(${obj.filters.brightness ?? 1}) contrast(${obj.filters.contrast ?? 1}) saturate(${obj.filters.saturate ?? 1}) hue-rotate(${obj.filters.hueRotate ?? 0}deg) blur(${obj.filters.blur ?? 0}px) sepia(${obj.filters.sepia ?? 0}) invert(${obj.filters.invert ?? 0}) grayscale(${obj.filters.grayscale ?? 0})`
         : "none";
-      const imgStyle = `width: 100%; height: 100%; object-fit: fill; transform: scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1}); filter: ${filters}; pointer-events: auto;`;
+      const imgStyle = `width: 100%; height: 100%; object-fit: fill; transform: scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1}); filter: ${filters};`;
       const asset = project.assets.find(a => a.src === obj.src);
       const assetDataAttr = asset ? `data-asset-id="${asset.id}" data-runtime-src="true"` : `src="${obj.src}"`;
       if (obj.isVideo) {
@@ -734,11 +754,25 @@ export function generateExportHtml(project: Project): string {
     let activeDialogue = null;
 
     // Game State
+    let defaultNeeds = { rest: 100, hunger: 100, connection: 100, spiritual: 100, novelty: 100 };
+    if (globalSettings.customNeeds && globalSettings.customNeeds.length > 0) {
+      defaultNeeds = {};
+      globalSettings.customNeeds.forEach(n => defaultNeeds[n] = 100);
+    }
+    
+    let defaultSkills = { naturalist: 5, occultist: 2, scribal: 8 };
+    if (globalSettings.customSkills && globalSettings.customSkills.length > 0) {
+      defaultSkills = {};
+      globalSettings.customSkills.forEach(s => defaultSkills[s] = 0);
+    }
+
     let state = {
-      needs: { rest: 100, hunger: 100, connection: 100, spiritual: 100, novelty: 100 },
-      skills: { naturalist: 5, occultist: 2, scribal: 8 },
+      needs: defaultNeeds,
+      skills: defaultSkills,
       inventory: [],
       flags: {},
+      activeQuests: gameData.quests?.filter(q => q.autoStart).map(q => q.id) || [],
+      completedQuests: [],
       time: 8 // 0-24
     };
 
@@ -980,7 +1014,7 @@ export function generateExportHtml(project: Project): string {
 
       // Update Needs UI
       const updateNeedsUI = () => {
-        ['rest', 'hunger', 'connection', 'spiritual', 'novelty'].forEach(need => {
+        Object.keys(state.needs).forEach(need => {
           const el = document.getElementById('need-' + need);
           if (el) el.style.width = Math.max(0, Math.min(100, state.needs[need] || 0)) + '%';
         });
@@ -989,7 +1023,7 @@ export function generateExportHtml(project: Project): string {
 
       // Update Skills UI
       const updateSkillsUI = () => {
-        ['naturalist', 'occultist', 'scribal'].forEach(skill => {
+        Object.keys(state.skills).forEach(skill => {
           const el = document.getElementById('skill-' + skill);
           if (el) el.style.width = Math.max(0, Math.min(100, (state.skills[skill] || 0) * 5)) + '%';
         });
@@ -1024,6 +1058,21 @@ export function generateExportHtml(project: Project): string {
       `
           : ""
       }
+
+      // Inventory Deselect on Background Click/Right-Click
+      container.addEventListener('pointerdown', (e) => {
+         if (typeof selectedInventoryItemId !== 'undefined' && selectedInventoryItemId !== null) {
+            selectedInventoryItemId = null;
+            try { updateInventoryUI(); } catch(e){}
+         }
+      });
+      container.addEventListener('contextmenu', (e) => {
+         e.preventDefault();
+         if (typeof selectedInventoryItemId !== 'undefined' && selectedInventoryItemId !== null) {
+            selectedInventoryItemId = null;
+            try { updateInventoryUI(); } catch(e){}
+         }
+      });
 
       // Parallax Effect
       container.addEventListener('mousemove', (e) => {
@@ -1188,6 +1237,23 @@ export function generateExportHtml(project: Project): string {
                  }
               }
             }
+          } else if (interaction === 'start_quest') {
+            if (data && !state.activeQuests.includes(data) && !state.completedQuests.includes(data)) {
+               state.activeQuests.push(data);
+               const q = (gameData.quests || []).find(q => q.id === data);
+               showSimpleDialogue("Quest Started: " + (q ? q.name : data), "System");
+               saveGame();
+               buildQuestLog();
+            }
+          } else if (interaction === 'complete_quest') {
+            if (data && state.activeQuests.includes(data)) {
+               state.activeQuests = state.activeQuests.filter(id => id !== data);
+               state.completedQuests.push(data);
+               const q = (gameData.quests || []).find(q => q.id === data);
+               showSimpleDialogue("Quest Completed: " + (q ? q.name : data), "System");
+               saveGame();
+               buildQuestLog();
+            }
           } else if (interaction === 'set_flag') {
             if (data) {
               state.flags[data] = true;
@@ -1244,10 +1310,17 @@ export function generateExportHtml(project: Project): string {
             setTimeout(() => flavorText.style.display = 'none', 2000);
           } else if (interaction === 'load_game') {
             location.reload(); 
+          } else if (interaction === 'open_crafting') {
+            toggleInventory();
+            flavorText.innerText = 'Crafting System: Select an item, then click another to combine them!';
+            flavorText.style.display = 'block';
+            setTimeout(() => flavorText.style.display = 'none', 4000);
           } else if (interaction === 'skill_check') {
             showSimpleDialogue("[Skill Check Success]\\n" + (data || "You succeeded!"), "");
           } else if (interaction === 'toggle_inventory') {
             toggleInventory();
+          } else if (interaction === 'open_quest_log') {
+            toggleQuestLog();
           } else if (interaction === 'play_cutscene') {
             const videoAssetId = data;
             const scriptAssetId = obj.getAttribute('data-script-src');
@@ -1337,20 +1410,20 @@ export function generateExportHtml(project: Project): string {
           flavorText.style.display = 'block';
           setTimeout(() => flavorText.style.display = 'none', 3000);
         } else if (selectedInventoryItemId && selectedInventoryItemId !== itemId) {
-             const sourceItem = inventoryItems.find(i => i.id === selectedInventoryItemId);
-             const targetItem = itemDef;
-             const combinationFromSource = sourceItem?.combinations?.find(c => c.withItemId === itemId);
-             const combinationFromTarget = targetItem?.combinations?.find(c => c.withItemId === selectedInventoryItemId);
-             const combination = combinationFromSource || combinationFromTarget;
+             const combination = (gameData.craftingRecipes || []).find(r => 
+               (r.ingredient1Id === selectedInventoryItemId && r.ingredient2Id === itemId) ||
+               (r.ingredient1Id === itemId && r.ingredient2Id === selectedInventoryItemId)
+             );
              if (combination) {
-                 const activeSource = combinationFromSource ? sourceItem : targetItem;
-                 const activeTarget = combinationFromSource ? targetItem : sourceItem;
-                 if (combination.destroySelf && activeSource) {
-                     const idIdx = state.inventory.indexOf(activeSource.id);
+                 const ing1Id = combination.ingredient1Id;
+                 const ing2Id = combination.ingredient2Id;
+                 
+                 if (combination.destroyIngredient1) {
+                     const idIdx = state.inventory.indexOf(ing1Id);
                      if (idIdx !== -1) state.inventory.splice(idIdx, 1);
                  }
-                 if (combination.destroyTarget && activeTarget) {
-                     const idIdx = state.inventory.indexOf(activeTarget.id);
+                 if (combination.destroyIngredient2) {
+                     const idIdx = state.inventory.indexOf(ing2Id);
                      if (idIdx !== -1) state.inventory.splice(idIdx, 1);
                  }
                  if (combination.resultItemId) {
@@ -1397,6 +1470,59 @@ export function generateExportHtml(project: Project): string {
         setTimeout(() => flavorText.style.display = 'none', 3000);
         saveGame();
         updateInventoryUI();
+      };
+
+      const gameQuests = gameData.quests || [];
+      window.toggleQuestLog = () => {
+        const overlay = document.getElementById('quest-overlay');
+        if (overlay.style.display === 'block') {
+          overlay.style.display = 'none';
+        } else {
+          overlay.style.display = 'block';
+          buildQuestLog();
+        }
+      };
+
+      window.buildQuestLog = () => {
+        const questList = document.getElementById('quest-list');
+        if (!questList) return;
+        
+        const visibleQuests = gameQuests.filter(q => state.activeQuests.includes(q.id) || state.completedQuests.includes(q.id));
+        if (visibleQuests.length === 0) {
+           questList.innerHTML = '<div style="text-align: center; padding: 40px; opacity: 0.5;">Your journal is empty.</div>';
+           return;
+        }
+
+        let html = '<div style="display: flex; flex-direction: column; gap: 16px; padding: 16px;">';
+        visibleQuests.forEach(q => {
+           const isCompleted = state.completedQuests.includes(q.id);
+           const color = isCompleted ? 'var(--ui-primary)' : '#fff';
+           const border = isCompleted ? 'var(--ui-primary)' : 'var(--ui-primary)';
+           const opacity = isCompleted ? '1' : '0.4';
+           
+           html += \`<div style="padding: 16px; border: 2px solid \${border}; border-radius: 8px; border-opacity: \${opacity}">
+              <h3 style="margin: 0 0 8px 0; color: \${color};">
+                  \${q.name} \${isCompleted ? '✓' : ''}
+              </h3>
+              <p style="margin: 0 0 16px 0; font-size: 14px; opacity: 0.8; line-height: 1.4;">\${q.description}</p>
+              \`
+           if (q.objectives && q.objectives.length > 0) {
+              html += \`<div style="font-size: 12px; font-weight: bold; text-transform: uppercase; color: var(--ui-primary); margin-bottom: 8px;">Objectives</div>\`;
+              q.objectives.forEach(obj => {
+                 let isDone = false;
+                 if (obj.type === 'custom_flag' && state.flags[obj.targetId]) isDone = true;
+                 if (obj.type === 'collect_item' && state.inventory.includes(obj.targetId)) isDone = true;
+                 
+                 html += \`<div style="margin-bottom: 4px; display: flex; align-items: center; gap: 8px; font-size: 13px;">
+                    <div style="width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ui-primary); background: \${isDone ? 'var(--ui-primary)' : 'transparent'};"></div>
+                    <span style="opacity: \${isDone ? 0.5 : 1}; text-decoration: \${isDone ? 'line-through' : 'none'};">\${obj.description}</span>
+                 </div>\`;
+              })
+           }
+           html += \`</div>\`;
+        });
+        html += '</div>';
+        questList.innerHTML = html;
       };
 
       const updateInventoryUI = () => {
@@ -1466,16 +1592,9 @@ export function generateExportHtml(project: Project): string {
     const overlay = project.globalSettings.hudOverlay;
     const asset = project.assets.find((a) => a.id === overlay.assetId);
     if (asset) {
-      const stageW = exportWidth;
-      const stageH = exportHeight;
-      const totalW = stageW / (overlay.screenRect.w || 1);
-      const totalH = stageH / (overlay.screenRect.h || 1);
-      const left = -(totalW * (overlay.screenRect.x || 0));
-      const top = -(totalH * (overlay.screenRect.y || 0));
-
       const hudSrc = asset.dataURL || asset.src || "";
       hudHtml = `
-      <div id="global-hud-overlay" style="position: absolute; left: ${left}px; top: ${top}px; width: ${totalW}px; height: ${totalH}px; background-image: url('${hudSrc}'); background-size: 100% 100%; pointer-events: none; z-index: 99999; mix-blend-mode: ${overlay.blendMode || "normal"}; opacity: ${overlay.opacity ?? 1};"></div>
+      <div id="global-hud-overlay" style="position: absolute; left: 0px; top: 0px; width: ${exportWidth}px; height: ${exportHeight}px; background-image: url('${hudSrc}'); background-size: 100% 100%; pointer-events: none; z-index: 99999; mix-blend-mode: ${overlay.blendMode || "normal"}; opacity: ${overlay.opacity ?? 1};"></div>
       `;
     }
   }
@@ -1526,6 +1645,16 @@ export function generateExportHtml(project: Project): string {
       `
         }
 
+        ${
+          (project.quests && project.quests.length > 0) && !project.globalSettings?.hideDefaultInventoryBtn
+            ? `
+      <button id="quest-toggle-btn" onclick="toggleQuestLog()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--ui-primary)"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+      </button>
+      `
+            : ""
+        }
+
       <div id="inventory-overlay" onclick="toggleInventory()">
         <div class="inventory-box" onclick="event.stopPropagation()">
           <div class="inventory-header">
@@ -1543,19 +1672,31 @@ export function generateExportHtml(project: Project): string {
         </div>
       </div>
       
-      <div id="needs-tracker">
-        <div>Rest <div class="need-bar"><div id="need-rest" class="need-fill"></div></div></div>
-        <div>Hunger <div class="need-bar"><div id="need-hunger" class="need-fill"></div></div></div>
-        <div>Connection <div class="need-bar"><div id="need-connection" class="need-fill"></div></div></div>
-        <div>Spiritual <div class="need-bar"><div id="need-spiritual" class="need-fill"></div></div></div>
-        <div>Novelty <div class="need-bar"><div id="need-novelty" class="need-fill"></div></div></div>
+      <div id="quest-overlay" onclick="toggleQuestLog()" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100000; padding: 20px;">
+        <div class="inventory-box" onclick="event.stopPropagation()" style="max-height: 80%; max-width: 600px; margin: auto;">
+          <div class="inventory-header">
+            <h2>Quest Log</h2>
+            <button class="close-btn" onclick="toggleQuestLog()">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+          <div class="inventory-content" style="overflow-y: auto;">
+            <div id="quest-list"></div>
+          </div>
+        </div>
       </div>
       
-      <div id="skills-tracker">
-        <div>Naturalist <div class="need-bar"><div id="skill-naturalist" class="need-fill"></div></div></div>
-        <div>Occultist <div class="need-bar"><div id="skill-occultist" class="need-fill"></div></div></div>
-        <div>Scribal <div class="need-bar"><div id="skill-scribal" class="need-fill"></div></div></div>
-      </div>
+      ${project.globalSettings?.enableNeeds ? `<div id="needs-tracker">
+        ${(project.globalSettings.customNeeds?.length ? project.globalSettings.customNeeds : ['rest', 'hunger', 'connection', 'spiritual', 'novelty']).map(need => 
+          `<div>${need.charAt(0).toUpperCase() + need.slice(1)} <div class="need-bar"><div id="need-${need}" class="need-fill"></div></div></div>`
+        ).join('')}
+      </div>` : ''}
+      
+      ${project.globalSettings?.enableTTRPGStats ? `<div id="skills-tracker">
+        ${(project.globalSettings.customSkills?.length ? project.globalSettings.customSkills : ['naturalist', 'occultist', 'scribal']).map(skill => 
+          `<div>${skill.charAt(0).toUpperCase() + skill.slice(1)} <div class="need-bar"><div id="skill-${skill}" class="need-fill"></div></div></div>`
+        ).join('')}
+      </div>` : ''}
       
       <div id="time-tracker">
         <div style="font-weight: bold; border-top: 1px solid rgba(255,255,255,0.3); padding-top: 4px; margin-top: 4px;">

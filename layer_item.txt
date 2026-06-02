@@ -1,0 +1,187 @@
+4355-                            .filter(Boolean)
+4356-                            .join(" ");
+4357-
+4358-                          return (
+4359-                            <div
+4360:                              key={obj.id}
+4361-                              onClick={() => {
+4362-                                const anyBlockingUi = activeUiMenus.some(
+4363-                                  (id) =>
+4364-                                    (project.uiMenus || []).find(
+4365-                                      (m) => m.id === id,
+4366-                                    )?.blocksClicks,
+4367-                                );
+4368-                                if (isPlaying && anyBlockingUi) return; // Disable base scene interactions if UI blocking clicks
+4369-                                handleObjectClick(obj);
+4370-                              }}
+4371-                              onPointerDown={(e) => {
+4372-                                const anyBlockingUi = activeUiMenus.some(
+4373-                                  (id) =>
+4374-                                    (project.uiMenus || []).find(
+4375-                                      (m) => m.id === id,
+4376-                                    )?.blocksClicks,
+4377-                                );
+4378-                                if (isPlaying && anyBlockingUi) return;
+4379-                                handleObjectPointerDown(e, obj);
+4380-                              }}
+4381-                              onPointerEnter={() => {
+4382-                                if (!isPlaying) return;
+4383-                                if (obj.triggerOnEnter === true) {
+4384-                                  if (
+4385-                                    obj.triggerOnce &&
+4386-                                    triggeredObjects.has(obj.id)
+4387-                                  )
+4388-                                    return;
+4389-                                  const anyBlockingUi = activeUiMenus.some(
+4390-                                    (id) =>
+4391-                                      (project.uiMenus || []).find(
+4392-                                        (m) => m.id === id,
+4393-                                      )?.blocksClicks,
+4394-                                  );
+4395-                                  if (anyBlockingUi) return;
+4396-                                  handleObjectClick(obj);
+4397-                                  if (obj.triggerOnce) {
+4398-                                    setTriggeredObjects((prev) =>
+4399-                                      new Set(prev).add(obj.id),
+4400-                                    );
+--
+7749-                                                obj.targetId
+7750-                                            )
+7751-                                              isObjDone = true;
+7752-                                            return (
+7753-                                              <div
+7754:                                                key={obj.id}
+7755-                                                className="flex items-center gap-2 text-sm"
+7756-                                              >
+7757-                                                <div
+7758-                                                  className="w-4 h-4 rounded-full border-2 flex items-center justify-center"
+7759-                                                  style={{
+7760-                                                    borderColor: uiPrimary,
+7761-                                                    backgroundColor: isObjDone
+7762-                                                      ? uiPrimary
+7763-                                                      : "transparent",
+7764-                                                  }}
+7765-                                                >
+7766-                                                  {isObjDone && (
+7767-                                                    <CheckCircle2
+7768-                                                      size={10}
+7769-                                                      color={uiBg}
+7770-                                                    />
+7771-                                                  )}
+7772-                                                </div>
+7773-                                                <span
+7774-                                                  style={{
+7775-                                                    textDecoration: isObjDone
+7776-                                                      ? "line-through"
+7777-                                                      : "none",
+7778-                                                    color: isObjDone
+7779-                                                      ? uiPrimary
+7780-                                                      : uiSecondary,
+7781-                                                    opacity: isObjDone
+7782-                                                      ? 0.8
+7783-                                                      : 1,
+7784-                                                  }}
+7785-                                                >
+7786-                                                  {obj.description}
+7787-                                                </span>
+7788-                                              </div>
+7789-                                            );
+7790-                                          })}
+7791-                                        </div>
+7792-                                      )}
+7793-                                    </div>
+7794-                                  );
+--
+7913-                            <ImageIcon size={14} className="text-neutral-400" />
+7914-                          );
+7915-
+7916-                        return (
+7917-                          <div
+7918:                            key={obj.id}
+7919-                            onClick={() =>
+7920-                              !isPlaying && setSelectedObjectId(obj.id)
+7921-                            }
+7922-                            draggable
+7923-                            onDragStart={(e) => {
+7924-                              e.dataTransfer.setData("layerId", obj.id);
+7925-                            }}
+7926-                            onDragOver={(e) => e.preventDefault()}
+7927-                            onDrop={(e) => {
+7928-                              e.preventDefault();
+7929-                              const draggedLayerId =
+7930-                                e.dataTransfer.getData("layerId");
+7931-                              if (!draggedLayerId || draggedLayerId === obj.id)
+7932-                                return;
+7933-
+7934-                              // We need to re-assign z-indices to cleanly insert the layer.
+7935-                              // Current array is reverse sorted (highest z-index first).
+7936-                              const sortedObjects = [
+7937-                                ...currentScene.objects,
+7938-                              ].sort((a, b) => b.zIndex - a.zIndex);
+7939-                              const fromIndex = sortedObjects.findIndex(
+7940-                                (o) => o.id === draggedLayerId,
+7941-                              );
+7942-                              const toIndex = sortedObjects.findIndex(
+7943-                                (o) => o.id === obj.id,
+7944-                              );
+7945-                              if (fromIndex === -1 || toIndex === -1) return;
+7946-
+7947-                              // Reorder the array
+7948-                              const [movedItem] = sortedObjects.splice(
+7949-                                fromIndex,
+7950-                                1,
+7951-                              );
+7952-                              sortedObjects.splice(toIndex, 0, movedItem);
+7953-
+7954-                              // Re-assign z-indices cleanly, starting from highest
+7955-                              const total = sortedObjects.length;
+7956-                              const isUI =
+7957-                                editorMode === "ui_stage" && !isPlaying;
+7958-                              const newProject = {
+--
+13632-                              </button>
+13633-                            </div>
+13634-                            <div className="space-y-3">
+13635-                              {(quest.objectives || []).map((obj) => (
+13636-                                <div
+13637:                                  key={obj.id}
+13638-                                  className="p-4 border border-neutral-800 bg-neutral-950 rounded-lg relative group"
+13639-                                >
+13640-                                  <button
+13641-                                    onClick={() => {
+13642-                                      const updated = (
+13643-                                        project.quests || []
+13644-                                      ).map((q) =>
+13645-                                        q.id === quest.id
+13646-                                          ? {
+13647-                                              ...q,
+13648-                                              objectives: q.objectives.filter(
+13649-                                                (o) => o.id !== obj.id,
+13650-                                              ),
+13651-                                            }
+13652-                                          : q,
+13653-                                      );
+13654-                                      pushHistory({
+13655-                                        ...project,
+13656-                                        quests: updated,
+13657-                                      });
+13658-                                    }}
+13659-                                    className="absolute top-2 right-2 text-neutral-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+13660-                                  >
+13661-                                    <X size={14} />
+13662-                                  </button>
+13663-                                  <div className="grid grid-cols-2 gap-4">
+13664-                                    <div>
+13665-                                      <LabelWithHelp
+13666-                                        label="Type"
+13667-                                        className="uppercase block mb-1"
+13668-                                        helpText="The condition the player must meet to complete this objective."
+13669-                                      />
+13670-                                      <select
+13671-                                        value={obj.type}
+13672-                                        onChange={(e) => {
+13673-                                          const updated = (
+13674-                                            project.quests || []
+13675-                                          ).map((q) =>
+13676-                                            q.id === quest.id
+13677-                                              ? {

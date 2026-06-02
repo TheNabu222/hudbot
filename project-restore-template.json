@@ -1,0 +1,161 @@
+{
+  "id": "project-uuid-here",
+  "name": "My Custom Cavebot Project",
+  "currentSceneId": "scene-1-uuid",
+  "currentUiMenuId": null,
+  "gameFlags": ["START_CUSTOM_GAME"],
+  "globalSettings": {
+    "useDayNightCycle": true,
+    "enableNeeds": true,
+    "enableTTRPGStats": true,
+    "stageWidth": 1200,
+    "stageHeight": 800,
+    "snapToGrid": false,
+    "gridSize": 32,
+    "showGhostOutlines": false,
+    "uiColorPrimary": "#8A2BE2",
+    "uiColorBackground": "#111111",
+    "enableSettingsHud": true,
+    "enableInventoryHud": true,
+    "enableQuestsHud": true,
+    "enableCraftingHud": true,
+    "enableLoreHud": true,
+    "enableRelationshipsHud": true,
+    "uiTheme": "retro"
+  },
+  "assets": [
+    {
+      "id": "asset-1-uuid",
+      "name": "Default Background",
+      "type": "image",
+      "src": "https://images.unsplash.com/photo-1544983057-7a2e22ca0f0f?auto=format&fit=crop&q=80&w=800"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "scene-1-uuid",
+      "name": "Starting Area",
+      "width": 1200,
+      "height": 800,
+      "backgroundColor": "#3E2A1D",
+      "objects": [
+        {
+          "id": "obj-1-uuid",
+          "name": "Nabu",
+          "src": "https://images.unsplash.com/photo-1544983057-7a2e22ca0f0f?auto=format&fit=crop&q=80&w=150",
+          "x": 100,
+          "y": 100,
+          "width": 64,
+          "height": 64,
+          "rotation": 0,
+          "zIndex": 10,
+          "opacity": 1,
+          "locked": false,
+          "cursor": "pointer",
+          "animation": "pulse",
+          "interaction": "dialogue",
+          "interactionData": "dialogue-1-uuid",
+          "flavorText": "Nabu stands here, looking confident.",
+          "blendMode": "normal",
+          "parallaxSpeed": 1,
+          "hasPhysics": true,
+          "physicsStatic": true
+        }
+      ]
+    }
+  ],
+  "uiMenus": [],
+  "inventoryItems": [
+    {
+      "id": "item-1-uuid",
+      "name": "Strange Berry",
+      "description": "It looks tasty but suspicious.",
+      "category": "consumable",
+      "iconAssetId": null
+    }
+  ],
+  "craftingRecipes": [
+    {
+      "id": "recipe-1-uuid",
+      "name": "Berry Mash",
+      "description": "Crush strange berries into a mash.",
+      "resultItemId": "item-2-uuid",
+      "resultAmount": 1,
+      "ingredients": [
+        {
+          "itemId": "item-1-uuid",
+          "amount": 2
+        }
+      ]
+    }
+  ],
+  "dialogueTrees": [
+    {
+      "id": "dialogue-1-uuid",
+      "name": "Nabu's Intro",
+      "startNodeId": "node-1-uuid",
+      "nodes": [
+        {
+          "id": "node-1-uuid",
+          "speaker": "Nabu",
+          "text": "Hello there! Are you ready to dive into the Babel Matrix?",
+          "choices": [
+            {
+              "id": "choice-1",
+              "text": "I am ready.",
+              "nextNodeId": "node-2-uuid",
+              "setFlags": ["TALKED_TO_NABU"]
+            },
+            {
+              "id": "choice-2",
+              "text": "Not yet.",
+              "nextNodeId": null
+            }
+          ]
+        },
+        {
+          "id": "node-2-uuid",
+          "speaker": "Nabu",
+          "text": "Excellent! Then let our story begin.",
+          "choices": []
+        }
+      ]
+    }
+  ],
+  "quests": [
+    {
+      "id": "quest-1-uuid",
+      "name": "The Journey Begins",
+      "description": "Talk to Nabu to find out what's going on.",
+      "objectives": [
+        {
+          "id": "obj-1-uuid",
+          "type": "talk_to",
+          "targetId": "dialogue-1-uuid",
+          "description": "Speak with Nabu.",
+          "requiredAmount": 1
+        }
+      ],
+      "rewards": [
+        {
+          "type": "give_item",
+          "targetId": "item-1-uuid",
+          "amount": 5
+        }
+      ],
+      "autoStart": true
+    }
+  ],
+  "maps": [],
+  "loreEntries": [
+    {
+      "id": "lore-1-uuid",
+      "title": "The Glitch Phenomenon",
+      "content": "Occasionally, the real world peaks through the paleolithic simulation.",
+      "category": "Mysteries"
+    }
+  ],
+  "factions": [],
+  "companions": [],
+  "prefabs": []
+}

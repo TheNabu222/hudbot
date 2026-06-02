@@ -27,10 +27,7 @@ export type InteractionType =
   | "scene_change"
   | "link"
   | "sound"
-  | "flavor_text"
-  | "branching_dialogue"
   | "skill_check"
-  | "start-dialogue"
   | "give-item"
   | "collect"
   | "run_script"
@@ -42,6 +39,13 @@ export type InteractionType =
   | "modify_number"
   | "open_crafting"
   | "open_quest_log"
+  | "start_quest"
+  | "complete_quest"
+  | "open_skills"
+  | "open_almanac"
+  | "open_map"
+  | "open_relationships"
+  | "open_settings"
   | "set_flag"
   | "play_cutscene"
   | "restart_scene"
@@ -74,6 +78,17 @@ export interface DialogueChoice {
   nextNodeId: string | null;
   requiredGameFlag?: string;
   setGameFlag?: string;
+  startQuestId?: string;
+  completeQuestId?: string;
+  giveItemId?: string;
+  consumeItemId?: string;
+  playSoundAssetId?: string;
+  changeSceneId?: string;
+  requiredSkillId?: string;
+  requiredSkillValue?: number;
+  timeCost?: number;
+  needsEffect?: Record<string, number>;
+  reputationEffect?: { factionId: string; value: number };
 }
 export interface DialogueNode {
   id: string;
@@ -104,6 +119,19 @@ export type ItemCategory =
   | "quest"
   | "crafting_station";
 
+export interface CraftingRecipe {
+  id: string;
+  name: string;
+  ingredient1Id: string;
+  ingredient2Id: string;
+  ingredient3Id?: string;
+  resultItemId: string;
+  destroyIngredient1: boolean;
+  destroyIngredient2: boolean;
+  destroyIngredient3?: boolean;
+  successMessage: string;
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
@@ -124,6 +152,12 @@ export interface Asset {
   src: string;
   dataURL?: string;
   name: string;
+  isFavorite?: boolean;
+  tags?: string[];
+  description?: string;
+  trimStart?: number;
+  trimEnd?: number;
+  volume?: number;
   type:
     | "image"
     | "hitbox"
@@ -133,8 +167,6 @@ export interface Asset {
     | "ui_element"
     | "text";
   category: string;
-  description?: string;
-  tags?: string[];
   lore?: string;
   needsAttention?: boolean;
 }
@@ -153,12 +185,17 @@ export interface SceneObject {
   zIndex: number;
   opacity: number;
   locked: boolean;
+  hidden?: boolean;
   cursor: CursorType;
 
   // Animation settings
   animation: AnimationType;
   animationDuration?: number;
   animationEasing?: "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out";
+
+  // Relationship Systems
+  parentObjectId?: string;
+  affinityId?: string;
 
   interaction: InteractionType;
   interactionData?: string;
@@ -283,17 +320,12 @@ export interface SceneObject {
 
   // Sim & RPG Elements (Urbz / TTRPG)
   flavorText?: string;
-  requiredSkill?: "none" | "naturalist" | "occultist" | "scribal";
+  requiredSkill?: string;
   skillCheckDifficulty?: number;
-  needsEffect?: {
-    rest: number;
-    hunger: number;
-    connection: number;
-    spiritual: number;
-    novelty: number;
-  };
+  timeCost?: number;
+  needsEffect?: Record<string, number>;
   reputationEffect?: { npcId: string; value: number };
-  grantSkill?: "none" | "naturalist" | "occultist" | "scribal";
+  grantSkill?: string;
   grantSkillValue?: number;
 
   // Dialogue, Inventory, UI
@@ -361,6 +393,30 @@ export interface FastTravelMap {
   nodes: MapNode[];
 }
 
+export interface LoreEntry {
+  id: string;
+  title: string;
+  content: string;
+  category?: string;
+  requiredFlagId?: string;
+}
+
+export interface Companion {
+  id: string;
+  name: string;
+  assetId: string | null;
+  dialogueTreeId: string | null; // For clicking on them
+  requiredFlagId?: string; // Follows if you have this flag
+  interjections?: string[]; // Periodically says one of these
+}
+
+export interface Faction {
+  id: string;
+  name: string;
+  description: string;
+  defaultAffinity: number;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -371,9 +427,14 @@ export interface Project {
   assets: Asset[];
   dialogueTrees: DialogueTree[];
   inventoryItems: InventoryItem[];
+  craftingRecipes: CraftingRecipe[];
   quests: Quest[];
   maps: FastTravelMap[];
   gameFlags: string[]; // Custom string flag names used throughout the project
+  loreEntries?: LoreEntry[];
+  factions?: Faction[];
+  companions?: Companion[];
+  prefabs?: SceneObject[];
   globalSettings: {
     useDayNightCycle: boolean;
     enableNeeds: boolean;
@@ -386,6 +447,18 @@ export interface Project {
     dialoguePosition?: "top" | "bottom" | "center";
     typewriterSpeed?: number;
     hideDefaultInventoryBtn?: boolean;
+    hideDefaultCraftingBtn?: boolean;
+    hideDefaultQuestLogBtn?: boolean;
+    hideDefaultSkillsBtn?: boolean;
+    hideDefaultAlmanacBtn?: boolean;
+    hideDefaultMapBtn?: boolean;
+    hideDefaultRelationshipsBtn?: boolean;
+    hideDefaultSettingsBtn?: boolean;
+    enableSkillsHud?: boolean;
+    enableAlmanacHud?: boolean;
+    enableMapHud?: boolean;
+    enableRelationshipsHud?: boolean;
+    enableSettingsHud?: boolean;
     customCursorAssetId?: string; // ID of the custom cursor asset
     hudOverlay?: {
       assetId?: string;
@@ -401,9 +474,12 @@ export interface Project {
       | "retro"
       | "minimalist";
     uiColorPrimary?: string;
+    uiColorSecondary?: string;
     uiColorBackground?: string;
     uiBorderRadius?: number;
     uiFontFamily?: string;
     customCss?: string;
+    customSkills?: string[];
+    customNeeds?: string[];
   };
 }

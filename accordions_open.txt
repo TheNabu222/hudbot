@@ -1,0 +1,15 @@
+8292:                      <Accordion title="Stage Settings" defaultOpen={true}>
+8395:                      <Accordion title="UI Theme Settings">
+8587:                      <Accordion title="HUD & Built-in Action Buttons">
+8887:                      <Accordion title="Advanced UI Settings">
+8935:                      <Accordion title="Gameplay Settings">
+9018:                      <Accordion title="General Properties" defaultOpen={true}>
+9142:                        <Accordion title="HUD / UI Properties">
+9489:                      <Accordion title="Transform">
+9731:                        <Accordion title="Text Styling">
+10038:                      <Accordion title="Layering">
+10200:                        <Accordion title="Appearance">
+10474:                          <Accordion title="Physics">
+10592:                      <Accordion title="Interaction Setup">
+11418:                        <Accordion title="Relationships & Connections">
+11468:                        <Accordion title="RPG & Sim Logic">

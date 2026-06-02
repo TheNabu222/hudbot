@@ -4,7 +4,7 @@
 */
 
 
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { extractHtmlFromText } from "../utils/html";
 
 // Initialize Gemini Client

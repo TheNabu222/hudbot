@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Project } from '../types';
 import { DEFAULT_ASSETS } from '../App';
+import { getCavebotPreset } from './cavebotTemplate';
 
 export const TEMPLATES: Record<string, () => Project> = {
   empty: () => ({
@@ -14,6 +15,8 @@ export const TEMPLATES: Record<string, () => Project> = {
     assets: DEFAULT_ASSETS,
     dialogueTrees: [],
     inventoryItems: [],
+    craftingRecipes: [],
+    maps: [],
     globalSettings: {
       useDayNightCycle: false,
       enableNeeds: false,
@@ -79,6 +82,8 @@ export const TEMPLATES: Record<string, () => Project> = {
           iconAssetId: null
         }
       ],
+      craftingRecipes: [],
+      maps: [],
       globalSettings: {
         useDayNightCycle: false,
         enableNeeds: false,
@@ -111,8 +116,8 @@ export const TEMPLATES: Record<string, () => Project> = {
               locked: false,
               cursor: 'pointer',
               animation: 'glow',
-              interaction: 'start-dialogue',
-              dialogueTreeId: 'dt-rpg-1',
+              interaction: 'dialogue',
+              interactionData: 'dt-rpg-1',
               blendMode: 'normal',
               parallaxSpeed: 1,
               hasPhysics: true
@@ -142,5 +147,6 @@ export const TEMPLATES: Record<string, () => Project> = {
         }
       ]
     };
-  }
+  },
+  cavebot: getCavebotPreset
 };
