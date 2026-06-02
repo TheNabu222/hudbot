@@ -169,8 +169,11 @@ const AssetManager = {
     let html = '<div class="metadata-panel">';
     html += `<h4>📋 ${asset.name} <span style="font-weight:400;font-size:10px;color:var(--text-muted)">${asset.width}×${asset.height}</span></h4>`;
 
-    // Preview
-    html += `<div class="metadata-preview"><img src="${asset.dataURL}" alt="${asset.name}" /></div>`;
+    // Preview + Edit button
+    html += `<div class="metadata-preview" style="position:relative">
+      <img src="${asset.dataURL}" alt="${asset.name}" />
+      <button class="small-btn" onclick="ImageEditor.show('${asset.id}')" style="margin-top:4px;width:100%">✏ Edit Image</button>
+    </div>`;
 
     // Palette
     if (palette.length > 0) {

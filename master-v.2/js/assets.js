@@ -91,8 +91,14 @@ const Assets = {
       div.innerHTML = `
         <img src="${asset.dataURL}" alt="${asset.name}" loading="lazy" />
         <span class="asset-label">${asset.name}</span>
+        <button class="asset-edit"   data-id="${asset.id}" title="Edit Image">✏</button>
         <button class="asset-delete" data-id="${asset.id}" title="Delete">&times;</button>
       `;
+      // Edit handler
+      div.querySelector('.asset-edit').addEventListener('click', (e) => {
+        e.stopPropagation();
+        ImageEditor.show(asset.id);
+      });
       // Delete handler
       div.querySelector('.asset-delete').addEventListener('click', (e) => {
         e.stopPropagation();
