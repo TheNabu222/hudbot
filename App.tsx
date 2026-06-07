@@ -74,6 +74,9 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
+  History,
+  Clock,
+  Calendar,
 } from "lucide-react";
 import Matter from "matter-js";
 import { AIAssistant } from "./components/AIAssistant";
@@ -100,16 +103,53 @@ import { analyzeAssetVibe } from "./services/gemini";
 import { generateExportHtml } from "./utils/exportHtml";
 import { TEMPLATES } from "./utils/templates";
 import { ImageEditorModal } from "./components/ImageEditorModal";
+import { exportToTwee, importFromTwee } from "./utils/twineAdapter";
+import { downloadJSON, downloadText, loadJSON, loadText } from "./utils/fileHelpers";
 import { MapMaker } from "./components/MapMaker";
 import { AISpriteModal } from "./components/AISpriteModal";
 import { AssetPickerModal } from "./components/AssetPickerModal";
 import { AssetLibraryManager } from "./components/AssetLibraryManager";
 import { get, set } from "idb-keyval";
 
+export interface SaveSlotMeta {
+  slotId: number;
+  projectName: string;
+  timestamp: string;
+  savedSceneCount: number;
+  gameFlagCount: number;
+  timeMs?: number;
+}
+
 const Accordion = ({ title, children, defaultOpen = false }: { title: string, children: React.ReactNode, defaultOpen?: boolean }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  const elementId = `accordion-${title.replace(/[^a-zA-Z0-9]/g, "-")}`;
+
+  useEffect(() => {
+    const handleOpen = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail && customEvent.detail.title === title) {
+        setIsOpen(true);
+        setTimeout(() => {
+          const el = document.getElementById(elementId);
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            el.classList.add("ring-2", "ring-emerald-500", "scale-[1.01]");
+            setTimeout(() => {
+              el.classList.remove("ring-2", "ring-emerald-500", "scale-[1.01]");
+            }, 1500);
+          }
+        }, 120);
+      }
+    };
+    window.addEventListener("open-accordion", handleOpen);
+    return () => window.removeEventListener("open-accordion", handleOpen);
+  }, [title, elementId]);
+
   return (
-    <div className="bg-neutral-900 border border-neutral-800 rounded-lg overflow-hidden shrink-0">
+    <div 
+      id={elementId} 
+      className="bg-neutral-900 border border-neutral-800 rounded-lg overflow-hidden shrink-0 transition-all duration-300"
+    >
       <button 
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center justify-between px-4 py-3 bg-neutral-800/50 hover:bg-neutral-800 transition-colors text-left"
@@ -394,6 +434,11 @@ const App: React.FC = () => {
     "saved",
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
   const [promptModal, setPromptModal] = useState<{
     isOpen: boolean;
     message: string;
@@ -420,6 +465,199 @@ const App: React.FC = () => {
   const [craftSlot1, setCraftSlot1] = useState<string | null>(null);
   const [craftSlot2, setCraftSlot2] = useState<string | null>(null);
   const [craftSlot3, setCraftSlot3] = useState<string | null>(null);
+
+  const [saveSlotsMeta, setSaveSlotsMeta] = useState<SaveSlotMeta[]>(() => {
+    try {
+      const raw = localStorage.getItem("neocities_project_slots_meta");
+      if (raw) return JSON.parse(raw);
+    } catch (e) {
+      console.error("Failed to parse slots meta", e);
+    }
+    return [];
+  });
+  const [isBackupMenuOpen, setIsBackupMenuOpen] = useState(false);
+  const [hideEditorHud, setHideEditorHud] = useState(true);
+
+  const [isResizingCanvas, setIsResizingCanvas] = useState<{
+    direction: "r" | "b" | "br";
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (editorMode === "stage") {
+      setHideEditorHud(true);
+    } else if (editorMode === "ui_stage") {
+      setHideEditorHud(false);
+    }
+  }, [editorMode]);
+
+  useEffect(() => {
+    if (!isResizingCanvas) return;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      const dx = e.clientX - isResizingCanvas.startX;
+      const dy = e.clientY - isResizingCanvas.startY;
+
+      const canvasDx = Math.round(dx / stageZoom);
+      const canvasDy = Math.round(dy / stageZoom);
+
+      let newWidth = isResizingCanvas.startWidth;
+      let newHeight = isResizingCanvas.startHeight;
+
+      if (isResizingCanvas.direction === "r" || isResizingCanvas.direction === "br") {
+        newWidth = Math.max(100, Math.min(4000, isResizingCanvas.startWidth + canvasDx));
+      }
+      if (isResizingCanvas.direction === "b" || isResizingCanvas.direction === "br") {
+        newHeight = Math.max(100, Math.min(4000, isResizingCanvas.startHeight + canvasDy));
+      }
+
+      setProject((p) => {
+        const updatedScenes = p.scenes.map((s) => {
+          if (s.id === p.currentSceneId) {
+            return { ...s, width: newWidth, height: newHeight };
+          }
+          return s;
+        });
+        return {
+          ...p,
+          globalSettings: {
+            ...p.globalSettings,
+            stageWidth: newWidth,
+            stageHeight: newHeight,
+          },
+          scenes: updatedScenes,
+        };
+      });
+    };
+
+    const handlePointerUp = () => {
+      setIsResizingCanvas(null);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isResizingCanvas, stageZoom]);
+
+  const handleSaveToSlot = async (slotId: number) => {
+    try {
+      setSaveStatus("saving");
+      const strippedProject = {
+        ...project,
+        prefabs: (project.prefabs || []).map((o) => {
+          if (
+            o.src &&
+            o.src.startsWith("data:") &&
+            project.assets.some((a) => a.src === o.src)
+          ) {
+            const asset = project.assets.find((a) => a.src === o.src);
+            return { ...o, src: "", _assetId: asset?.id };
+          }
+          return o;
+        }),
+        scenes: project.scenes.map((s) => ({
+          ...s,
+          objects: s.objects.map((o) => {
+            if (
+              o.src &&
+              o.src.startsWith("data:") &&
+              project.assets.some((a) => a.src === o.src)
+            ) {
+              const asset = project.assets.find((a) => a.src === o.src);
+              return { ...o, src: "", _assetId: asset?.id };
+            }
+            return o;
+          }),
+        })),
+        uiMenus: project.uiMenus
+          ? project.uiMenus.map((m) => ({
+              ...m,
+              objects: m.objects.map((o) => {
+                if (
+                  o.src &&
+                  o.src.startsWith("data:") &&
+                  project.assets.some((a) => a.src === o.src)
+                ) {
+                  const asset = project.assets.find((a) => a.src === o.src);
+                  return { ...o, src: "", _assetId: asset?.id };
+                }
+                return o;
+              }),
+            }))
+          : [],
+      };
+
+      await set(`neocities_project_slot_${slotId}`, strippedProject);
+
+      const timestamp = new Date().toLocaleString();
+      const newMeta: SaveSlotMeta = {
+        slotId,
+        projectName: project.name || "Untitled Game",
+        timestamp,
+        savedSceneCount: project.scenes?.length || 0,
+        gameFlagCount: project.gameFlags?.length || 0,
+        timeMs: Date.now(),
+      };
+
+      setSaveSlotsMeta((prev) => {
+        const updated = prev.filter((s) => s.slotId !== slotId);
+        updated.push(newMeta);
+        updated.sort((a, b) => a.slotId - b.slotId);
+        localStorage.setItem("neocities_project_slots_meta", JSON.stringify(updated));
+        return updated;
+      });
+
+      setSaveStatus("saved");
+      showError(`Saved project version to Slot ${slotId}!`);
+    } catch (err) {
+      console.error("Failed to save to slot", err);
+      setSaveStatus("error");
+      showError(`Failed to save to Slot ${slotId}.`);
+    }
+  };
+
+  const handleLoadFromSlot = async (slotId: number) => {
+    try {
+      const saved = await get(`neocities_project_slot_${slotId}`);
+      if (saved) {
+        setProject((prev) => ({
+          ...prev,
+          ...hydrateProject(saved),
+          globalSettings: {
+            ...prev.globalSettings,
+            ...(saved.globalSettings || {}),
+          },
+        }));
+        setHistory({ past: [], future: [] });
+        showError(`Restored Slot ${slotId} project version successfully!`);
+      } else {
+        showError(`No saved project version found in Slot ${slotId}.`);
+      }
+    } catch (err) {
+      console.error("Failed to load from slot", err);
+      showError(`Failed to load project from Slot ${slotId}.`);
+    }
+  };
+
+  const handleDeleteSlot = async (slotId: number) => {
+    try {
+      setSaveSlotsMeta((prev) => {
+        const updated = prev.filter((s) => s.slotId !== slotId);
+        localStorage.setItem("neocities_project_slots_meta", JSON.stringify(updated));
+        return updated;
+      });
+      showError(`Reset Slot ${slotId} version backup info.`);
+    } catch (err) {
+      console.error("Failed to delete slot info", err);
+    }
+  };
 
   const showError = (msg: string) => {
     setEditorError(msg);
@@ -455,6 +693,13 @@ const App: React.FC = () => {
     const assets = parsed.assets || [];
     return {
       ...parsed,
+      prefabs: (parsed.prefabs || []).map((o: any) => {
+        if (o._assetId) {
+          const asset = assets.find((a: any) => a.id === o._assetId);
+          if (asset) return { ...o, src: asset.src };
+        }
+        return o;
+      }),
       dialogueTrees: parsed.dialogueTrees
         ? parsed.dialogueTrees.map((t: any) => ({
             ...t,
@@ -471,9 +716,8 @@ const App: React.FC = () => {
       scenes: parsed.scenes
         ? parsed.scenes.map((s: any) => ({
             ...s,
-            objects: s.objects.map((o: any) => {
-              // Hydrate missing srcs from assets
-              if (!o.src && o._assetId) {
+            objects: (s.objects || []).map((o: any) => {
+              if (o._assetId) {
                 const asset = assets.find((a: any) => a.id === o._assetId);
                 if (asset) return { ...o, src: asset.src };
               }
@@ -484,8 +728,8 @@ const App: React.FC = () => {
       uiMenus: parsed.uiMenus
         ? parsed.uiMenus.map((s: any) => ({
             ...s,
-            objects: s.objects.map((o: any) => {
-              if (!o.src && o._assetId) {
+            objects: (s.objects || []).map((o: any) => {
+              if (o._assetId) {
                 const asset = assets.find((a: any) => a.id === o._assetId);
                 if (asset) return { ...o, src: asset.src };
               }
@@ -537,6 +781,17 @@ const App: React.FC = () => {
         // Strip out duplicated large base64 strings before saving
         const strippedProject = {
           ...project,
+          prefabs: (project.prefabs || []).map((o) => {
+            if (
+              o.src &&
+              o.src.startsWith("data:") &&
+              project.assets.some((a) => a.src === o.src)
+            ) {
+              const asset = project.assets.find((a) => a.src === o.src);
+              return { ...o, src: "", _assetId: asset?.id };
+            }
+            return o;
+          }),
           scenes: project.scenes.map((s) => ({
             ...s,
             objects: s.objects.map((o) => {
@@ -586,6 +841,17 @@ const App: React.FC = () => {
     try {
       const strippedProject = {
         ...project,
+        prefabs: (project.prefabs || []).map((o) => {
+          if (
+            o.src &&
+            o.src.startsWith("data:") &&
+            project.assets.some((a) => a.src === o.src)
+          ) {
+            const asset = project.assets.find((a) => a.src === o.src);
+            return { ...o, src: "", _assetId: asset?.id };
+          }
+          return o;
+        }),
         scenes: project.scenes.map((s) => ({
           ...s,
           objects: s.objects.map((o) => {
@@ -1002,6 +1268,7 @@ const App: React.FC = () => {
       id: uuidv4(),
       name: asset.name,
       src: actualSrc,
+      _assetId: asset.id,
       x: (project.globalSettings.stageWidth || 800) / 2 - 50,
       y: (project.globalSettings.stageHeight || 600) / 2 - 50,
       width:
@@ -1173,7 +1440,7 @@ const App: React.FC = () => {
               name: "NPC Trigger",
             };
             showError(
-              'NPC dropped! Select it and assign a "Dialogue Tree" in the Interaction settings.',
+              'NPC dropped! Select it and assign a "Conversation" in the Interaction settings.',
             );
           }
         }
@@ -1190,6 +1457,7 @@ const App: React.FC = () => {
           id: uuidv4(),
           name: asset.name,
           src: actualSrc,
+          _assetId: asset.id,
           x: x - 50, // Center roughly
           y: y - 50,
           width:
@@ -2579,6 +2847,32 @@ const App: React.FC = () => {
           </button>
         </div>
       )}
+      {confirmDialog?.isOpen && (
+        <div className="fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center">
+          <div className="bg-neutral-800 p-6 rounded-lg shadow-xl border border-neutral-700 w-80">
+            <h3 className="text-lg font-medium text-white mb-6 text-center">
+              {confirmDialog.message}
+            </h3>
+            <div className="flex justify-center gap-2">
+              <button
+                onClick={() => setConfirmDialog(null)}
+                className="px-4 py-2 text-sm text-neutral-400 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  confirmDialog.onConfirm();
+                  setConfirmDialog(null);
+                }}
+                className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {promptModal?.isOpen && (
         <div className="fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center">
           <div className="bg-neutral-800 p-6 rounded-lg shadow-xl border border-neutral-700 w-80">
@@ -2625,7 +2919,7 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-      <header className="flex items-center justify-between gap-4 px-4 py-2 bg-neutral-950 border-b border-neutral-800 relative z-[2100] custom-scrollbar overflow-x-auto min-h-[50px] shrink-0">
+      <header className="flex items-center justify-between gap-4 px-4 py-2 bg-neutral-950 border-b border-neutral-800 relative z-[2100] custom-scrollbar min-h-[50px] shrink-0">
         <div className="flex items-center gap-3 shrink-0">
           <h1 className="text-base font-bold text-emerald-400 hidden lg:block">
             NGB
@@ -2657,7 +2951,7 @@ const App: React.FC = () => {
                   editorMode === "assets" ? "opacity-100" : "opacity-70"
                 }
               />{" "}
-              Files
+              Media Files
             </button>
 
             <div className="w-px h-5 bg-neutral-700/50 mx-1"></div>
@@ -2672,7 +2966,7 @@ const App: React.FC = () => {
                   editorMode === "stage" ? "opacity-100" : "opacity-70"
                 }
               />{" "}
-              Stage
+              Visual Editor
             </button>
             <button
               onClick={() => setEditorMode("scenes")}
@@ -2684,7 +2978,7 @@ const App: React.FC = () => {
                   editorMode === "scenes" ? "opacity-100" : "opacity-70"
                 }
               />{" "}
-              Scenes
+              Rooms & Areas
             </button>
             <button
               onClick={() => setEditorMode("map_maker")}
@@ -2708,7 +3002,7 @@ const App: React.FC = () => {
                   editorMode === "ui_maker" ? "opacity-100" : "opacity-70"
                 }
               />{" "}
-              UI
+              Menus & UI
             </button>
             {editorMode === "ui_stage" && (
               <button
@@ -2731,7 +3025,7 @@ const App: React.FC = () => {
                   editorMode === "dialogue" ? "opacity-100" : "opacity-70"
                 }
               />{" "}
-              Dialogue
+              Story & Text
             </button>
             <button
               onClick={() => setEditorMode("items")}
@@ -2743,7 +3037,7 @@ const App: React.FC = () => {
                   editorMode === "items" ? "opacity-100" : "opacity-70"
                 }
               />{" "}
-              Items
+              Player Items
             </button>
             <button
               onClick={() => setEditorMode("rpg_systems")}
@@ -2755,7 +3049,7 @@ const App: React.FC = () => {
                   editorMode === "rpg_systems" ? "opacity-100" : "opacity-70"
                 }
               />{" "}
-              RPG Config
+              Game Rules
             </button>
           </div>
         </div>
@@ -2832,34 +3126,291 @@ const App: React.FC = () => {
               className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950"
             />
             <LabelWithHelp
-              label="Ghosts"
+              label="Show Helpers"
               className="text-neutral-400"
-              helpText="Show outlines of invisible objects and hitboxes."
+              helpText="Show outlines of invisible objects and hidden click targets."
             />
           </div>
 
           {/* Backup / Restore Controls */}
-          <div className="flex items-center gap-1 mr-2">
+          <div className="relative">
             <button
-              onClick={handleExportProject}
-              className="flex items-center gap-1 px-2 py-1.5 bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 rounded text-sm transition-colors"
-              title="Backup Project (JSON)"
+              onClick={() => setIsBackupMenuOpen((prev) => !prev)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 border border-neutral-700/85 hover:bg-neutral-800 rounded-lg text-xs font-bold transition-all shadow-sm text-neutral-200 active:scale-95"
+              title="Backup, restore, or manage version slots"
             >
-              <Save size={14} /> Backup
+              <Save size={13} className="text-emerald-500" />
+              Backup / Restore
+              <ChevronDown size={11} className={`transition-transform duration-200 ${isBackupMenuOpen ? 'rotate-180' : ''}`} />
             </button>
-            <label
-              className="flex items-center gap-1 px-2 py-1.5 bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 rounded text-sm transition-colors cursor-pointer"
-              title="Restore Project (JSON or HTML)"
-            >
-              <Upload size={14} /> Restore
-              <input
-                type="file"
-                accept=".json,.html"
-                className="hidden"
-                ref={fileInputRef}
-                onChange={handleImportProject}
-              />
-            </label>
+
+            {isBackupMenuOpen && (
+              <>
+                <div 
+                  className="fixed inset-0 z-[2999]" 
+                  onClick={() => setIsBackupMenuOpen(false)} 
+                />
+                <div className="absolute right-0 mt-2 w-[410px] max-h-[85vh] overflow-y-auto custom-scrollbar bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-[3000] p-4 flex flex-col gap-4 text-xs select-none">
+                  <div className="flex items-center justify-between pb-2 border-b border-neutral-800/60">
+                    <div className="flex items-center gap-1.5">
+                      <History size={14} className="text-emerald-500 animate-pulse" />
+                      <span className="font-bold text-neutral-200 uppercase tracking-wider text-[10px]">Project Version Control</span>
+                    </div>
+                    <button 
+                      onClick={() => setIsBackupMenuOpen(false)}
+                      className="text-neutral-500 hover:text-neutral-300"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+
+                  {/* Visual Save Timeline Sequence */}
+                  {(() => {
+                    const getSlotTime = (m: SaveSlotMeta) => {
+                      if (m.timeMs) return m.timeMs;
+                      try {
+                        return new Date(m.timestamp).getTime();
+                      } catch (e) {
+                        return 0;
+                      }
+                    };
+                    const occupiedSlots = [...saveSlotsMeta]
+                      .filter((s) => s.projectName)
+                      .sort((a, b) => getSlotTime(a) - getSlotTime(b)); // oldest first to newest last
+
+                    const latestSlotMeta = occupiedSlots.length > 0 ? occupiedSlots[occupiedSlots.length - 1] : null;
+
+                    return (
+                      <div className="flex flex-col gap-2.5 p-3 bg-neutral-900/45 border border-neutral-850 rounded-xl">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-neutral-400 uppercase tracking-wider text-[9px] flex items-center gap-1">
+                            <History size={10} className="text-emerald-400" /> Save Chronology Track
+                          </span>
+                          {occupiedSlots.length > 0 && (
+                            <span className="text-[9px] font-bold text-emerald-400 flex items-center gap-1.5 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-mono">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                              Latest Slot: #{latestSlotMeta?.slotId}
+                            </span>
+                          )}
+                        </div>
+
+                        {occupiedSlots.length === 0 ? (
+                          <div className="text-[10px] text-neutral-500 italic text-center py-2.5">
+                            No checkpoint backups on the timeline yet.<br />Save a slot below to begin tracking versions!
+                          </div>
+                        ) : (
+                          <div className="relative pt-4 pb-2">
+                            {/* Horizontal timeline bar */}
+                            <div className="absolute top-[26px] left-3 right-3 h-[2px] bg-neutral-800 z-0" />
+                            
+                            {/* Connected Nodes */}
+                            <div className="relative z-10 flex items-center justify-between px-1.5">
+                              {occupiedSlots.map((m, idx) => {
+                                const isLatest = latestSlotMeta && m.slotId === latestSlotMeta.slotId;
+                                const isOldest = idx === 0 && occupiedSlots.length > 1;
+                                return (
+                                  <div 
+                                    key={m.slotId} 
+                                    className="flex flex-col items-center group relative cursor-pointer"
+                                    onClick={() => {
+                                      setConfirmDialog({
+                                        isOpen: true,
+                                        message: `Load and restore your project state from Slot ${m.slotId} (${m.projectName})?`,
+                                        onConfirm: () => {
+                                          handleLoadFromSlot(m.slotId);
+                                          setIsBackupMenuOpen(false);
+                                        }
+                                      });
+                                    }}
+                                  >
+                                    {/* Tooltip on hover */}
+                                    <div className="absolute bottom-[36px] opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 bg-neutral-950 border border-neutral-800 text-[10px] text-neutral-300 p-2.5 rounded-lg shadow-2xl w-48 -translate-x-1/2 left-1/2 z-[4000] flex flex-col gap-1 text-center">
+                                      <div className="flex items-center justify-between font-bold border-b border-neutral-900 pb-1 mb-1 font-mono text-[9px]">
+                                        <span className="text-emerald-400">Slot {m.slotId}</span>
+                                        {isLatest && <span className="text-emerald-400 text-[8px] tracking-wider uppercase">LATEST VERSION</span>}
+                                        {isOldest && <span className="text-indigo-400 text-[8px] tracking-wider uppercase">OLDEST</span>}
+                                      </div>
+                                      <div className="font-semibold truncate text-neutral-200 text-xs">{m.projectName}</div>
+                                      <div className="text-[9px] text-neutral-400 font-mono flex items-center justify-center gap-1 mt-0.5">
+                                        <Clock size={8} /> {m.timestamp}
+                                      </div>
+                                      <div className="text-[9px] text-neutral-500 font-bold">
+                                        {m.savedSceneCount} scenes • {m.gameFlagCount} flags
+                                      </div>
+                                      <div className="text-[9px] text-emerald-400 font-bold mt-1.5 border-t border-neutral-900/60 pt-1 flex items-center justify-center gap-1">
+                                        <Upload size={10} /> Click to Restore version
+                                      </div>
+                                    </div>
+
+                                    {/* Node Bubble */}
+                                    <div 
+                                      className={`w-7 h-7 rounded-full flex items-center justify-center font-bold font-mono text-xs ring-4 transition-all hover:scale-110 active:scale-95 ${
+                                        isLatest 
+                                          ? "bg-emerald-500/20 text-emerald-400 ring-emerald-500/15 border border-emerald-400" 
+                                          : isOldest
+                                            ? "bg-indigo-950/20 text-indigo-450 ring-indigo-500/10 border border-indigo-500/60 hover:border-indigo-400"
+                                            : "bg-neutral-900 text-neutral-350 ring-neutral-950/40 border border-neutral-700 hover:border-neutral-500"
+                                      }`}
+                                      title={`Slot ${m.slotId}: ${m.projectName} (${m.timestamp})`}
+                                    >
+                                      {m.slotId}
+                                    </div>
+
+                                    {/* Tag label under node */}
+                                    <span className={`text-[9px] mt-1.5 font-bold font-mono tracking-tight ${
+                                      isLatest ? "text-emerald-400" : isOldest ? "text-indigo-400" : "text-neutral-500 font-medium"
+                                    }`}>
+                                      {isLatest ? "Latest" : isOldest ? "Oldest" : `#${m.slotId}`}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Standard File Backup / Restore */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => {
+                        handleExportProject();
+                        setIsBackupMenuOpen(false);
+                      }}
+                      className="flex items-center justify-center gap-1.5 py-2 bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 hover:border-neutral-700 text-neutral-200 hover:text-white rounded-lg transition-all active:scale-95 text-center font-semibold animate-none"
+                      title="Download project version to your computer as a JSON file"
+                    >
+                      <Download size={13} className="text-indigo-400" /> Download File
+                    </button>
+                    <label
+                      className="flex items-center justify-center gap-1.5 py-2 bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 hover:border-neutral-700 text-neutral-200 hover:text-white rounded-lg transition-all active:scale-95 cursor-pointer text-center font-semibold"
+                      title="Upload a previously exported JSON backup from your computer"
+                    >
+                      <Upload size={13} className="text-indigo-400" /> Upload File
+                      <input
+                        type="file"
+                        accept=".json,.html"
+                        className="hidden"
+                        ref={fileInputRef}
+                        onChange={(e) => {
+                          handleImportProject(e);
+                          setIsBackupMenuOpen(false);
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="h-px bg-neutral-800/60" />
+
+                  {/* Local Storage Save Slots */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold text-neutral-450 uppercase tracking-wider text-[9px]">
+                        Database Save Slots (Instant & Clean)
+                      </span>
+                      <span className="text-[8px] font-bold text-neutral-500 uppercase tracking-tight">Max 5 slots</span>
+                    </div>
+                    
+                    {[1, 2, 3, 4, 5].map((slotId) => {
+                      const meta = saveSlotsMeta.find((s) => s.slotId === slotId);
+                      
+                      // Highlight slot item if it's the latest save in the timeline
+                      const occupiedSlotsCopy = [...saveSlotsMeta]
+                        .filter((s) => s.projectName)
+                        .sort((a, b) => {
+                          const ta = a.timeMs || 0;
+                          const tb = b.timeMs || 0;
+                          return ta - tb;
+                        });
+                      const latestSlotId = occupiedSlotsCopy.length > 0 ? occupiedSlotsCopy[occupiedSlotsCopy.length - 1].slotId : null;
+                      const isLatest = meta && meta.slotId === latestSlotId;
+
+                      return (
+                        <div 
+                          key={slotId} 
+                          className={`flex items-center justify-between p-2.5 rounded-xl transition-all border gap-3 ${
+                            isLatest 
+                              ? "bg-emerald-950/10 border-emerald-500/20 hover:bg-emerald-950/15" 
+                              : "bg-neutral-900/60 border-neutral-850 hover:bg-neutral-900 hover:border-neutral-800"
+                          }`}
+                        >
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 font-sans">
+                              <span className={`w-4 h-4 rounded font-bold font-mono text-[9px] flex items-center justify-center ${
+                                isLatest ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/20" : "bg-neutral-850 text-neutral-400 border border-neutral-800"
+                              }`}>
+                                {slotId}
+                              </span>
+                              <span className="font-bold text-neutral-200 truncate max-w-[170px]" title={meta?.projectName}>
+                                {meta ? meta.projectName : "Empty Local Slot"}
+                              </span>
+                              {isLatest && (
+                                <span className="text-[8px] font-extrabold text-emerald-400 uppercase tracking-wider bg-emerald-500/10 px-1 py-0.5 rounded-md shrink-0">
+                                  Latest
+                                </span>
+                              )}
+                            </div>
+                            {meta ? (
+                              <div className="text-[10px] text-neutral-400 mt-1 font-medium font-mono flex flex-col gap-0.5">
+                                <span className="flex items-center gap-1"><Clock size={9} className="text-neutral-500" /> {meta.timestamp}</span>
+                                <span className="text-[9px] text-neutral-500 font-bold ml-3.5">
+                                  {meta.savedSceneCount} scene(s) • {meta.gameFlagCount} flag(s)
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-neutral-500 italic mt-0.5 ml-5">
+                                Ready for quick checkpoint save
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            {/* Save here button */}
+                            <button
+                              onClick={() => handleSaveToSlot(slotId)}
+                              className={`p-1 px-2 rounded-lg border transition-all font-bold text-[10px] active:scale-95 ${
+                                isLatest
+                                  ? "bg-neutral-900 hover:bg-emerald-500/25 text-emerald-400 border-neutral-850 hover:border-emerald-500/30"
+                                  : "bg-neutral-800 hover:bg-neutral-700 text-neutral-350 border-neutral-700/60"
+                              }`}
+                              title={`Save current project and overrides to Slot ${slotId}`}
+                            >
+                              Save
+                            </button>
+                            
+                            {meta && (
+                              <>
+                                {/* Load button */}
+                                <button
+                                  onClick={() => {
+                                    handleLoadFromSlot(slotId);
+                                    setIsBackupMenuOpen(false);
+                                  }}
+                                  className="p-1 px-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-all font-bold text-[10px] active:scale-95"
+                                  title={`Load and restore the project version from Slot ${slotId}`}
+                                >
+                                  Load
+                                </button>
+                                {/* Clear/Delete button */}
+                                <button
+                                  onClick={() => handleDeleteSlot(slotId)}
+                                  className="p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-850 rounded-lg transition-all"
+                                  title={`Clear Slot ${slotId}`}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           <button
@@ -3440,67 +3991,6 @@ const App: React.FC = () => {
                           <span className="text-sm font-medium text-indigo-200 uppercase">
                             Text
                           </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {editorMode === "stage" && (
-                      <div className="mb-4">
-                        <div className="text-sm font-bold text-neutral-500 uppercase tracking-wider mb-2">
-                          Smart Prefabs
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div
-                            draggable
-                            onDragStart={(e) =>
-                              handleDragStartAsset(e, {
-                                type: "prefab",
-                                prefabType: "chest",
-                                name: "Loot Chest",
-                              })
-                            }
-                            className="p-2 border border-dashed border-amber-500/50 bg-amber-500/10 rounded-lg cursor-grab hover:bg-amber-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                          >
-                            <Package size={16} className="text-amber-400" />
-                            <span className="text-sm font-medium text-amber-200 uppercase truncate w-full text-center">
-                              Chest
-                            </span>
-                          </div>
-                          <div
-                            draggable
-                            onDragStart={(e) =>
-                              handleDragStartAsset(e, {
-                                type: "prefab",
-                                prefabType: "door",
-                                name: "Door / Portal",
-                              })
-                            }
-                            className="p-2 border border-dashed border-blue-500/50 bg-blue-500/10 rounded-lg cursor-grab hover:bg-blue-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                          >
-                            <LogIn size={16} className="text-blue-400" />
-                            <span className="text-sm font-medium text-blue-200 uppercase truncate w-full text-center">
-                              Portal
-                            </span>
-                          </div>
-                          <div
-                            draggable
-                            onDragStart={(e) =>
-                              handleDragStartAsset(e, {
-                                type: "prefab",
-                                prefabType: "npc",
-                                name: "NPC",
-                              })
-                            }
-                            className="p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                          >
-                            <MessageSquare
-                              size={16}
-                              className="text-emerald-400"
-                            />
-                            <span className="text-sm font-medium text-emerald-200 uppercase truncate w-full text-center">
-                              NPC
-                            </span>
-                          </div>
                         </div>
                       </div>
                     )}
@@ -4107,6 +4597,19 @@ const App: React.FC = () => {
                         <ChevronDown size={14} />
                       </div>
                     </div>
+
+                    <button
+                      onClick={() => setHideEditorHud(!hideEditorHud)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md transition-all border ${
+                        hideEditorHud
+                          ? "bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 font-bold"
+                          : "bg-neutral-800 text-neutral-300 border-neutral-700 hover:text-white hover:bg-neutral-700"
+                      }`}
+                      title={hideEditorHud ? "Show HUD Menus in Editor" : "Hide HUD Menus in Editor"}
+                    >
+                      {hideEditorHud ? <EyeOff size={14} /> : <Eye size={14} />}
+                      <span>{hideEditorHud ? "HUD: Hidden" : "HUD: Visible"}</span>
+                    </button>
                   </div>
                 )}
 
@@ -4473,10 +4976,10 @@ const App: React.FC = () => {
                               style={{
                                 ...animStyle,
                                 filter: filterStr || undefined,
-                                left: renderX,
-                                top: renderY,
-                                width: obj.width,
-                                height: obj.height,
+                                left: obj.stretchToScreen ? 0 : renderX,
+                                top: obj.stretchToScreen ? 0 : renderY,
+                                width: obj.stretchToScreen ? "100%" : obj.width,
+                                height: obj.stretchToScreen ? "100%" : obj.height,
                                 zIndex: obj.zIndex,
                                 opacity: obj.hidden
                                   ? (isPlaying ? 0 : 0.2)
@@ -4909,7 +5412,7 @@ const App: React.FC = () => {
                                 (obj.isVideo ? (
                                   <video
                                     src={obj.src || undefined}
-                                    className="w-full h-full object-fill pointer-events-none"
+                                    className={`w-full h-full pointer-events-none ${obj.objectFit === "contain" ? "object-contain" : obj.objectFit === "cover" ? "object-cover" : "object-fill"}`}
                                     autoPlay
                                     loop
                                     muted={!isPlaying}
@@ -4922,7 +5425,7 @@ const App: React.FC = () => {
                                   <img
                                     src={obj.src || undefined}
                                     alt={obj.name}
-                                    className="w-full h-full object-fill pointer-events-none"
+                                    className={`w-full h-full pointer-events-none ${obj.objectFit === "contain" ? "object-contain" : obj.objectFit === "cover" ? "object-cover" : "object-fill"}`}
                                     draggable={false}
                                     style={{
                                       transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
@@ -5224,10 +5727,10 @@ const App: React.FC = () => {
                                 style={{
                                   ...animStyle,
                                   filter: filterStr || undefined,
-                                  left: renderX,
-                                  top: renderY,
-                                  width: obj.width,
-                                  height: obj.height,
+                                  left: obj.stretchToScreen ? 0 : renderX,
+                                  top: obj.stretchToScreen ? 0 : renderY,
+                                  width: obj.stretchToScreen ? "100%" : obj.width,
+                                  height: obj.stretchToScreen ? "100%" : obj.height,
                                   zIndex: obj.zIndex,
                                   opacity: obj.hidden
                                     ? (isPlaying ? 0 : 0.2)
@@ -5579,7 +6082,7 @@ const App: React.FC = () => {
                                   (obj.isVideo ? (
                                     <video
                                       src={obj.src || undefined}
-                                      className="w-full h-full object-fill pointer-events-none"
+                                      className={`w-full h-full pointer-events-none ${obj.objectFit === "contain" ? "object-contain" : obj.objectFit === "cover" ? "object-cover" : "object-fill"}`}
                                       autoPlay
                                       loop
                                       muted={!isPlaying}
@@ -5592,7 +6095,7 @@ const App: React.FC = () => {
                                     <img
                                       src={obj.src || undefined}
                                       alt={obj.name}
-                                      className="w-full h-full object-fill pointer-events-none"
+                                      className={`w-full h-full pointer-events-none ${obj.objectFit === "contain" ? "object-contain" : obj.objectFit === "cover" ? "object-cover" : "object-fill"}`}
                                       draggable={false}
                                       style={{
                                         transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
@@ -5784,6 +6287,9 @@ const App: React.FC = () => {
                     if (dPos === "center")
                       posClass =
                         "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2";
+                    if (dPos === "below")
+                      posClass = "top-full mt-4 !left-0 !w-full !translate-x-0 !max-w-none";
+
                     return (
                       <div
                         onClick={() => setPreviewDialogue(null)}
@@ -5809,6 +6315,23 @@ const App: React.FC = () => {
                     );
                   })()}
 
+                {/* HUD Overlay Preview */}
+                {(isPlaying || editorMode === "ui_stage" || editorMode === "code") && project.globalSettings.hudOverlay?.assetId && (
+                  <div 
+                    className="absolute inset-0 pointer-events-none z-[8500]"
+                    style={{
+                      backgroundImage: `url('${project.assets.find(a => a.id === project.globalSettings.hudOverlay?.assetId)?.src}')`,
+                      backgroundSize: project.globalSettings.hudOverlay.position === "stretch" ? "100% 100%" : (project.globalSettings.hudOverlay.position ? "contain" : "100% 100%"),
+                      backgroundPosition: (project.globalSettings.hudOverlay.position && project.globalSettings.hudOverlay.position !== "stretch") ? project.globalSettings.hudOverlay.position.replace("-", " ") : "center",
+                      backgroundRepeat: "no-repeat",
+                      transform: `scale(${project.globalSettings.hudOverlay.scale ?? 1}) translate(${project.globalSettings.hudOverlay.offsetX || 0}px, ${project.globalSettings.hudOverlay.offsetY || 0}px)`,
+                      mixBlendMode: (project.globalSettings.hudOverlay.blendMode || "normal") as any,
+                      opacity: project.globalSettings.hudOverlay.opacity ?? 1,
+                      pointerEvents: project.globalSettings.hudOverlay.pointerEvents === "auto" ? "auto" : "none"
+                    }}
+                  />
+                )}
+
                 {transition.active && (
                   <div className="absolute inset-0 z-[1500] bg-black pointer-events-none animate-[fadeTransition_1s_ease-in-out]" />
                 )}
@@ -5833,6 +6356,8 @@ const App: React.FC = () => {
                     if (dPos === "center")
                       posClass =
                         "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2";
+                    if (dPos === "below")
+                      posClass = "top-full mt-4 !left-0 !w-full !translate-x-0 !max-w-none";
 
                     const speakerAsset = node.speakerAssetId
                       ? project.assets.find((a) => a.id === node.speakerAssetId)
@@ -5840,7 +6365,7 @@ const App: React.FC = () => {
 
                     return (
                       <div
-                        className={`absolute ${posClass} w-11/12 max-w-2xl max-h-[90%] text-neutral-100 z-[9000] shadow-2xl flex flex-col overflow-hidden backdrop-blur-md filter drop-shadow-2xl dialogue-box`}
+                        className={`absolute ${posClass} w-11/12 max-w-2xl max-h-[90%] shrink-0 text-neutral-100 z-[9000] shadow-2xl flex flex-col overflow-hidden backdrop-blur-md filter drop-shadow-2xl dialogue-box`}
                         style={{
                           backgroundColor: `${uiBg}ee`,
                           border: `2px solid ${uiPrimary}80`,
@@ -5859,7 +6384,7 @@ const App: React.FC = () => {
                         >
                           {node.speaker || "Unknown"}
                         </div>
-                        <div className="flex p-6 max-h-[40vh] overflow-y-auto custom-scrollbar dialogue-content">
+                        <div className="flex shrink-0 p-6 max-h-[40vh] overflow-y-auto custom-scrollbar dialogue-content">
                           {speakerAsset &&
                             (!node.portraitPosition ||
                               node.portraitPosition === "left") && (
@@ -6115,9 +6640,21 @@ const App: React.FC = () => {
                   !["dialogue", "items", "scenes"].includes(editorMode)) && (
                   <>
                     {/* Needs Tracker */}
-                    {project.globalSettings.enableNeeds && (
+                    {project.globalSettings.enableNeeds && (!hideEditorHud || isPlaying) && (
                       <div
-                        className="absolute top-4 right-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2"
+                        onClick={() => {
+                          if (!isPlaying) {
+                            setSelectedObjectId(null);
+                            setSelectedMultiIds([]);
+                            setRightSidebarTab("properties");
+                            window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Gameplay Settings" } }));
+                          }
+                        }}
+                        className={`absolute top-4 right-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2 transition-all ${
+                          !isPlaying 
+                            ? "cursor-pointer hover:ring-2 hover:ring-emerald-400 group/needs select-none" 
+                            : ""
+                        }`}
                         style={{
                           backgroundColor: `${uiBg}cc`,
                           border: `1px solid ${uiPrimary}80`,
@@ -6185,15 +6722,32 @@ const App: React.FC = () => {
                             </span>
                           </div>
                         )}
+                        {!isPlaying && (
+                          <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-emerald-500 text-neutral-950 font-bold scale-0 group-hover/needs:scale-100 transition-all text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded shadow-lg whitespace-nowrap z-50 pointer-events-none flex items-center gap-1">
+                            <span>✏️ Click to Edit</span>
+                          </div>
+                        )}
                       </div>
                     )}
-
+ 
                     {/* Skills Tracker */}
-                    {project.globalSettings.enableTTRPGStats && (
+                    {project.globalSettings.enableTTRPGStats && (!hideEditorHud || isPlaying) && (
                       <div
-                        className="absolute top-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2"
+                        onClick={() => {
+                          if (!isPlaying) {
+                            setSelectedObjectId(null);
+                            setSelectedMultiIds([]);
+                            setRightSidebarTab("properties");
+                            window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Gameplay Settings" } }));
+                          }
+                        }}
+                        className={`absolute top-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2 transition-all ${
+                          !isPlaying 
+                            ? "cursor-pointer hover:ring-2 hover:ring-emerald-400 group/skills select-none" 
+                            : ""
+                        }`}
                         style={{
-                          right: project.globalSettings.enableNeeds
+                          right: project.globalSettings.enableNeeds && (!hideEditorHud || isPlaying)
                             ? "180px"
                             : "16px",
                           backgroundColor: `${uiBg}cc`,
@@ -6238,208 +6792,237 @@ const App: React.FC = () => {
                             </div>
                           </div>
                         ))}
+                        {!isPlaying && (
+                          <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-emerald-500 text-neutral-950 font-bold scale-0 group-hover/skills:scale-100 transition-all text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded shadow-lg whitespace-nowrap z-50 pointer-events-none flex items-center gap-1">
+                            <span>✏️ Click to Edit</span>
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {/* HUD Button Bar */}
-                    <div className="absolute bottom-4 right-4 flex items-end gap-2 z-[2000]">
-                      {project.globalSettings.enableSettingsHud &&
-                        !project.globalSettings.hideDefaultSettingsBtn && (
-                          <button
-                            onClick={() =>
-                              isPlaying
-                                ? setIsSettingsOpen(!isSettingsOpen)
-                                : null
-                            }
-                            className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying && "opacity-50 hover:scale-100 cursor-not-allowed"}`}
-                            style={{
-                              backgroundColor: `${uiBg}ee`,
-                              borderColor: uiPrimary,
-                              borderRadius: uiRadius,
-                              color: uiPrimary,
-                            }}
-                          >
-                            <Settings size={20} />
-                            <span className="absolute -top-8 bg-black/80 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                              Settings
-                            </span>
-                          </button>
-                        )}
-                      {project.globalSettings.enableRelationshipsHud &&
-                        !project.globalSettings.hideDefaultRelationshipsBtn && (
-                          <button
-                            onClick={() =>
-                              isPlaying
-                                ? setIsRelationshipsOpen(!isRelationshipsOpen)
-                                : null
-                            }
-                            className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying && "opacity-50 hover:scale-100 cursor-not-allowed"}`}
-                            style={{
-                              backgroundColor: `${uiBg}ee`,
-                              borderColor: uiPrimary,
-                              borderRadius: uiRadius,
-                              color: uiPrimary,
-                            }}
-                          >
-                            <Users size={20} />
-                            <span className="absolute -top-8 bg-black/80 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                              Relationships
-                            </span>
-                          </button>
-                        )}
-                      {project.globalSettings.enableAlmanacHud &&
-                        !project.globalSettings.hideDefaultAlmanacBtn && (
-                          <button
-                            onClick={() =>
-                              isPlaying
-                                ? setIsAlmanacOpen(!isAlmanacOpen)
-                                : null
-                            }
-                            className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying && "opacity-50 hover:scale-100 cursor-not-allowed"}`}
-                            style={{
-                              backgroundColor: `${uiBg}ee`,
-                              borderColor: uiPrimary,
-                              borderRadius: uiRadius,
-                              color: uiPrimary,
-                            }}
-                          >
-                            <FileText size={20} />
-                            <span className="absolute -top-8 bg-black/80 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                              Almanac
-                            </span>
-                          </button>
-                        )}
-                      {project.globalSettings.enableSkillsHud &&
-                        !project.globalSettings.enableTTRPGStats &&
-                        !project.globalSettings.hideDefaultSkillsBtn && (
-                          <button
-                            onClick={() =>
-                              isPlaying
-                                ? setIsSkillsOpen(!isSkillsOpen)
-                                : setEditorMode("rpg_systems")
-                            }
-                            className="w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group"
-                            style={{
-                              backgroundColor: `${uiBg}ee`,
-                              borderColor: uiPrimary,
-                              borderRadius: uiRadius,
-                              color: uiPrimary,
-                            }}
-                          >
-                            <Zap size={20} />
-                            <span className="absolute -top-8 bg-black/80 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                              Skills
-                            </span>
-                          </button>
-                        )}
-                      {!project.globalSettings.hideDefaultQuestLogBtn && (
-                        <button
-                          onClick={() =>
-                            isPlaying
-                              ? setIsQuestLogOpen(!isQuestLogOpen)
-                              : setEditorMode("rpg_systems")
-                          }
-                          className="w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group"
-                          style={{
-                            backgroundColor: `${uiBg}ee`,
-                            borderColor: uiPrimary,
-                            borderRadius: uiRadius,
-                            color: uiPrimary,
-                          }}
-                        >
-                          <Book size={20} />
-                          <span className="absolute -top-8 bg-black/80 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                            Quests
-                          </span>
-                        </button>
-                      )}
-                      {!project.globalSettings.hideDefaultCraftingBtn && (
-                        <button
-                          onClick={() => {
-                            if (isPlaying) {
-                              setIsCraftingOpen(!isCraftingOpen);
-                            } else {
-                              setEditorMode("items");
-                              setItemsTab("crafting");
-                            }
-                          }}
-                          className="w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group"
-                          style={{
-                            backgroundColor: `${uiBg}ee`,
-                            borderColor: uiPrimary,
-                            borderRadius: uiRadius,
-                            color: uiPrimary,
-                          }}
-                        >
-                          <Hammer size={20} />
-                          <span className="absolute -top-8 bg-black/80 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                            Crafting
-                          </span>
-                        </button>
-                      )}
-                      {(project.globalSettings.enableMapHud ||
-                        (project.maps && project.maps.length > 0)) &&
-                        !project.globalSettings.hideDefaultMapBtn && (
+                    {(!hideEditorHud || isPlaying) && (
+                      <div className="absolute bottom-4 right-4 flex items-end gap-2 z-[2000]">
+                        {project.globalSettings.enableSettingsHud &&
+                          !project.globalSettings.hideDefaultSettingsBtn && (
+                            <button
+                              onClick={() => {
+                                if (isPlaying) {
+                                  setIsSettingsOpen(!isSettingsOpen);
+                                } else {
+                                  setSelectedObjectId(null);
+                                  setSelectedMultiIds([]);
+                                  setRightSidebarTab("properties");
+                                  window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "HUD & Built-in Action Buttons" } }));
+                                }
+                              }}
+                              className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
+                              style={{
+                                backgroundColor: `${uiBg}ee`,
+                                borderColor: !isPlaying ? undefined : uiPrimary,
+                                borderRadius: uiRadius,
+                                color: !isPlaying ? "#34d399" : uiPrimary,
+                              }}
+                            >
+                              <Settings size={20} />
+                              <span className="absolute -top-8 bg-black/85 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                                {isPlaying ? "Settings" : "✏️ HUD Settings Btn"}
+                              </span>
+                            </button>
+                          )}
+                        {project.globalSettings.enableRelationshipsHud &&
+                          !project.globalSettings.hideDefaultRelationshipsBtn && (
+                            <button
+                              onClick={() => {
+                                if (isPlaying) {
+                                  setIsRelationshipsOpen(!isRelationshipsOpen);
+                                } else {
+                                  setSelectedObjectId(null);
+                                  setSelectedMultiIds([]);
+                                  setRightSidebarTab("properties");
+                                  window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "HUD & Built-in Action Buttons" } }));
+                                }
+                              }}
+                              className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
+                              style={{
+                                backgroundColor: `${uiBg}ee`,
+                                borderColor: !isPlaying ? undefined : uiPrimary,
+                                borderRadius: uiRadius,
+                                color: !isPlaying ? "#34d399" : uiPrimary,
+                              }}
+                            >
+                              <Users size={20} />
+                              <span className="absolute -top-8 bg-black/85 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                                {isPlaying ? "Relationships" : "✏️ HUD Relationships Btn"}
+                              </span>
+                            </button>
+                          )}
+                        {project.globalSettings.enableAlmanacHud &&
+                          !project.globalSettings.hideDefaultAlmanacBtn && (
+                            <button
+                              onClick={() => {
+                                if (isPlaying) {
+                                  setIsAlmanacOpen(!isAlmanacOpen);
+                                } else {
+                                  setSelectedObjectId(null);
+                                  setSelectedMultiIds([]);
+                                  setRightSidebarTab("properties");
+                                  window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "HUD & Built-in Action Buttons" } }));
+                                }
+                              }}
+                              className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
+                              style={{
+                                backgroundColor: `${uiBg}ee`,
+                                borderColor: !isPlaying ? undefined : uiPrimary,
+                                borderRadius: uiRadius,
+                                color: !isPlaying ? "#34d399" : uiPrimary,
+                              }}
+                            >
+                              <FileText size={20} />
+                              <span className="absolute -top-8 bg-black/85 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                                {isPlaying ? "Almanac" : "✏️ HUD Almanac Btn"}
+                              </span>
+                            </button>
+                          )}
+                        {project.globalSettings.enableSkillsHud &&
+                          !project.globalSettings.enableTTRPGStats &&
+                          !project.globalSettings.hideDefaultSkillsBtn && (
+                            <button
+                              onClick={() => {
+                                if (isPlaying) {
+                                  setIsSkillsOpen(!isSkillsOpen);
+                                } else {
+                                  setEditorMode("rpg_systems");
+                                }
+                              }}
+                              className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
+                              style={{
+                                backgroundColor: `${uiBg}ee`,
+                                borderColor: !isPlaying ? undefined : uiPrimary,
+                                borderRadius: uiRadius,
+                                color: !isPlaying ? "#34d399" : uiPrimary,
+                              }}
+                            >
+                              <Zap size={20} />
+                              <span className="absolute -top-8 bg-black/85 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                                {isPlaying ? "Skills" : "✏️ Edit RPG Skills"}
+                              </span>
+                            </button>
+                          )}
+                        {!project.globalSettings.hideDefaultQuestLogBtn && (
                           <button
                             onClick={() => {
                               if (isPlaying) {
-                                if (project.maps && project.maps.length > 0) {
-                                  setActiveFastTravelMapId(project.maps[0].id);
-                                }
-                                setIsMapOpen(!isMapOpen);
+                                setIsQuestLogOpen(!isQuestLogOpen);
                               } else {
-                                setEditorMode("map_maker");
+                                setEditorMode("rpg_systems");
                               }
                             }}
-                            className="w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group"
+                            className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
                             style={{
                               backgroundColor: `${uiBg}ee`,
-                              borderColor: uiPrimary,
+                              borderColor: !isPlaying ? undefined : uiPrimary,
                               borderRadius: uiRadius,
-                              color: uiPrimary,
+                              color: !isPlaying ? "#34d399" : uiPrimary,
                             }}
                           >
-                            <MapIcon size={20} />
-                            <span className="absolute -top-8 bg-black/80 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                              Map
+                            <Book size={20} />
+                            <span className="absolute -top-8 bg-black/85 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                              {isPlaying ? "Quests" : "✏️ Edit RPG Quests"}
                             </span>
                           </button>
                         )}
-                      {!project.globalSettings.hideDefaultInventoryBtn && (
-                        <button
-                          onClick={() => {
-                            if (isPlaying) {
-                              setIsInventoryOpen(!isInventoryOpen);
-                            } else {
-                              setEditorMode("items");
-                              setItemsTab("items");
-                            }
-                          }}
-                          className="w-14 h-14 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group"
-                          style={{
-                            backgroundColor: `${uiBg}ee`,
-                            borderColor: uiPrimary,
-                            borderRadius: uiRadius,
-                            color: uiPrimary,
-                          }}
-                        >
-                          <div className="relative">
-                            <Backpack size={24} />
-                            {playerInventory.length > 0 && (
-                              <div
-                                className="absolute -top-2 -right-2 text-white text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full border-2"
-                                style={{
-                                  backgroundColor: uiPrimary,
-                                  borderColor: uiBg,
-                                }}
-                              >
-                                {playerInventory.length}
-                              </div>
-                            )}
-                          </div>
-                        </button>
-                      )}
-                    </div>
+                        {!project.globalSettings.hideDefaultCraftingBtn && (
+                          <button
+                            onClick={() => {
+                              if (isPlaying) {
+                                setIsCraftingOpen(!isCraftingOpen);
+                              } else {
+                                setEditorMode("items");
+                                setItemsTab("crafting");
+                              }
+                            }}
+                            className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-[1.05] active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
+                            style={{
+                              backgroundColor: `${uiBg}ee`,
+                              borderColor: !isPlaying ? undefined : uiPrimary,
+                              borderRadius: uiRadius,
+                              color: !isPlaying ? "#34d399" : uiPrimary,
+                            }}
+                          >
+                            <Hammer size={20} />
+                            <span className="absolute -top-8 bg-black/85 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                              {isPlaying ? "Crafting" : "✏️ Edit Crafting Recipes"}
+                            </span>
+                          </button>
+                        )}
+                        {(project.globalSettings.enableMapHud ||
+                          (project.maps && project.maps.length > 0)) &&
+                          !project.globalSettings.hideDefaultMapBtn && (
+                            <button
+                              onClick={() => {
+                                if (isPlaying) {
+                                  if (project.maps && project.maps.length > 0) {
+                                    setActiveFastTravelMapId(project.maps[0].id);
+                                  }
+                                  setIsMapOpen(!isMapOpen);
+                                } else {
+                                  setEditorMode("map_maker");
+                                }
+                              }}
+                              className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
+                              style={{
+                                backgroundColor: `${uiBg}ee`,
+                                borderColor: !isPlaying ? undefined : uiPrimary,
+                                borderRadius: uiRadius,
+                                color: !isPlaying ? "#34d399" : uiPrimary,
+                              }}
+                            >
+                              <MapIcon size={20} />
+                              <span className="absolute -top-8 bg-black/85 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                                {isPlaying ? "Map" : "✏️ Edit Wilderness Maps"}
+                              </span>
+                            </button>
+                          )}
+                        {!project.globalSettings.hideDefaultInventoryBtn && (
+                          <button
+                            onClick={() => {
+                              if (isPlaying) {
+                                setIsInventoryOpen(!isInventoryOpen);
+                              } else {
+                                setEditorMode("items");
+                                setItemsTab("items");
+                              }
+                            }}
+                            className={`w-14 h-14 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-[1.05] active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
+                            style={{
+                              backgroundColor: `${uiBg}ee`,
+                              borderColor: !isPlaying ? undefined : uiPrimary,
+                              borderRadius: uiRadius,
+                              color: !isPlaying ? "#34d399" : uiPrimary,
+                            }}
+                          >
+                            <div className="relative">
+                              <Backpack size={24} />
+                              {playerInventory.length > 0 && (
+                                <div
+                                  className="absolute -top-2 -right-2 text-white text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full border-2"
+                                  style={{
+                                    backgroundColor: uiPrimary,
+                                    borderColor: uiBg,
+                                  }}
+                                >
+                                  {playerInventory.length}
+                                </div>
+                              )}
+                            </div>
+                            <span className="absolute -top-10 bg-black/85 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                              {isPlaying ? "Inventory" : "✏️ Edit Items & Inventory"}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     {/* Map Modal */}
                     {isMapOpen && activeFastTravelMapId && (
@@ -7844,6 +8427,81 @@ const App: React.FC = () => {
                     )}
                   </>
                 )}
+
+                {/* Drag-to-resize handles for canvas (stage) boundary */}
+                {!isPlaying && (
+                  <>
+                    {/* Right edge handle */}
+                    <div
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setIsResizingCanvas({
+                          direction: "r",
+                          startX: e.clientX,
+                          startY: e.clientY,
+                          startWidth: currentScene.width || project.globalSettings.stageWidth || 800,
+                          startHeight: currentScene.height || project.globalSettings.stageHeight || 600,
+                        });
+                      }}
+                      className="absolute top-0 bottom-0 pointer-events-auto -right-2 w-4 z-[5000] cursor-col-resize group flex items-center justify-center select-none"
+                      title="Drag to resize scene width"
+                    >
+                      <div className="h-12 w-1.5 rounded-full bg-neutral-700/80 group-hover:bg-emerald-500 hover:scale-x-125 transition-all border border-neutral-900 shadow-lg" />
+                    </div>
+
+                    {/* Bottom edge handle */}
+                    <div
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setIsResizingCanvas({
+                          direction: "b",
+                          startX: e.clientX,
+                          startY: e.clientY,
+                          startWidth: currentScene.width || project.globalSettings.stageWidth || 800,
+                          startHeight: currentScene.height || project.globalSettings.stageHeight || 600,
+                        });
+                      }}
+                      className="absolute left-0 right-0 pointer-events-auto -bottom-2 h-4 z-[5000] cursor-row-resize group flex items-center justify-center select-none"
+                      title="Drag to resize scene height"
+                    >
+                      <div className="w-12 h-1.5 rounded-full bg-neutral-700/80 group-hover:bg-emerald-500 hover:scale-y-125 transition-all border border-neutral-900 shadow-lg" />
+                    </div>
+
+                    {/* Bottom-right corner handle */}
+                    <div
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setIsResizingCanvas({
+                          direction: "br",
+                          startX: e.clientX,
+                          startY: e.clientY,
+                          startWidth: currentScene.width || project.globalSettings.stageWidth || 800,
+                          startHeight: currentScene.height || project.globalSettings.stageHeight || 600,
+                        });
+                      }}
+                      className="absolute pointer-events-auto -bottom-3 -right-3 w-6 h-6 z-[5001] cursor-se-resize group flex items-center justify-center select-none bg-neutral-950 border border-neutral-700 hover:border-emerald-500 rounded-full shadow-lg hover:scale-110 active:scale-95 transition-transform"
+                      title="Drag to resize entire scene (width & height)"
+                    >
+                      <svg width="10" height="10" viewBox="0 0 10 10" className="text-neutral-400 group-hover:text-emerald-400 transition-colors stroke-current stroke-2 fill-none">
+                        <line x1="2" y1="8" x2="8" y2="2" />
+                        <line x1="5" y1="8" x2="8" y2="5" />
+                      </svg>
+                    </div>
+
+                    {/* Real-time Scale Badge Toast */}
+                    {isResizingCanvas && (
+                      <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-neutral-950/95 border border-emerald-500 text-emerald-400 px-3 py-1.5 rounded-lg text-xs font-mono font-bold shadow-2xl flex items-center gap-2 pointer-events-none select-none z-[6000] whitespace-nowrap">
+                        <span className="opacity-75">📐 Size:</span>
+                        <span className="text-white">{(currentScene.width || project.globalSettings.stageWidth || 800)}px</span>
+                        <span className="text-neutral-500 font-sans">×</span>
+                        <span className="text-white">{(currentScene.height || project.globalSettings.stageHeight || 600)}px</span>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               {/* Global styles for animations injected by Tailwind or custom */}
@@ -7884,11 +8542,12 @@ const App: React.FC = () => {
           `}</style>
 
               {/* Mobile & Desktop Viewport Live-Scale HUD Controls */}
-              <div 
-                className="absolute bottom-4 right-4 bg-neutral-900/95 backdrop-blur-md border border-neutral-800 p-2 rounded-xl shadow-2xl flex items-center gap-3 z-[4000] select-none transition-all hover:border-neutral-700/80 hover:shadow-indigo-500/5 group"
-                onPointerDown={(e) => e.stopPropagation()}
-                title="Scale and Fit Viewport for Mobile Phones / Desktop"
-              >
+              {!isPlaying && (
+                <div 
+                  className="absolute bottom-4 right-4 bg-neutral-900/95 backdrop-blur-md border border-neutral-800 p-2 rounded-xl shadow-2xl flex items-center gap-3 z-[4000] select-none transition-all hover:border-neutral-700/80 hover:shadow-indigo-500/5 group"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  title="Scale and Fit Viewport for Mobile Phones / Desktop"
+                >
                 <div className="flex flex-col gap-0.5">
                   <div className="flex items-center justify-between gap-3 px-1">
                     <span className="text-[9px] font-bold text-neutral-500 uppercase tracking-wider">Viewport Scale</span>
@@ -7946,6 +8605,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
               </div>
+              )}
             </main>
 
             {/* Right Sidebar - Properties/Layers */}
@@ -7964,7 +8624,7 @@ const App: React.FC = () => {
                   onClick={() => setRightSidebarTab("properties")}
                   className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${rightSidebarTab === "properties" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
                 >
-                  <Settings size={14} /> Props
+                  <Settings size={14} /> Options
                 </button>
                 <button
                   onClick={() => setRightSidebarTab("layers")}
@@ -7976,7 +8636,7 @@ const App: React.FC = () => {
                   onClick={() => setRightSidebarTab("prefabs")}
                   className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${rightSidebarTab === "prefabs" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
                 >
-                  <Box size={14} /> Prefabs
+                  <Box size={14} /> Stamps
                 </button>
               </div>
 
@@ -7987,7 +8647,7 @@ const App: React.FC = () => {
                       <div className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
                         {editorMode === "ui_stage"
                           ? "UI Elements"
-                          : "Stage Objects"}
+                          : "Visual Editor Objects"}
                       </div>
                       <span className="text-sm text-neutral-500">
                         {currentScene.objects.length}
@@ -8126,13 +8786,17 @@ const App: React.FC = () => {
                                 className="shrink-0 cursor-pointer text-neutral-400 hover:text-red-400"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (confirm("Delete this object?")) {
-                                     setProject(p => ({
-                                       ...p,
-                                       scenes: p.scenes.map(s => s.id === currentScene.id ? { ...s, objects: s.objects.filter(o => o.id !== obj.id) } : s)
-                                     }));
-                                     if(selectedObjectId === obj.id) setSelectedObjectId(null);
-                                  }
+                                  setConfirmDialog({
+                                    isOpen: true,
+                                    message: "Delete this object?",
+                                    onConfirm: () => {
+                                      setProject(p => ({
+                                        ...p,
+                                        scenes: p.scenes.map(s => s.id === currentScene.id ? { ...s, objects: s.objects.filter(o => o.id !== obj.id) } : s)
+                                      }));
+                                      if(selectedObjectId === obj.id) setSelectedObjectId(null);
+                                    }
+                                  });
                                 }}
                                 title="Delete"
                               >
@@ -8228,7 +8892,7 @@ const App: React.FC = () => {
                     <div className="flex flex-col gap-2">
                        <div className="flex justify-between items-center mb-2">
                           <div className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
-                            My Stamps & Prefabs
+                            My Stamps
                           </div>
                        </div>
                        {(project.prefabs && project.prefabs.length > 0) ? (
@@ -8261,12 +8925,16 @@ const App: React.FC = () => {
                                  className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-400 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-md"
                                  onClick={(e) => {
                                    e.stopPropagation();
-                                   if (confirm("Delete this prefab?")) {
-                                     setProject(p => ({
-                                       ...p,
-                                       prefabs: (p.prefabs || []).filter(pp => pp.id !== pObj.id)
-                                     }));
-                                   }
+                                   setConfirmDialog({
+                                     isOpen: true,
+                                     message: "Delete this prefab?",
+                                     onConfirm: () => {
+                                       setProject(p => ({
+                                         ...p,
+                                         prefabs: (p.prefabs || []).filter(pp => pp.id !== pObj.id)
+                                       }));
+                                     }
+                                   });
                                  }}
                                >
                                  <X size={10} />
@@ -8276,7 +8944,7 @@ const App: React.FC = () => {
                          </div>
                        ) : (
                          <div className="text-xs text-neutral-500 italic p-4 text-center bg-neutral-900 border border-neutral-800 rounded-lg">
-                           Right click any object on the canvas and select "Save as Prefab/Stamp" to add it here.
+                           Right click any object on the canvas and select "Save as Stamp" to add it here.
                          </div>
                        )}
                     </div>
@@ -8284,7 +8952,7 @@ const App: React.FC = () => {
                     <div className="flex flex-col gap-2">
                       <div className="flex justify-between items-center mb-2">
                         <div className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
-                          Smart Prefabs
+                          Smart Stamps
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
@@ -8323,22 +8991,6 @@ const App: React.FC = () => {
                         draggable
                         onDragStart={(e) =>
                           handleDragStartAsset(e, {
-                            type: "prefab",
-                            prefabType: "npc",
-                            name: "NPC",
-                          })
-                        }
-                        className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                      >
-                        <MessageSquare size={16} className="text-emerald-400" />
-                        <span className="text-sm font-medium text-emerald-200 uppercase">
-                          NPC
-                        </span>
-                      </div>
-                      <div
-                        draggable
-                        onDragStart={(e) =>
-                          handleDragStartAsset(e, {
                             type: "ui_element",
                             uiElementType: "button",
                             name: "UI Button",
@@ -8359,12 +9011,12 @@ const App: React.FC = () => {
                 {rightSidebarTab === "properties" &&
                   (!selectedObject ? (
                     <div className="space-y-2">
-                      <Accordion title="Stage Settings" defaultOpen={true}>
+                      <Accordion title="Project / Canvas Settings" defaultOpen={true}>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <LabelWithHelp
-                              label="Game Screen Width"
-                              helpText="The total width of your game screen in pixels."
+                              label="Global Screen Width"
+                              helpText="The default total width of your game screen in pixels."
                             />
                             <input
                               type="number"
@@ -8383,8 +9035,8 @@ const App: React.FC = () => {
                           </div>
                           <div>
                             <LabelWithHelp
-                              label="Game Screen Height"
-                              helpText="The total height of your game screen in pixels."
+                              label="Global Screen Height"
+                              helpText="The default total height of your game screen in pixels."
                             />
                             <input
                               type="number"
@@ -8398,11 +9050,43 @@ const App: React.FC = () => {
                                   },
                                 }))
                               }
-                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1"
                             />
                           </div>
                         </div>
-                        <div>
+                        <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-neutral-800">
+                          <div className="col-span-2">
+                             <LabelWithHelp 
+                               label={(editorMode === "ui_stage") ? "This Canvas Override Size" : "This Room Override Size"}
+                               helpText="Override the size of this specific canvas only. Leave as 0 to use Global size."
+                             />
+                          </div>
+                          <div>
+                            <input
+                              type="number"
+                              placeholder="Width"
+                              value={currentScene?.width || ""}
+                              onChange={(e) => {
+                                const val = Number(e.target.value) || 0;
+                                updateScene({ width: val });
+                              }}
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1 focus:border-indigo-500"
+                            />
+                          </div>
+                          <div>
+                            <input
+                              type="number"
+                              placeholder="Height"
+                              value={currentScene?.height || ""}
+                              onChange={(e) => {
+                                const val = Number(e.target.value) || 0;
+                                updateScene({ height: val });
+                              }}
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1 focus:border-indigo-500"
+                            />
+                          </div>
+                        </div>
+                        <div className="mt-4 pt-4 border-t border-neutral-800">
                           <LabelWithHelp
                             label="Custom Global Cursor"
                             helpText="Replace the default mouse pointer for your entire game."
@@ -8462,7 +9146,125 @@ const App: React.FC = () => {
                         </div>
                       </Accordion>
 
-                      <Accordion title="UI Theme Settings">
+                      <Accordion title="Visual Export Layout Arranger">
+                        <div className="bg-neutral-950 p-2 rounded relative flex items-center justify-center border border-neutral-800 mt-2" style={{ height: '300px' }}>
+                          <div className={`relative flex w-full h-full text-[10px] items-center justify-center p-2 rounded bg-neutral-900 border border-neutral-700 ${project.globalSettings.dialoguePosition === 'below' ? 'flex-col' : 'flex-row'}`}>
+                            
+                            {/* Game Canvas */}
+                            <div 
+                              className="relative bg-black flex shrink-0 items-center justify-center border border-emerald-500 overflow-hidden"
+                              style={{
+                                aspectRatio: `${project.globalSettings.stageWidth || 800} / ${project.globalSettings.stageHeight || 600}`,
+                                maxHeight: project.globalSettings.dialoguePosition === 'below' ? 'calc(100% - 60px)' : '100%',
+                                maxWidth: '100%'
+                              }}
+                            >
+                                <span className="text-emerald-500 opacity-50 font-bold uppercase tracking-widest pointer-events-none">Game Canvas</span>
+
+                                {/* HUD Icons Approximation */}
+                                <div className="absolute top-2 right-2 flex flex-col gap-1 pointer-events-none">
+                                  {!project.globalSettings.hideDefaultInventoryBtn && <div className="w-4 h-4 bg-purple-500/50 border border-purple-500 rounded flex items-center justify-center text-[6px]">Inv</div>}
+                                  {(project.quests && project.quests.length > 0) && !project.globalSettings.hideDefaultQuestBtn && <div className="w-4 h-4 bg-purple-500/50 border border-purple-500 rounded flex items-center justify-center text-[6px]">Qsts</div>}
+                                  {!project.globalSettings.hideDefaultMapBtn && <div className="w-4 h-4 bg-purple-500/50 border border-purple-500 rounded flex items-center justify-center text-[6px]">Map</div>}
+                                </div>
+                                
+                                <div className="absolute top-2 left-2 flex flex-col gap-1 pointer-events-none">
+                                  {!project.globalSettings.hideDefaultSettingsBtn && <div className="w-4 h-4 bg-blue-500/50 border border-blue-500 rounded flex items-center justify-center text-[6px]">Set</div>}
+                                  {!project.globalSettings.hideDefaultAlmanacBtn && <div className="w-4 h-4 bg-blue-500/50 border border-blue-500 rounded flex items-center justify-center text-[6px]">Alm</div>}
+                                </div>
+
+                                <div className="absolute top-8 right-2 flex flex-col gap-1 pointer-events-none">
+                                  {project.globalSettings.enableNeeds && <div className="w-16 h-3 bg-red-500/30 border border-red-500 rounded text-[6px] flex items-center justify-center text-white">Needs</div>}
+                                </div>
+                                
+                                <div className="absolute top-8 left-2 flex flex-col gap-1 pointer-events-none">
+                                  {project.globalSettings.enableTTRPGStats && <div className="w-16 h-3 bg-yellow-500/30 border border-yellow-500 rounded text-[6px] flex items-center justify-center text-white">Stats</div>}
+                                </div>
+
+                                {/* HUD Overlay Preview */}
+                                {project.globalSettings.hudOverlay?.assetId && (
+                                  <div 
+                                    className="absolute inset-0 pointer-events-none"
+                                    style={{
+                                      backgroundImage: `url('${project.assets.find(a => a.id === project.globalSettings.hudOverlay?.assetId)?.src}')`,
+                                      backgroundSize: project.globalSettings.hudOverlay.position === "stretch" ? "100% 100%" : (project.globalSettings.hudOverlay.position ? "contain" : "100% 100%"),
+                                      backgroundPosition: (project.globalSettings.hudOverlay.position && project.globalSettings.hudOverlay.position !== "stretch") ? project.globalSettings.hudOverlay.position.replace("-", " ") : "center",
+                                      backgroundRepeat: "no-repeat",
+                                      transform: `scale(${project.globalSettings.hudOverlay.scale ?? 1}) translate(${project.globalSettings.hudOverlay.offsetX || 0}px, ${project.globalSettings.hudOverlay.offsetY || 0}px)`,
+                                      mixBlendMode: (project.globalSettings.hudOverlay.blendMode || "normal") as any,
+                                      opacity: project.globalSettings.hudOverlay.opacity ?? 1,
+                                    }}
+                                  >
+                                    <div className="absolute inset-0 border-2 border-orange-500 border-dashed m-[10%]" />
+                                    <div className="absolute top-[10%] left-1/2 -translate-x-1/2">
+                                      <span className="bg-orange-500/80 text-white px-1 font-bold text-[8px] rounded">HUD OVERLAY BOUNDARIES</span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Dialogue overlay if absolute */}
+                                {project.globalSettings.dialoguePosition !== 'below' && (
+                                  <div 
+                                    className={`absolute border border-cyan-500 bg-cyan-900/50 flex flex-col items-center justify-center text-cyan-200 cursor-pointer hover:bg-cyan-400/30 transition-colors
+                                      ${project.globalSettings.dialoguePosition === 'top' ? 'top-2' : ''}
+                                      ${project.globalSettings.dialoguePosition === 'center' ? 'top-1/2 -translate-y-1/2' : ''}
+                                      ${project.globalSettings.dialoguePosition === 'bottom' || !project.globalSettings.dialoguePosition ? 'bottom-2' : ''}
+                                    `}
+                                    style={{ width: '90%', height: '40px', left: '5%', zIndex: 100 }}
+                                    onClick={() => {
+                                      const positions = ["bottom", "top", "center"];
+                                      const current = project.globalSettings.dialoguePosition || "bottom";
+                                      pushHistory({
+                                        ...project,
+                                        globalSettings: {
+                                          ...project.globalSettings,
+                                          dialoguePosition: positions[(positions.indexOf(current) + 1) % positions.length] as any
+                                        }
+                                      });
+                                    }}
+                                  >
+                                    <span className="font-bold">Dialogue Box</span>
+                                    <span className="text-[8px] opacity-80">(In-Canvas: {project.globalSettings.dialoguePosition || "bottom"}) - Click to Rotate</span>
+                                  </div>
+                                )}
+                            </div>
+
+                            {/* Dialogue below if below */}
+                            {project.globalSettings.dialoguePosition === 'below' && (
+                                <div 
+                                  className="w-[90%] shrink-0 border border-cyan-500 bg-cyan-900/50 mt-2 flex flex-col items-center justify-center text-cyan-200 cursor-pointer hover:bg-cyan-400/30 transition-colors rounded-sm"
+                                  style={{ height: '40px' }}
+                                  onClick={() => {
+                                      pushHistory({
+                                        ...project,
+                                        globalSettings: {
+                                          ...project.globalSettings,
+                                          dialoguePosition: 'bottom'
+                                        }
+                                      });
+                                  }}
+                                >
+                                  <span className="font-bold">Dialogue Box (Below Canvas)</span>
+                                  <span className="text-[8px] opacity-80">Click to attach inside canvas</span>
+                                </div>
+                            )}
+                          </div>
+
+                          <div className="absolute top-2 left-2 flex gap-1 z-10 pointer-events-auto">
+                            <button
+                              onClick={() => pushHistory({...project, globalSettings: {...project.globalSettings, dialoguePosition: 'below'}})}
+                              className={`text-[9px] px-1.5 py-0.5 rounded border shadow ${project.globalSettings.dialoguePosition === 'below' ? 'bg-cyan-500 border-cyan-400 text-black' : 'bg-neutral-800 border-neutral-600 text-neutral-300 hover:bg-neutral-700'} transition-all`}
+                            >
+                              Move Dialogue Below Canvas
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-neutral-400 mt-2 leading-tight">
+                          This preview approximates how your game will layout upon export. Click the Dialogue Box to change its attachment point! Check "Heads Up Display" settings to hide/show corner icons.
+                        </p>
+                      </Accordion>
+
+                      <Accordion title="User Interface Theming">
                         <div>
                           <LabelWithHelp
                             label="Preset Theme"
@@ -8654,8 +9456,107 @@ const App: React.FC = () => {
                         </div>
                       </Accordion>
 
-                      <Accordion title="HUD & Built-in Action Buttons">
+                      <Accordion title="Heads Up Display (HUD)">
                         <div className="space-y-4 bg-neutral-950/50 p-2 rounded">
+                          {/* HUD Overlay */}
+                          <div className="flex flex-col gap-1 border-b border-neutral-800 pb-2">
+                            <span className="text-xs font-bold text-neutral-500 uppercase">
+                              Static Screen Overlay
+                            </span>
+                            <div className="flex items-center gap-2 mt-1">
+                              {project.globalSettings.hudOverlay?.assetId ? (
+                                <div className="relative w-10 h-10 bg-neutral-800 border border-neutral-700 rounded">
+                                  <img
+                                    src={project.assets.find((a) => a.id === project.globalSettings.hudOverlay?.assetId)?.src}
+                                    className="w-full h-full object-contain p-1"
+                                  />
+                                  <button
+                                    className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"
+                                    onClick={() =>
+                                      setProject((p) => ({
+                                        ...p,
+                                        globalSettings: {
+                                          ...p.globalSettings,
+                                          hudOverlay: { ...p.globalSettings.hudOverlay, assetId: undefined }
+                                        },
+                                      }))
+                                    }
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() =>
+                                    setAssetPickerCb({
+                                      onSelect: (id) => {
+                                        pushHistory({
+                                          ...project,
+                                          globalSettings: {
+                                            ...project.globalSettings,
+                                            hudOverlay: { ...project.globalSettings.hudOverlay, assetId: id }
+                                          },
+                                        });
+                                        setAssetPickerCb(null);
+                                      },
+                                      filterType: "image",
+                                    })
+                                  }
+                                  className="px-3 py-1 bg-neutral-800 border border-neutral-700 text-neutral-300 text-sm rounded hover:bg-neutral-700"
+                                >
+                                  Select Overlay Image
+                                </button>
+                              )}
+                            </div>
+                            {project.globalSettings.hudOverlay?.assetId && (
+                              <div className="mt-2 space-y-2">
+                                <label className="flex items-center justify-between gap-2 text-sm text-neutral-300">
+                                  Opacity
+                                  <input type="range" min="0" max="1" step="0.1" value={project.globalSettings.hudOverlay.opacity ?? 1} onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, opacity: parseFloat(e.target.value) } } }))} />
+                                </label>
+                                <label className="flex items-center justify-between gap-2 text-sm text-neutral-300">
+                                  Position
+                                  <select className="bg-neutral-800 border-neutral-700 rounded text-sm px-1 py-0.5" value={project.globalSettings.hudOverlay.position || "stretch"} onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, position: e.target.value as any } } }))}>
+                                    <option value="stretch">Stretch to Screen</option>
+                                    <option value="center">Center</option>
+                                    <option value="top-left">Top Left</option>
+                                    <option value="top-right">Top Right</option>
+                                    <option value="bottom-left">Bottom Left</option>
+                                    <option value="bottom-right">Bottom Right</option>
+                                  </select>
+                                </label>
+                                {project.globalSettings.hudOverlay.position !== "stretch" && (
+                                  <>
+                                    <label className="flex items-center justify-between gap-2 text-sm text-neutral-300">
+                                      Scale Override
+                                      <input type="number" step="0.1" className="bg-neutral-800 border-neutral-700 rounded px-2 w-20 text-sm" value={project.globalSettings.hudOverlay.scale ?? 1} onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, scale: parseFloat(e.target.value) || 1 } } }))} />
+                                    </label>
+                                    <label className="flex items-center justify-between gap-2 text-sm text-neutral-300">
+                                      Offset X / Y
+                                      <div className="flex gap-1">
+                                        <input type="number" className="bg-neutral-800 border-neutral-700 rounded px-2 w-16 text-sm" placeholder="X" value={project.globalSettings.hudOverlay.offsetX || 0} onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, offsetX: parseInt(e.target.value) || 0 } } }))} />
+                                        <input type="number" className="bg-neutral-800 border-neutral-700 rounded px-2 w-16 text-sm" placeholder="Y" value={project.globalSettings.hudOverlay.offsetY || 0} onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, offsetY: parseInt(e.target.value) || 0 } } }))} />
+                                      </div>
+                                    </label>
+                                  </>
+                                )}
+                                <label className="flex items-center justify-between gap-2 text-sm text-neutral-300">
+                                  Blend Mode
+                                  <select className="bg-neutral-800 border-neutral-700 rounded text-sm px-1 py-0.5" value={project.globalSettings.hudOverlay.blendMode || "normal"} onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, blendMode: e.target.value } } }))}>
+                                    <option value="normal">Normal</option>
+                                    <option value="multiply">Multiply</option>
+                                    <option value="screen">Screen</option>
+                                    <option value="overlay">Overlay</option>
+                                  </select>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer text-sm text-neutral-300">
+                                  <input type="checkbox" className="rounded bg-neutral-800 border-neutral-700 focus:ring-emerald-500 text-emerald-500" checked={project.globalSettings.hudOverlay.pointerEvents !== "none"} onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, pointerEvents: e.target.checked ? "auto" : "none" } } }))} />
+                                  Blocks Clicks (Pointer Events)
+                                </label>
+                              </div>
+                            )}
+                          </div>
+
                           {/* Inventory */}
                           <div className="flex flex-col gap-1 border-b border-neutral-800 pb-2">
                               <span className="text-xs font-bold text-neutral-500 uppercase">
@@ -8954,7 +9855,7 @@ const App: React.FC = () => {
                           </div>
                       </Accordion>
 
-                      <Accordion title="Advanced UI Settings">
+                      <Accordion title="Advanced Setup">
                         <div>
                           <LabelWithHelp
                             label="UI Border Radius (px)"
@@ -9002,7 +9903,7 @@ const App: React.FC = () => {
                         </div>
                       </Accordion>
 
-                      <Accordion title="Gameplay Settings">
+                      <Accordion title="Simulation & Overrides">
                         <div>
                           <label className="flex items-center gap-2 cursor-pointer">
                             <input
@@ -9073,7 +9974,7 @@ const App: React.FC = () => {
                               className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
                             />
                             <span className="text-sm font-medium text-neutral-300">
-                              Enable TTRPG Stats/Skills
+                              Enable Character Skills & Meters
                             </span>
                           </label>
                           <p className="text-sm text-neutral-500 mt-1">
@@ -9085,7 +9986,7 @@ const App: React.FC = () => {
                     </div>
                   ) : (
                     <div className="space-y-2 pb-16">
-                      <Accordion title="General Properties" defaultOpen={true}>
+                      <Accordion title="Identity & Setup" defaultOpen={true}>
                         <div className="space-y-4">
                           {/* Object Preview Visualizer Sandbox */}
                           {!selectedObject.isHitbox && !selectedObject.isText && !selectedObject.isScript && selectedObject.src && (
@@ -9209,7 +10110,7 @@ const App: React.FC = () => {
                       </Accordion>
 
                       {selectedObject.isUiElement && (
-                        <Accordion title="HUD / UI Properties">
+                        <Accordion title="UI Element Properties">
                           <div className="space-y-3 mb-4">
                             <div className="grid grid-cols-2 gap-2">
                               <div>
@@ -9468,7 +10369,7 @@ const App: React.FC = () => {
                                   {selectedObject.uiElementType ===
                                     "progress" && (
                                     <option value="need">
-                                      Player Stat (e.g. Health/Energy)
+                                      Player Meter (e.g. Health/Energy)
                                     </option>
                                   )}
                                   {selectedObject.uiElementType === "button" ||
@@ -9793,12 +10694,37 @@ const App: React.FC = () => {
                                 Flip Y
                               </label>
                             </div>
+                            <div className="col-span-2 pt-2 border-t border-neutral-800 flex items-center justify-between">
+                              <label className="flex items-center gap-2 text-sm text-neutral-300 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={!!selectedObject.stretchToScreen}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      stretchToScreen: e.target.checked,
+                                    })
+                                  }
+                                  className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                                />
+                                Stretch to fill Screen
+                              </label>
+                              <select 
+                                value={selectedObject.objectFit || "fill"}
+                                onChange={(e) => updateObject(selectedObject.id, { objectFit: e.target.value as any })}
+                                className="bg-neutral-800 border border-neutral-700 rounded px-1.5 py-1 text-xs"
+                                disabled={!selectedObject.stretchToScreen}
+                              >
+                                <option value="fill">Fill Canvas</option>
+                                <option value="contain">Scale (Contain)</option>
+                                <option value="cover">Crop (Cover)</option>
+                              </select>
+                            </div>
                           </div>
                         </div>
                       </Accordion>
 
                       {selectedObject.isText && !selectedObject.isUiElement && (
-                        <Accordion title="Text Styling">
+                        <Accordion title="Typography">
                           <div>
                             <LabelWithHelp
                               label="Content"
@@ -10105,7 +11031,7 @@ const App: React.FC = () => {
                       )}
 
                       {/* Layering */}
-                      <Accordion title="Layering">
+                      <Accordion title="Visual Layers & Sorting">
                         <div className="flex items-center justify-between">
                           <span className="text-sm flex items-center gap-1">
                             <LabelWithHelp
@@ -10267,7 +11193,7 @@ const App: React.FC = () => {
 
                       {/* Appearance & Filters */}
                       {!selectedObject.isUiElement && (
-                        <Accordion title="Appearance">
+                        <Accordion title="Rendering & Blend Modes">
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-medium text-emerald-400">Tools</span>
                             {!selectedObject.isHitbox &&
@@ -10290,8 +11216,8 @@ const App: React.FC = () => {
                           </div>
                           <div>
                             <LabelWithHelp
-                              label="Blend Mode"
-                              helpText="How the object's colors blend with objects behind it."
+                              label="Visual Blending"
+                              helpText="How this layer mixes visually with layers behind it."
                             />
                             <select
                               value={selectedObject.blendMode || "normal"}
@@ -10541,7 +11467,7 @@ const App: React.FC = () => {
                       {/* Physics */}
                       {!selectedObject.isUiElement &&
                         !selectedObject.isText && (
-                          <Accordion title="Physics">
+                          <Accordion title="Colliders & Physics">
                             <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-white">
                               <input
                                 type="checkbox"
@@ -10659,7 +11585,7 @@ const App: React.FC = () => {
                         )}
 
                       {/* Interaction */}
-                      <Accordion title="Interaction Setup">
+                      <Accordion title="Behaviors & Events">
                         <div>
                           <LabelWithHelp
                             label="Cursor on Hover"
@@ -10677,7 +11603,7 @@ const App: React.FC = () => {
                             <option value="default">Default</option>
                             <option value="pointer">Pointer (Hand)</option>
                             <option value="help">Help (Question)</option>
-                            <option value="text">Dialogue (Text)</option>
+                            <option value="text">Conversation (Text)</option>
                             <option value="crosshair">Crosshair</option>
                             <option value="zoom-in">Eye (Look)</option>
                           </select>
@@ -10828,77 +11754,58 @@ const App: React.FC = () => {
                             }
                             className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
                           >
-                            <option value="none">None</option>
-                            <option value="dialogue">Show Dialogue</option>
-                            <option value="give-item">
-                              Give Item (Keep Object)
-                            </option>
-                            <option value="collect">
-                              Collect Item (Hide Object)
-                            </option>
-                            <option value="scene_change">
-                              Change Scene / Map Trigger
-                            </option>
-                            <option value="open_ui">
-                              Open Custom UI (Map, Journal, etc)
-                            </option>
-                            <option value="close_ui">Close UI Menu</option>
-                            <option value="modify_number">
-                              Modify Number (Progress/Text)
-                            </option>
-                            <option value="set_flag">
-                              Trigger Story Event
-                            </option>
-                            <option value="open_crafting">
-                              Open Crafting System
-                            </option>
-                            <option value="open_quest_log">
-                              Open Quest Log
-                            </option>
-                            <option value="open_skills">
-                              Open Skills Menu
-                            </option>
-                            <option value="open_almanac">Open Almanac</option>
-                            <option value="open_map">
-                              Open Fast Travel Map
-                            </option>
-                            <option value="open_relationships">
-                              Open Relationships Menu
-                            </option>
-                            <option value="open_settings">
-                              Open Player Settings
-                            </option>
-                            <option value="start_quest">Start Quest</option>
-                            <option value="complete_quest">
-                              Complete Quest (Force)
-                            </option>
-                            <option value="sound">Play SFX</option>
-                            <option value="play_cutscene">
-                              Play Fullscreen Video (Cutscene)
-                            </option>
-                            <option value="link">Open URL</option>
-                            <option value="skill_check">
-                              Skill Check (RPG)
-                            </option>
-                            <option value="run_script">Run Script</option>
-                            <option value="save_game">Save Game (Local)</option>
-                            <option value="load_game">Load Game (Local)</option>
-                            <option value="toggle_inventory">
-                              Toggle Inventory
-                            </option>
-                            <option value="restart_scene">
-                              Restart Current Scene
-                            </option>
-                            <option value="restart_game">
-                              Restart Full Game
-                            </option>
-                            <option value="toggle_fullscreen">
-                              Toggle Fullscreen
-                            </option>
-                            <option value="toggle_mute">
-                              Toggle Mute Audio
-                            </option>
-                            <option value="exit_game">Exit / Close Game</option>
+                            <option value="none">None (No Action)</option>
+
+                            <optgroup label="Story & Dialogues">
+                              <option value="dialogue">Start Conversation (Dialogue Tree)</option>
+                              <option value="set_flag">Trigger Story Event (Flags)</option>
+                              <option value="skill_check">Skill Check (Attributes/Dice)</option>
+                            </optgroup>
+
+                            <optgroup label="Items & Inventory">
+                              <option value="give-item">Give Item to Player</option>
+                              <option value="collect">Collect Item (And Hide Object)</option>
+                              <option value="open_crafting">Open Crafting Menu</option>
+                            </optgroup>
+
+                            <optgroup label="Navigation & Scenes (Maps)">
+                              <option value="scene_change">Change Room / Teleport Map</option>
+                              <option value="open_map">Open Fast Travel Map</option>
+                            </optgroup>
+
+                            <optgroup label="Quests & Lore">
+                              <option value="start_quest">Start Quest</option>
+                              <option value="complete_quest">Complete Quest (Force)</option>
+                              <option value="open_quest_log">Open Quest Log</option>
+                              <option value="open_almanac">Open Almanac / Lore</option>
+                              <option value="open_relationships">Open Relationships Menu</option>
+                            </optgroup>
+
+                            <optgroup label="Overlays & Interface">
+                              <option value="open_ui">Open Custom UI Canvas</option>
+                              <option value="close_ui">Close UI Canvas</option>
+                              <option value="toggle_inventory">Toggle Built-in Inventory</option>
+                              <option value="open_skills">Open Skills Menu</option>
+                              <option value="open_settings">Open Player Settings</option>
+                            </optgroup>
+
+                            <optgroup label="Media & Code">
+                              <option value="play_cutscene">Play Fullscreen Video (Cutscene)</option>
+                              <option value="sound">Play SFX / Audio</option>
+                              <option value="run_script">Execute Custom Script</option>
+                              <option value="link">Open Web URL</option>
+                              <option value="modify_number">Modify Number Var (Progress/Text)</option>
+                            </optgroup>
+
+                            <optgroup label="System Controls">
+                              <option value="save_game">Save Game State</option>
+                              <option value="load_game">Load Game State</option>
+                              <option value="restart_scene">Restart Current Region</option>
+                              <option value="restart_game">Restart Full Game</option>
+                              <option value="toggle_fullscreen">Toggle Fullscreen</option>
+                              <option value="toggle_mute">Toggle Audio Mute</option>
+                              <option value="exit_game">Close Game Execution</option>
+                            </optgroup>
                           </select>
 
                           {selectedObject.interaction !== "none" && (
@@ -11011,9 +11918,19 @@ const App: React.FC = () => {
                         {(selectedObject.interaction === "start_quest" ||
                           selectedObject.interaction === "complete_quest") && (
                           <div>
-                            <label className="text-sm text-neutral-500">
-                              Select Quest
-                            </label>
+                            <div className="flex justify-between items-center mb-1">
+                              <label className="text-sm text-neutral-500">
+                                Select Quest
+                              </label>
+                              {selectedObject.interactionData && (
+                                <button
+                                  onClick={() => setEditorMode("quests")}
+                                  className="text-[10px] text-yellow-400 hover:text-yellow-300 flex items-center gap-1 font-bold tracking-wide uppercase bg-yellow-500/10 hover:bg-yellow-500/20 px-2 py-0.5 rounded"
+                                >
+                                  <Map size={10} /> Edit Quest
+                                </button>
+                              )}
+                            </div>
                             <select
                               value={selectedObject.interactionData || ""}
                               onChange={(e) =>
@@ -11058,28 +11975,58 @@ const App: React.FC = () => {
                         )}
 
                         {selectedObject.interaction === "dialogue" && (
-                          <div>
-                            <label className="text-sm text-neutral-500">
-                              Dialogue Tree (Optional)
-                            </label>
-                            <select
-                              value={selectedObject.dialogueTreeId || ""}
-                              onChange={(e) =>
-                                updateObject(selectedObject.id, {
-                                  dialogueTreeId: e.target.value,
-                                })
-                              }
-                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
-                            >
-                              <option value="">
-                                No tree (use simple text)
-                              </option>
-                              {(project.dialogueTrees || []).map((t) => (
-                                <option key={t.id} value={t.id}>
-                                  {t.name}
+                          <div className="space-y-4">
+                            <div>
+                              <div className="flex justify-between items-center">
+                                <label className="text-sm text-neutral-500">
+                                  Link to Dialogue Tree
+                                </label>
+                                {selectedObject.dialogueTreeId && (
+                                  <button
+                                    onClick={() => setEditorMode("dialogue")}
+                                    className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-bold tracking-wide uppercase bg-indigo-500/10 hover:bg-indigo-500/20 px-2 py-0.5 rounded"
+                                  >
+                                    <MessageSquare size={10} /> Edit Tree
+                                  </button>
+                                )}
+                              </div>
+                              <select
+                                value={selectedObject.dialogueTreeId || ""}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    dialogueTreeId: e.target.value,
+                                  })
+                                }
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                              >
+                                <option value="">
+                                  No tree (use simple text)
                                 </option>
-                              ))}
-                            </select>
+                                {(project.dialogueTrees || []).map((t) => (
+                                  <option key={t.id} value={t.id}>
+                                    {t.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {!selectedObject.dialogueTreeId && (
+                              <div>
+                                <label className="text-sm text-neutral-500">
+                                  Simple Text Popup
+                                </label>
+                                <textarea
+                                  value={selectedObject.interactionData || ""}
+                                  onChange={(e) =>
+                                    updateObject(selectedObject.id, {
+                                      interactionData: e.target.value,
+                                    })
+                                  }
+                                  placeholder="Enter simple message... (Used if no Dialogue Tree is selected)"
+                                  className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 min-h-[60px]"
+                                />
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -11149,43 +12096,57 @@ const App: React.FC = () => {
                                   label="Required Item to Click"
                                   helpText="If set, the player must have this item in their inventory to interact with this object."
                                 />
-                                <button
-                                  onClick={() => {
-                                    if (!currentScene) return;
-                                    const newItem = {
-                                      id: uuidv4(),
-                                      name: "New Required Item",
-                                      description: "",
-                                      iconAssetId: null,
-                                    };
-                                    const newProject = {
-                                      ...project,
-                                      inventoryItems: [
-                                        ...project.inventoryItems,
-                                        newItem,
-                                      ],
-                                      scenes: project.scenes.map((s) =>
-                                        s.id === currentScene.id
-                                          ? {
-                                              ...s,
-                                              objects: s.objects.map((o) =>
-                                                o.id === selectedObject.id
-                                                  ? {
-                                                      ...o,
-                                                      requireItemId: newItem.id,
-                                                    }
-                                                  : o,
-                                              ),
-                                            }
-                                          : s,
-                                      ),
-                                    };
-                                    pushHistory(newProject);
-                                  }}
-                                  className="text-sm bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded hover:bg-emerald-500/30 line-clamp-1 truncate"
-                                >
-                                  + Add New
-                                </button>
+                                <div className="flex items-center gap-1">
+                                  {selectedObject.requireItemId && (
+                                      <button
+                                        onClick={() => setEditorMode("inventory")}
+                                        className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-bold tracking-wide uppercase bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded"
+                                      >
+                                        <Package size={10} /> Edit Item
+                                      </button>
+                                  )}
+                                  <button
+                                    onClick={() => {
+                                      if (!currentScene) return;
+                                      const newItem = {
+                                        id: uuidv4(),
+                                        name: "New Required Item",
+                                        description: "",
+                                        iconAssetId: null,
+                                        type: "key" as any,
+                                      };
+                                      const isUI = editorMode === "ui_stage";
+                                      const newProject = {
+                                        ...project,
+                                        inventoryItems: [
+                                          ...project.inventoryItems,
+                                          newItem as any,
+                                        ],
+                                        [isUI ? "uiMenus" : "scenes"]: (isUI ? project.uiMenus : project.scenes).map((s: any) =>
+                                          s.id === currentScene.id
+                                            ? {
+                                                ...s,
+                                                objects: s.objects.map((o: any) =>
+                                                  o.id === selectedObject.id
+                                                    ? {
+                                                        ...o,
+                                                        requireItemId: newItem.id,
+                                                      }
+                                                    : o,
+                                                ),
+                                              }
+                                            : s,
+                                        ),
+                                      };
+                                      setProject(newProject);
+                                      pushHistory(newProject);
+                                      setEditorMode("inventory");
+                                    }}
+                                    className="text-[10px] text-emerald-400 font-bold uppercase tracking-wide flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded"
+                                  >
+                                    <Plus size={10} /> Quick Create
+                                  </button>
+                                </div>
                               </div>
                               <select
                                 value={selectedObject.requireItemId || ""}
@@ -11228,54 +12189,66 @@ const App: React.FC = () => {
                               selectedObject.interaction === "collect") && (
                               <div className="space-y-3">
                                 <div>
-                                  <div className="flex justify-between items-center">
+                                  <div className="flex justify-between items-center mb-1">
                                     <label className="text-sm text-neutral-500">
                                       Item to Give
                                     </label>
-                                    <button
-                                      onClick={() => {
-                                        if (!currentScene) return;
-                                        const newItem = {
-                                          id: uuidv4(),
-                                          name:
-                                            selectedObject.name || "New Item",
-                                          description: "",
-                                          iconAssetId: selectedObject.src
-                                            ? project.assets.find(
-                                                (a) =>
-                                                  a.src === selectedObject.src,
-                                              )?.id || null
-                                            : null,
-                                        };
-                                        const isUI = editorMode === "ui_stage";
-                                        const newProject = {
-                                          ...project,
-                                          inventoryItems: [
-                                            ...project.inventoryItems,
-                                            newItem,
-                                          ],
-                                          [isUI ? "uiMenus" : "scenes"]: (isUI ? project.uiMenus : project.scenes).map((s: any) =>
-                                            s.id === currentScene.id
-                                              ? {
-                                                  ...s,
-                                                  objects: s.objects.map((o: any) =>
-                                                    o.id === selectedObject.id
-                                                      ? {
-                                                          ...o,
-                                                          giveItemId: newItem.id,
-                                                        }
-                                                      : o,
-                                                  ),
-                                                }
-                                              : s,
-                                          ),
-                                        };
-                                        pushHistory(newProject);
-                                      }}
-                                      className="text-sm bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded hover:bg-emerald-500/30"
-                                    >
-                                      + Quick Create
-                                    </button>
+                                    <div className="flex items-center gap-1">
+                                      {selectedObject.giveItemId && (
+                                        <button
+                                          onClick={() => setEditorMode("inventory")}
+                                          className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-bold tracking-wide uppercase bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded"
+                                        >
+                                          <Package size={10} /> Edit Item Settings
+                                        </button>
+                                      )}
+                                      <button
+                                        onClick={() => {
+                                          if (!currentScene) return;
+                                          const newItem = {
+                                            id: uuidv4(),
+                                            name:
+                                              selectedObject.name || "New Item",
+                                            description: "",
+                                            iconAssetId: selectedObject.src
+                                              ? project.assets.find(
+                                                  (a) =>
+                                                    a.src === selectedObject.src,
+                                                )?.id || null
+                                              : null,
+                                          };
+                                          const isUI = editorMode === "ui_stage";
+                                          const newProject = {
+                                            ...project,
+                                            inventoryItems: [
+                                              ...project.inventoryItems,
+                                              newItem as any,
+                                            ],
+                                            [isUI ? "uiMenus" : "scenes"]: (isUI ? project.uiMenus : project.scenes).map((s: any) =>
+                                              s.id === currentScene.id
+                                                ? {
+                                                    ...s,
+                                                    objects: s.objects.map((o: any) =>
+                                                      o.id === selectedObject.id
+                                                        ? {
+                                                            ...o,
+                                                            giveItemId: newItem.id,
+                                                          }
+                                                        : o,
+                                                    ),
+                                                  }
+                                                : s,
+                                            ),
+                                          };
+                                          setProject(newProject);
+                                          pushHistory(newProject);
+                                          setEditorMode("inventory");
+                                        }}
+                                        className="text-[10px] text-emerald-400 font-bold uppercase tracking-wide flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded"
+                                      >
+                                        <Plus size={10} /> Quick Create Item
+                                      </button>
+                                    </div>
                                   </div>
                                   <select
                                     value={selectedObject.giveItemId || ""}
@@ -11342,7 +12315,7 @@ const App: React.FC = () => {
                           </div>
                         )}
 
-                        {["dialogue", "link", "skill_check"].includes(
+                        {["link", "skill_check"].includes(
                           selectedObject.interaction,
                         ) && (
                           <div>
@@ -11359,11 +12332,9 @@ const App: React.FC = () => {
                                 })
                               }
                               placeholder={
-                                selectedObject.interaction === "dialogue"
-                                  ? "Enter dialogue text..."
-                                  : selectedObject.interaction === "link"
-                                    ? "https://..."
-                                    : "Text shown on success..."
+                                selectedObject.interaction === "link"
+                                  ? "https://..."
+                                  : "Text shown on success..."
                               }
                               className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 min-h-[60px]"
                             />
@@ -11372,9 +12343,22 @@ const App: React.FC = () => {
 
                         {selectedObject.interaction === "scene_change" && (
                           <div>
-                            <label className="text-sm text-neutral-500">
-                              Target Scene
-                            </label>
+                            <div className="flex justify-between items-center">
+                              <label className="text-sm text-neutral-500">
+                                Target Map / Scene
+                              </label>
+                              {selectedObject.interactionData && (
+                                <button
+                                  onClick={() => {
+                                    setProject((p) => ({ ...p, currentSceneId: selectedObject.interactionData || "" }));
+                                    setEditorMode("stage");
+                                  }}
+                                  className="text-[10px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-bold tracking-wide uppercase bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded"
+                                >
+                                  <Map size={10} /> Edit Map
+                                </button>
+                              )}
+                            </div>
                             <select
                               value={selectedObject.interactionData || ""}
                               onChange={(e) =>
@@ -11400,11 +12384,24 @@ const App: React.FC = () => {
                         {(selectedObject.interaction === "open_ui" ||
                           selectedObject.interaction === "close_ui") && (
                           <div>
-                            <label className="text-sm text-neutral-500">
-                              {selectedObject.interaction === "open_ui"
-                                ? "Target UI Menu"
-                                : "Menu to Close (Optional)"}
-                            </label>
+                            <div className="flex justify-between items-center">
+                              <label className="text-sm text-neutral-500">
+                                {selectedObject.interaction === "open_ui"
+                                  ? "Target Custom UI Canvas"
+                                  : "Canvas to Close (Optional)"}
+                              </label>
+                              {selectedObject.interaction === "open_ui" && selectedObject.targetUiId && (
+                                <button
+                                  onClick={() => {
+                                    setProject((p) => ({ ...p, currentUiMenuId: selectedObject.targetUiId || "" }));
+                                    setEditorMode("ui_stage");
+                                  }}
+                                  className="text-[10px] text-fuchsia-400 hover:text-fuchsia-300 flex items-center gap-1 font-bold tracking-wide uppercase bg-fuchsia-500/10 hover:bg-fuchsia-500/20 px-2 py-0.5 rounded"
+                                >
+                                  <Layout size={10} /> Edit UI
+                                </button>
+                              )}
+                            </div>
                             <select
                               value={selectedObject.targetUiId || ""}
                               onChange={(e) =>
@@ -11416,7 +12413,7 @@ const App: React.FC = () => {
                             >
                               <option value="">
                                 {selectedObject.interaction === "open_ui"
-                                  ? "Select a UI menu..."
+                                  ? "Select a UI Canvas..."
                                   : "Currently Active Menu"}
                               </option>
                               {(project.uiMenus || []).map((s) => (
@@ -11485,12 +12482,12 @@ const App: React.FC = () => {
 
                       {/* Relationships */}
                       {!selectedObject.isUiElement && (
-                        <Accordion title="Relationships & Connections">
+                        <Accordion title="Grouping & Links">
                           <div className="grid grid-cols-2 gap-2">
                             <div>
                               <LabelWithHelp
-                                label="Parent Object"
-                                helpText="Attach this object to another object so it moves when the parent moves."
+                                label="Attach to Object"
+                                helpText="Link this object to another so they move together as a group."
                               />
                               <select
                                 value={selectedObject.parentObjectId || ""}
@@ -11501,7 +12498,7 @@ const App: React.FC = () => {
                                 }
                                 className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
                               >
-                                <option value="">None (Root)</option>
+                                <option value="">None (Independent)</option>
                                 {currentScene.objects
                                   .filter((o) => o.id !== selectedObject.id)
                                   .map((o) => (
@@ -11514,8 +12511,8 @@ const App: React.FC = () => {
                             </div>
                             <div>
                               <LabelWithHelp
-                                label="NPC Affinity ID"
-                                helpText="Used in RPG systems to track relationship stats with this character."
+                                label="Character Reputation ID"
+                                helpText="Used to track relationship points with this character."
                               />
                               <input
                                 type="text"
@@ -11535,7 +12532,7 @@ const App: React.FC = () => {
 
                       {/* RPG / Sim Elements */}
                       {!selectedObject.isUiElement && (
-                        <Accordion title="RPG & Sim Logic">
+                        <Accordion title="RPG Systems & Metadata">
                           <div>
                             <LabelWithHelp
                               label="Flavor Text (Hover)"
@@ -11744,24 +12741,79 @@ const App: React.FC = () => {
                   document.body.classList.add("resizing-left-sidebar")
                 }
               />
-              <button
-                onClick={() => {
-                  const newTree: DialogueTree = {
-                    id: uuidv4(),
-                    name: "New Conversation",
-                    nodes: [],
-                    startNodeId: null,
-                  };
-                  pushHistory({
-                    ...project,
-                    dialogueTrees: [...project.dialogueTrees, newTree],
-                  });
-                  setActiveTreeId(newTree.id);
-                }}
-                className="flex items-center justify-center gap-2 w-full py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
-              >
-                <Plus size={16} /> New Dialogue Tree
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    const newTree: DialogueTree = {
+                      id: uuidv4(),
+                      name: "New Conversation",
+                      nodes: [],
+                      startNodeId: null,
+                    };
+                    pushHistory({
+                      ...project,
+                      dialogueTrees: [...project.dialogueTrees, newTree],
+                    });
+                    setActiveTreeId(newTree.id);
+                  }}
+                  className="flex flex-1 items-center justify-center gap-2 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30 text-sm"
+                >
+                  <Plus size={16} /> New Conversation
+                </button>
+                <div className="flex gap-1 relative group">
+                   <button className="flex items-center justify-center gap-2 px-3 bg-neutral-800 text-neutral-300 rounded hover:bg-neutral-700 text-sm">
+                      IO
+                   </button>
+                   <div className="absolute top-full left-0 mt-1 hidden group-hover:block bg-neutral-900 border border-neutral-700 rounded shadow-xl z-[50] min-w-[200px]">
+                      <div 
+                        className="px-3 py-2 hover:bg-neutral-800 cursor-pointer text-xs"
+                        onClick={() => downloadJSON({ type: 'dialogueTrees', version: '1.0', data: project.dialogueTrees }, 'dialogue_trees.json')}
+                      >Export JSON</div>
+                      <div 
+                        className="px-3 py-2 hover:bg-neutral-800 cursor-pointer text-xs relative"
+                      >
+                         Import JSON
+                         <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept=".json" onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            try {
+                               const parsed = await loadJSON(file);
+                               if (parsed.type === 'dialogueTrees') {
+                                  pushHistory({ ...project, dialogueTrees: parsed.data });
+                               } else if (parsed.type === 'dialogueTree') {
+                                  pushHistory({ ...project, dialogueTrees: [...project.dialogueTrees, parsed.data] });
+                               }
+                            } catch (e) { alert("Failed to parse JSON"); }
+                         }} />
+                      </div>
+                      <div className="border-t border-neutral-700 my-1"></div>
+                      <div 
+                        className="px-3 py-2 hover:bg-neutral-800 cursor-pointer text-xs text-yellow-400"
+                        onClick={() => {
+                           if (!activeTreeId && project.dialogueTrees.length === 0) return;
+                           const targetTree = project.dialogueTrees.find(t => t.id === activeTreeId) || project.dialogueTrees[0];
+                           const twee = exportToTwee(targetTree);
+                           downloadText(twee, `${targetTree.name.replace(/[^a-z0-9]/gi, '_')}.twee`);
+                        }}
+                      >Export Active to Twine (Twee)</div>
+                      <div 
+                        className="px-3 py-2 hover:bg-neutral-800 cursor-pointer text-xs text-yellow-400 relative"
+                      >
+                         Import Twine (Twee)
+                         <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept=".twee,.txt" onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            try {
+                               const text = await loadText(file);
+                               const newTree = importFromTwee(text);
+                               pushHistory({ ...project, dialogueTrees: [...project.dialogueTrees, newTree] });
+                               setActiveTreeId(newTree.id);
+                            } catch (e) { alert("Failed to parse Twine"); }
+                         }} />
+                      </div>
+                   </div>
+                </div>
+              </div>
               <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
                 {(project.dialogueTrees || []).map((tree, idx) => {
                   const isActive = activeTreeId
@@ -11799,7 +12851,8 @@ const App: React.FC = () => {
                           dialoguePosition: e.target.value as
                             | "top"
                             | "center"
-                            | "bottom",
+                            | "bottom"
+                            | "below",
                         },
                       }))
                     }
@@ -11808,6 +12861,7 @@ const App: React.FC = () => {
                     <option value="top">Top</option>
                     <option value="center">Center</option>
                     <option value="bottom">Bottom</option>
+                    <option value="below">Below Scene</option>
                   </select>
                 </div>
                 <div>
@@ -11888,7 +12942,7 @@ const App: React.FC = () => {
                         }}
                         className="flex items-center gap-2 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 rounded text-sm"
                       >
-                        <Plus size={16} /> Add Node
+                        <Plus size={16} /> Add Message
                       </button>
 
                       <div className="space-y-4">
@@ -11901,7 +12955,7 @@ const App: React.FC = () => {
                               <div className="flex items-center gap-3">
                                 {tree.startNodeId === node.id && (
                                   <span className="text-sm uppercase tracking-wider bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">
-                                    Start Node
+                                    Start Message
                                   </span>
                                 )}
                                 <input
@@ -12546,7 +13600,7 @@ const App: React.FC = () => {
                                     </div>
                                     <div className="flex-1 flex items-center gap-1">
                                       <span className="text-sm uppercase font-bold text-emerald-800">
-                                        Change Scene:
+                                        Change Room (Scene):
                                       </span>
                                       <select
                                         value={choice.changeSceneId || ""}
@@ -12653,7 +13707,7 @@ const App: React.FC = () => {
         {editorMode === "scenes" && (
           <div className="flex-1 flex flex-col p-6 bg-neutral-950 overflow-hidden">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-white">Scene Manager</h2>
+              <h2 className="text-xl font-bold text-white">Rooms & Areas Manager</h2>
               <button
                 onClick={() => {
                   const newScene: Scene = {
@@ -12888,7 +13942,7 @@ const App: React.FC = () => {
         {editorMode === "ui_maker" && (
           <div className="flex-1 flex flex-col p-6 bg-neutral-950 overflow-hidden">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-white">UI Map Manager</h2>
+              <h2 className="text-xl font-bold text-white">Interfaces & Overlays</h2>
               <button
                 onClick={() => {
                   const newMenu: Scene = {
@@ -13146,7 +14200,7 @@ const App: React.FC = () => {
           <div className="flex-1 flex flex-col p-6 bg-neutral-950 overflow-hidden relative">
             <div className="flex justify-between items-center mb-6">
               <div className="flex items-center gap-4">
-                <h2 className="text-xl font-bold text-white">Systems</h2>
+                <h2 className="text-xl font-bold text-white">Game Rules</h2>
                 <div className="flex bg-neutral-900 rounded-lg p-1 border border-neutral-800">
                   <button
                     onClick={() => setRpgTab("quests")}
@@ -13400,7 +14454,7 @@ const App: React.FC = () => {
                     <div className="mt-8">
                       <div className="flex items-center justify-between mb-2">
                         <h2 className="text-xl font-bold text-pink-400">
-                          Custom Needs/Stats
+                          Custom Meters
                         </h2>
                       </div>
                       <div className="flex gap-2 mb-4">
@@ -14256,7 +15310,7 @@ const App: React.FC = () => {
           <div className="flex-1 flex flex-col p-6 bg-neutral-950 overflow-hidden">
             <div className="flex justify-between items-center mb-6">
               <div className="flex items-center gap-4">
-                <h2 className="text-xl font-bold text-white">Database</h2>
+                <h2 className="text-xl font-bold text-white">Item Database</h2>
                 <div className="flex bg-neutral-900 rounded-lg p-1 border border-neutral-800">
                   <button
                     onClick={() => setItemsTab("items")}
@@ -14274,23 +15328,53 @@ const App: React.FC = () => {
               </div>
 
               {itemsTab === "items" ? (
-                <button
-                  onClick={() => {
-                    const newItem: InventoryItem = {
-                      id: uuidv4(),
-                      name: "New Item",
-                      description: "",
-                      iconAssetId: null,
-                    };
-                    pushHistory({
-                      ...project,
-                      inventoryItems: [...project.inventoryItems, newItem],
-                    });
-                  }}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
-                >
-                  <Plus size={16} /> Create Item
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      const newItem: InventoryItem = {
+                        id: uuidv4(),
+                        name: "New Item",
+                        description: "",
+                        iconAssetId: null,
+                      };
+                      pushHistory({
+                        ...project,
+                        inventoryItems: [...project.inventoryItems, newItem],
+                      });
+                    }}
+                    className="flex flex-1 items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
+                  >
+                    <Plus size={16} /> Create Item
+                  </button>
+                  <div className="flex gap-1 relative group">
+                     <button className="flex items-center justify-center gap-2 px-4 bg-neutral-800 text-neutral-300 rounded hover:bg-neutral-700 text-sm">
+                        IO
+                     </button>
+                     <div className="absolute top-full right-0 mt-1 hidden group-hover:block bg-neutral-900 border border-neutral-700 rounded shadow-xl z-[50] min-w-[200px]">
+                        <div 
+                          className="px-3 py-2 hover:bg-neutral-800 cursor-pointer text-xs"
+                          onClick={() => downloadJSON({ type: 'inventoryItems', version: '1.0', data: project.inventoryItems }, 'inventory_items.json')}
+                        >Export JSON</div>
+                        <div 
+                          className="px-3 py-2 hover:bg-neutral-800 cursor-pointer text-xs relative"
+                        >
+                           Import JSON
+                           <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept=".json" onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              try {
+                                 const parsed = await loadJSON(file);
+                                 if (parsed.type === 'inventoryItems') {
+                                    pushHistory({ ...project, inventoryItems: parsed.data });
+                                 } else if (parsed.type === 'inventoryItem') {
+                                    pushHistory({ ...project, inventoryItems: [...project.inventoryItems, parsed.data] });
+                                 }
+                              } catch (e) { alert("Failed to parse JSON"); }
+                           }} />
+                        </div>
+                     </div>
+                  </div>
+                </div>
               ) : (
                 <button
                   onClick={() => {
@@ -15215,7 +16299,7 @@ const App: React.FC = () => {
                     </h3>
                     <ul className="text-sm text-neutral-400 space-y-1 mb-4">
                       <li>• {temp.scenes.length} Scene(s)</li>
-                      <li>• {temp.dialogueTrees.length} Dialogue Tree(s)</li>
+                      <li>• {temp.dialogueTrees.length} Conversation(s)</li>
                       <li>• {temp.inventoryItems.length} Item(s)</li>
                     </ul>
                     <div className="text-sm font-medium text-neutral-300 group-hover:text-emerald-400 transition-colors">
@@ -15385,7 +16469,7 @@ const App: React.FC = () => {
                       const y = rect ? contextMenu.y - rect.top : 0;
                       const newObj: SceneObject = {
                         id: uuidv4(),
-                        name: "New Hitbox",
+                        name: "Click Target",
                         src: "",
                         cursor: "default",
                         x, y,
@@ -15407,7 +16491,7 @@ const App: React.FC = () => {
                       setContextMenu(null);
                     }}
                   >
-                    <MousePointer2 size={14} /> Add Hitbox here
+                    <MousePointer2 size={14} /> Add Invisible Click Target
                   </button>
                 </>
               ) : (
@@ -15446,7 +16530,7 @@ const App: React.FC = () => {
                        setContextMenu(null);
                     }}
                   >
-                    <Box size={14} /> Save as Prefab/Stamp
+                    <Box size={14} /> Save as Stamp
                   </button>
                   <button
                     className="w-full text-left px-3 py-1.5 hover:bg-neutral-800 flex items-center gap-2"
@@ -15690,6 +16774,15 @@ const App: React.FC = () => {
                 assets: p.assets.map((a) =>
                   a.id === editingAssetId ? { ...a, src: newSrc } : a,
                 ),
+                prefabs: (p.prefabs || []).map(o => o._assetId === editingAssetId ? { ...o, src: newSrc } : o),
+                scenes: p.scenes.map(s => ({
+                  ...s,
+                  objects: s.objects.map(o => o._assetId === editingAssetId ? { ...o, src: newSrc } : o)
+                })),
+                uiMenus: p.uiMenus ? p.uiMenus.map(m => ({
+                  ...m,
+                  objects: m.objects.map(o => o._assetId === editingAssetId ? { ...o, src: newSrc } : o)
+                })) : []
               }));
             }
             setEditingAssetId(null);

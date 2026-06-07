@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { Plus, Trash2, Edit2, Play, Music, Video, Image as ImageIcon, Search, Star } from "lucide-react";
+import { Plus, Trash2, Edit2, Play, Music, Video, Image as ImageIcon, Search, Star, CheckSquare } from "lucide-react";
 import { Project, Asset } from "../types";
 import { v4 as uuidv4 } from "uuid";
 
@@ -14,7 +14,18 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
+  const [promptDialog, setPromptDialog] = useState<{
+    isOpen: boolean;
+    message: string;
+    onSubmit: (value: string) => void;
+  } | null>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -74,9 +85,9 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
     <div className="flex-1 flex flex-col bg-neutral-900 border-l border-neutral-800 h-full overflow-hidden">
       <div className="p-4 border-b border-neutral-800 bg-neutral-950 flex gap-4 items-center justify-between">
         <h2 className="text-xl font-bold flex flex-col gap-1 text-white">
-          <span>Asset Manager</span>
+          <span>File Library</span>
           <span className="text-[10px] text-neutral-400 font-normal">
-            (This tab is for uploading files. Return to <strong>Stage</strong> or <strong>UI</strong> mode and use the left Sidebar <strong>Library</strong> to place these in your game.)
+            (This tab is for uploading files. Return to <strong>Visual Editor</strong> or <strong>Menus & UI</strong> mode and use the left Sidebar <strong>Library</strong> to place these in your game.)
           </span>
         </h2>
         <div className="flex gap-2">
@@ -84,7 +95,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
             onClick={() => uploadInputRef.current?.click()}
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold flex items-center gap-2"
           >
-            <Plus size={16} /> Add Asset
+            <Plus size={16} /> Add File
           </button>
           <input
             type="file"
@@ -150,8 +161,13 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
             
             <button
                onClick={() => {
-                 const newCat = prompt("Enter new category name:");
-                 if (newCat) setActiveCategory(newCat);
+                 setPromptDialog({
+                   isOpen: true,
+                   message: "Enter new category name:",
+                   onSubmit: (newCat) => {
+                     if (newCat) setActiveCategory(newCat);
+                   }
+                 });
                }}
                className="w-full text-left px-3 py-2 text-sm text-neutral-500 hover:text-emerald-400"
             >
@@ -161,14 +177,126 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
         </div>
 
         {/* Main Asset Grid */}
-        <div className="flex-1 overflow-y-auto p-8 bg-neutral-900/50">
+        <div className="flex-1 overflow-y-auto p-8 bg-neutral-900/50 relative">
+          {selectedAssetIds.size > 0 && (
+            <div className="sticky top-0 z-30 mb-6 bg-indigo-900/80 backdrop-blur-md border border-indigo-500/50 rounded-lg p-3 flex items-center justify-between shadow-xl">
+               <div className="flex items-center gap-4">
+                  <div className="bg-indigo-950 text-indigo-300 font-bold px-3 py-1 rounded text-sm">
+                     {selectedAssetIds.size} Selected
+                  </div>
+                  
+                  <div className="h-6 w-px bg-indigo-500/30"></div>
+                  
+                  <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-indigo-200">Set Category:</span>
+                      <select 
+                         className="bg-indigo-950 border border-indigo-500/50 text-sm text-indigo-100 rounded px-2 py-1 outline-none"
+                         onChange={(e) => {
+                            if (!e.target.value) return;
+                            const val = e.target.value;
+                            updateProject({
+                              assets: project.assets.map(a => selectedAssetIds.has(a.id) ? { ...a, category: val } : a)
+                            });
+                            e.target.value = "";
+                         }}
+                      >
+                        <option value="">-- Categories --</option>
+                        <option value="root">Root Form</option>
+                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                  </div>
+                  
+                  <div className="h-6 w-px bg-indigo-500/30"></div>
+                  
+                  <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-indigo-200">Bulk Tags:</span>
+                      <input 
+                        id="bulk-tag-input"
+                        type="text" 
+                        placeholder="tag1, tag2..." 
+                        className="bg-indigo-950 border border-indigo-500/50 text-sm text-indigo-100 rounded px-2 py-1 outline-none w-40" 
+                        onKeyDown={(e) => {
+                           if (e.key === 'Enter') {
+                              const newTags = e.currentTarget.value.split(',').map(t => t.trim()).filter(Boolean);
+                              if (newTags.length > 0) {
+                                 updateProject({
+                                    assets: project.assets.map(a => {
+                                       if (selectedAssetIds.has(a.id)) {
+                                          const currentTags = a.tags || [];
+                                          const merged = Array.from(new Set([...currentTags, ...newTags]));
+                                          return { ...a, tags: merged };
+                                       }
+                                       return a;
+                                    })
+                                 });
+                                 e.currentTarget.value = "";
+                              }
+                           }
+                        }}
+                      />
+                      <span className="text-xs text-indigo-400">press Enter</span>
+                  </div>
+               </div>
+               
+               <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setSelectedAssetIds(new Set())}
+                    className="px-3 py-1.5 hover:bg-white/10 text-indigo-200 text-sm rounded transition-colors"
+                  >
+                     Clear Selection
+                  </button>
+                  <button 
+                    onClick={() => {
+                       setConfirmDialog({
+                          isOpen: true,
+                          message: `Delete ${selectedAssetIds.size} assets?`,
+                          onConfirm: () => {
+                             updateProject({
+                                assets: project.assets.filter(a => !selectedAssetIds.has(a.id))
+                             });
+                             setSelectedAssetIds(new Set());
+                          }
+                       });
+                    }}
+                    className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 text-sm rounded transition-colors flex items-center gap-2"
+                  >
+                     <Trash2 size={14} /> Bulk Delete
+                  </button>
+               </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-8 gap-6">
             {filteredAssets.map((asset) => (
               <div
                 key={asset.id}
-                className="group relative bg-neutral-900 border border-neutral-800/80 rounded-xl overflow-hidden flex flex-col shadow-lg transition-transform hover:-translate-y-1 hover:shadow-xl hover:border-indigo-500/50"
+                className={`group relative bg-neutral-900 border rounded-xl overflow-hidden flex flex-col shadow-lg transition-transform hover:-translate-y-1 hover:shadow-xl ${
+                  selectedAssetIds.has(asset.id) ? "border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)]" : "border-neutral-800/80 hover:border-indigo-500/50"
+                }`}
               >
-                <div className="aspect-square flex items-center justify-center p-4 relative bg-black/40">
+                <div 
+                   className="aspect-square flex items-center justify-center p-4 relative bg-black/40 cursor-pointer"
+                   onClick={() => {
+                      const newSet = new Set(selectedAssetIds);
+                      if (newSet.has(asset.id)) newSet.delete(asset.id);
+                      else newSet.add(asset.id);
+                      setSelectedAssetIds(newSet);
+                   }}
+                >
+                  <button 
+                    className={`absolute top-2 left-2 p-1 rounded-md backdrop-blur-md z-20 transition-all ${
+                       selectedAssetIds.has(asset.id) ? 'bg-indigo-500 text-white opacity-100' : 'bg-black/40 text-neutral-400 opacity-0 group-hover:opacity-100'
+                    }`}
+                    onClick={(e) => {
+                       e.stopPropagation();
+                       const newSet = new Set(selectedAssetIds);
+                       if (newSet.has(asset.id)) newSet.delete(asset.id);
+                       else newSet.add(asset.id);
+                       setSelectedAssetIds(newSet);
+                    }}
+                  >
+                     <CheckSquare size={16} />
+                  </button>
                   {asset.type === "image" ? (
                     <img src={asset.src} className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md" />
                   ) : asset.type === "audio" ? (
@@ -280,11 +408,15 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                     </select>
                     <button
                       onClick={() => {
-                        if (confirm(`Delete ${asset.name}?`)) {
-                          updateProject({
-                            assets: project.assets.filter((a) => a.id !== asset.id),
-                          });
-                        }
+                        setConfirmDialog({
+                          isOpen: true,
+                          message: `Delete ${asset.name}?`,
+                          onConfirm: () => {
+                            updateProject({
+                              assets: project.assets.filter((a) => a.id !== asset.id),
+                            });
+                          }
+                        });
                       }}
                       className="p-1.5 hover:bg-rose-500/20 text-neutral-500 hover:text-rose-400 rounded-md transition-colors"
                       title="Delete Asset"
@@ -301,8 +433,8 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                <div className="w-24 h-24 border-2 border-dashed border-neutral-700 rounded-full flex items-center justify-center mb-6 bg-neutral-950/50">
                  <ImageIcon size={32} className="opacity-40" />
                </div>
-               <h3 className="text-xl font-bold text-neutral-300 mb-2">No assets found</h3>
-               <p className="text-sm opacity-70 max-w-sm text-center mb-6">Your asset library is looking a little empty. Upload images, audio, or video files to get started.</p>
+               <h3 className="text-xl font-bold text-neutral-300 mb-2">No files found</h3>
+               <p className="text-sm opacity-70 max-w-sm text-center mb-6">Your file library is looking a little empty. Upload images, audio, or video files to get started.</p>
                <button 
                  onClick={() => uploadInputRef.current?.click()}
                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg shadow-lg flex items-center gap-2 transition-all hover:-translate-y-0.5"
@@ -313,6 +445,77 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
           )}
         </div>
       </div>
+      {confirmDialog?.isOpen && (
+        <div className="fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center">
+          <div className="bg-neutral-800 p-6 rounded-lg shadow-xl border border-neutral-700 w-80">
+            <h3 className="text-lg font-medium text-white mb-6 text-center">
+              {confirmDialog.message}
+            </h3>
+            <div className="flex justify-center gap-2">
+              <button
+                onClick={() => setConfirmDialog(null)}
+                className="px-4 py-2 text-sm text-neutral-400 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  confirmDialog.onConfirm();
+                  setConfirmDialog(null);
+                }}
+                className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {promptDialog?.isOpen && (
+        <div className="fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center">
+          <div className="bg-neutral-800 p-6 rounded-lg shadow-xl border border-neutral-700 w-80">
+            <h3 className="text-lg font-medium text-white mb-4">
+              {promptDialog.message}
+            </h3>
+            <input
+              autoFocus
+              type="text"
+              className="w-full bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-white mb-4 focus:outline-none focus:border-emerald-500"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  promptDialog.onSubmit(e.currentTarget.value);
+                  setPromptDialog(null);
+                } else if (e.key === "Escape") {
+                  setPromptDialog(null);
+                }
+              }}
+              id="library-prompt-input"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setPromptDialog(null)}
+                className="px-4 py-2 text-sm text-neutral-400 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const el = document.getElementById(
+                    "library-prompt-input",
+                  ) as HTMLInputElement;
+                  if (el) {
+                    promptDialog.onSubmit(el.value);
+                  }
+                  setPromptDialog(null);
+                }}
+                className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

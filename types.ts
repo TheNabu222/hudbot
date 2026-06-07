@@ -175,6 +175,7 @@ export interface SceneObject {
   id: string;
   name: string;
   src: string;
+  _assetId?: string;
   x: number;
   y: number;
   width: number;
@@ -205,6 +206,11 @@ export interface SceneObject {
   isHitbox?: boolean;
   isScript?: boolean;
   isVideo?: boolean;
+
+  // Responsive UI & Positioning Constraints
+  stretchToScreen?: boolean;
+  pinToEdge?: "none" | "center" | "top" | "bottom" | "left" | "right" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  objectFit?: "fill" | "contain" | "cover";
 
   // Text Tool settings
   isText?: boolean;
@@ -444,7 +450,7 @@ export interface Project {
     snapToGrid: boolean;
     gridSize: number;
     showGhostOutlines: boolean;
-    dialoguePosition?: "top" | "bottom" | "center";
+    dialoguePosition?: "top" | "bottom" | "center" | "below";
     typewriterSpeed?: number;
     hideDefaultInventoryBtn?: boolean;
     hideDefaultCraftingBtn?: boolean;
@@ -464,6 +470,11 @@ export interface Project {
       assetId?: string;
       opacity?: number;
       blendMode?: string;
+      pointerEvents?: "none" | "auto";
+      scale?: number;
+      position?: "stretch" | "center" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
+      offsetX?: number;
+      offsetY?: number;
     };
     uiTheme?:
       | "default"

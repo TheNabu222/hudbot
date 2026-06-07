@@ -16,31 +16,31 @@
 @layer base {
   body {
     background-image: 
-      linear-gradient(#4d004d 1px, transparent 1px),
-      linear-gradient(90deg, #4d004d 1px, transparent 1px);
-    background-size: 20px 20px;
-    background-color: #0d001a;
-    cursor: crosshair;
+      linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-color: #0c0c0e;
     letter-spacing: 0.5px;
+    color: #f4f4f5;
   }
   
   /* Removed global border-radius override to soften UI */
 
-  /* Make scrollbars blocky and neon */
+  /* Modern clean neutral scrollbars */
   ::-webkit-scrollbar {
-    width: 14px;
-    height: 14px;
+    width: 10px;
+    height: 10px;
   }
   ::-webkit-scrollbar-track {
-    background: #1a0033;
-    border-left: 2px solid #00ffff;
+    background: #0f0f11;
   }
   ::-webkit-scrollbar-thumb {
-    background: #ff00ff;
-    border: 2px solid #00ffff;
+    background: #27272a;
+    border: 2px solid #0f0f11;
+    border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #ff33ff;
+    background: #3f3f46;
   }
   
   /* Button and input styling handles by Tailwind in App.tsx */

@@ -12,6 +12,7 @@ interface ImageEditorModalProps {
 export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSave, onClose }) => {
   const [crop, setCrop] = useState<Crop>();
   const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   
   const [brightness, setBrightness] = useState(100);
@@ -102,7 +103,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
       const base64Image = canvas.toDataURL('image/png');
       onSave(base64Image, false);
     } catch (e) {
-      alert("Error saving image. If it's an external URL, it might have CORS restrictions that prevent editing. Try re-uploading the image directly.");
+      setErrorMsg("Error saving image. If it's an external URL, it might have CORS restrictions that prevent editing. Try re-uploading the image directly.");
       console.error(e);
     }
   };
@@ -147,13 +148,19 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
       const base64Image = canvas.toDataURL('image/png');
       onSave(base64Image, true);
     } catch (e) {
-      alert("Error saving image. If it's an external URL, it might have CORS restrictions that prevent editing. Try re-uploading the image directly.");
+      setErrorMsg("Error saving image. If it's an external URL, it might have CORS restrictions that prevent editing. Try re-uploading the image directly.");
       console.error(e);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/90 z-[3000] flex items-center justify-center p-4">
+      {errorMsg && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[4000] bg-red-500 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2">
+          <span>{errorMsg}</span>
+          <button onClick={() => setErrorMsg(null)} className="text-white/80 hover:text-white">&times;</button>
+        </div>
+      )}
       <div className="bg-neutral-900 border border-neutral-700 rounded-lg max-w-5xl w-full h-[90vh] flex shadow-2xl overflow-hidden">
         
         {/* Editor Area */}

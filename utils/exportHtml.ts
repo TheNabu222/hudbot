@@ -78,7 +78,13 @@ export function generateExportHtml(project: Project): string {
   const css = `
     :root {
       --time-filter: brightness(1) sepia(0) hue-rotate(0deg);
-      ${project.globalSettings?.customCursorAssetId ? `--custom-cursor: url('${project.assets.find((a) => a.id === project.globalSettings?.customCursorAssetId)?.src}'), auto;` : ""}
+      ${(() => {
+        if (!project.globalSettings?.customCursorAssetId) return "";
+        const cAsset = project.assets.find((a) => a.id === project.globalSettings?.customCursorAssetId);
+        if (!cAsset) return "";
+        const src = cAsset.dataURL || cAsset.src || "";
+        return `--custom-cursor: url('${src}'), auto;`;
+      })()}
     }
     * {
       ${project.globalSettings?.customCursorAssetId ? `cursor: var(--custom-cursor) !important;` : ""}
@@ -86,23 +92,13 @@ export function generateExportHtml(project: Project): string {
     body {
       margin: 0;
       padding: 0;
-      background-image: 
-        linear-gradient(#4d004d 1px, transparent 1px),
-        linear-gradient(90deg, #4d004d 1px, transparent 1px);
-      background-size: 20px 20px;
-      background-color: #0d001a;
+      background-color: #1a1a1a;
       display: flex;
       justify-content: center;
       align-items: center;
       min-height: 100vh;
       font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
-      overflow: visible;
-      cursor: crosshair;
-      color: #ff00ff;
-      background-color: #1a1a1a;
-    }
-    * {
-      border-radius: 0 !important;
+      color: #f5f5f5;
     }
     #game-container {
       position: relative;
@@ -111,8 +107,6 @@ export function generateExportHtml(project: Project): string {
       /* background-color handles inside scene divs */
       background-color: #000;
       overflow: hidden;
-      box-shadow: 6px 6px 0px #ff00ff, 12px 12px 0px #00ffff;
-      border: 4px dotted #ff00ff;
       filter: var(--time-filter);
       transition: filter 2s ease;
     }
@@ -209,45 +203,147 @@ export function generateExportHtml(project: Project): string {
     /* UI Variables */
     :root {
       --ui-bg: ${project.globalSettings?.uiColorBackground || "#171717"};
+      --ui-bg-alpha: color-mix(in srgb, var(--ui-bg) 93%, transparent);
       --ui-primary: ${project.globalSettings?.uiColorPrimary || "#10b981"};
+      --ui-primary-half: color-mix(in srgb, var(--ui-primary) 50%, transparent);
+      --ui-primary-glow: color-mix(in srgb, var(--ui-primary) 40%, transparent);
+      --ui-primary-border: color-mix(in srgb, var(--ui-primary) 80%, transparent);
+      --ui-primary-choice: color-mix(in srgb, var(--ui-primary) 30%, transparent);
+      --ui-primary-hover: color-mix(in srgb, var(--ui-primary) 20%, transparent);
       --ui-font: ${project.globalSettings?.uiFontFamily || "sans-serif"};
       --ui-radius: ${project.globalSettings?.uiBorderRadius ?? 8}px;
     }
 
     #dialogue-box {
       display: none;
-      position: absolute;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 90%;
-      max-width: 800px;
-      background-color: color-mix(in srgb, var(--ui-bg) 95%, transparent);
-      color: #e5e5e5;
+      ${(() => {
+        const dPos = project.globalSettings?.dialoguePosition || "bottom";
+        if (dPos === "top") return "position: absolute; top: 32px; left: 50%; transform: translateX(-50%); width: 91.666667%; max-width: 672px;";
+        if (dPos === "center") return "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 91.666667%; max-width: 672px;";
+        if (dPos === "below") return "position: relative; margin-top: 24px; width: 100%; max-width: " + (project.globalSettings?.stageWidth || 800) + "px; width: 91.666667%;";
+        return "position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); width: 91.666667%; max-width: 672px;";
+      })()}
+      max-height: 90%;
+      background-color: var(--ui-bg-alpha);
+      color: #f5f5f5;
       padding: 0;
       border-radius: var(--ui-radius);
-      border: 2px solid color-mix(in srgb, var(--ui-primary) 50%, transparent);
-      font-size: 18px;
+      border: 2px solid var(--ui-primary-border);
       font-family: var(--ui-font);
       pointer-events: auto;
-      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px color-mix(in srgb, var(--ui-primary) 40%, transparent);
-      backdrop-filter: blur(8px);
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px var(--ui-primary-glow);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      filter: drop-shadow(0 25px 25px rgb(0 0 0 / 0.15));
       overflow: hidden;
       z-index: 20000;
+      flex-direction: column;
+      flex-shrink: 0;
     }
-
+    
     .dialogue-title {
       padding: 12px 24px;
-      background-color: rgba(0,0,0,0.3);
-      border-bottom: 1px solid color-mix(in srgb, var(--ui-primary) 50%, transparent);
+      border-bottom: 1px solid var(--ui-primary-half);
       font-weight: bold;
+      letter-spacing: 0.05em;
+      background-color: rgba(0,0,0,0.3);
       color: var(--ui-primary);
-      letter-spacing: 0.025em;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    .dialogue-content {
+      display: flex;
+      padding: 24px;
+      max-height: 40vh;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+    .dialogue-portrait {
+      width: 96px;
+      height: 96px;
+      flex-shrink: 0;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--ui-primary-glow);
+      background-color: rgba(0,0,0,0.4);
+      padding: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+    }
+    .dialogue-portrait.left { margin-right: 24px; }
+    .dialogue-portrait.right { margin-left: 24px; }
+    .dialogue-portrait img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    .dialogue-text-container {
+      font-size: 18px;
+      font-weight: 500;
+      line-height: 1.625;
+      flex: 1;
+      color: white;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+      align-self: center;
+    }
+    .dialogue-choices {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      border-top: 1px solid var(--ui-primary-half);
+      background-color: rgba(0,0,0,0.2);
+      position: relative;
+    }
+    .dialogue-choice {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      color: white;
+      border: none;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--ui-primary-choice);
+      cursor: pointer;
+      transition: background-color 0.2s, color 0.2s;
+      font-family: inherit;
+      font-size: 16px;
+      font-weight: 500;
+    }
+    .dialogue-choice:last-child {
+      border-bottom: none;
+    }
+    .dialogue-choice:hover {
+      background-color: var(--ui-primary-hover);
     }
 
-    .dialogue-content {
-      padding: 24px;
-      display: flex;
+    #dialogue-box.simple-dialogue {
+      width: 80%;
+      max-width: 512px;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    #dialogue-box.simple-dialogue:hover {
+      transform: translateX(-50%) scale(1.02);
+    }
+    .simple-dialogue-text {
+      padding: 16px;
+      text-align: center;
+      margin-top: 10px;
+      line-height: 1.625;
+      font-weight: 500;
+      color: white;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+    }
+    .simple-dialogue-continue {
+      padding: 8px 16px;
+      opacity: 0.5;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      text-align: center;
+      border-top: 1px solid var(--ui-primary-glow);
+      margin-top: 8px;
     }
 
     /* Inventory UI */
@@ -809,15 +905,27 @@ export function generateExportHtml(project: Project): string {
       
       // Scale game to fit screen
       const scaleWrapper = document.getElementById('scale-wrapper');
+      const layoutResizer = document.getElementById('game-layout-resizer');
+      
       let currentScale = 1;
       const resizeGame = () => {
         const gameW = ${boundW};
-        const gameH = ${boundH};
+        let gameH = ${boundH};
+        
         const winW = window.innerWidth;
         const winH = window.innerHeight;
-        currentScale = Math.min(winW / gameW, winH / gameH);
+        
+        // Approximate a comfortable vertical limit if dialogue is below
+        const maxGameH = globalSettings.dialoguePosition === 'below' ? Math.max(0, winH - 240) : winH;
+        
+        currentScale = Math.min(winW / gameW, maxGameH / gameH);
         gamePositioner.style.transform = 'scale(' + currentScale + ')';
-        gamePositioner.style.transformOrigin = 'center center';
+        gamePositioner.style.transformOrigin = 'top left';
+        
+        if (layoutResizer) {
+            layoutResizer.style.width = (gameW * currentScale) + 'px';
+            layoutResizer.style.height = (gameH * currentScale) + 'px';
+        }
       };
       window.addEventListener('resize', resizeGame);
       resizeGame();
@@ -882,38 +990,44 @@ export function generateExportHtml(project: Project): string {
         
         const speakerAsset = node.speakerAssetId ? assets.find(a => a.id === node.speakerAssetId) : null;
         
-        let html = '<div class="dialogue-title">' + (node.speaker || 'Unknown') + '</div>';
-        html += '<div class="dialogue-content">';
+        let html = '<div class="dialogue-title">' + (node.speaker || 'Unknown') + '</div>' +
+                   '<div class="dialogue-content">';
         
         if (speakerAsset && (!node.portraitPosition || node.portraitPosition === 'left')) {
-          html += '<div style="width: 96px; height: 96px; flex-shrink: 0; margin-right: 24px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; overflow: hidden; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center;"><img src="' + speakerAsset.src + '" style="max-width: 100%; max-height: 100%; object-fit: contain;" /></div>';
+          html += '<div class="dialogue-portrait left">' +
+                  '<img src="' + speakerAsset.src + '" />' +
+                  '</div>';
         }
         
-        html += '<div style="flex: 1; font-size: 18px; line-height: 1.6; font-weight: 500; text-shadow: 1px 1px 2px rgba(0,0,0,0.6);" id="dialogue-text"></div>';
+        html += '<div class="dialogue-text-container" id="dialogue-text"></div>';
         
         if (speakerAsset && node.portraitPosition === 'right') {
-          html += '<div style="width: 96px; height: 96px; flex-shrink: 0; margin-left: 24px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; overflow: hidden; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center;"><img src="' + speakerAsset.src + '" style="max-width: 100%; max-height: 100%; object-fit: contain;" /></div>';
+          html += '<div class="dialogue-portrait right">' +
+                  '<img src="' + speakerAsset.src + '" />' +
+                  '</div>';
         }
         html += '</div>';
         
-        let choicesHtml = '<div class="dialogue-choices" style="display: flex; flex-direction: column; width: 100%;">';
+        let choicesHtml = '<div class="dialogue-choices">';
         if (node.choices && node.choices.length > 0) {
           let hasChoices = false;
           node.choices.forEach((c, idx) => {
             if (c.requiredGameFlag && !state.flags[c.requiredGameFlag]) return;
             hasChoices = true;
-            choicesHtml += '<button onclick="chooseDialogue(' + idx + ')" style="display: block; width: 100%; text-align: left; background: transparent; color: #d4d4d8; border: none; padding: 16px 24px; border-top: 1px solid rgba(255,255,255,0.1); cursor: pointer; transition: all 0.2s; font-family: inherit; font-size: 16px;" onmouseover="this.style.backgroundColor=\\'rgba(255,255,255,0.1)\\'; this.style.color=\\'var(--ui-primary)\\'" onmouseout="this.style.backgroundColor=\\'transparent\\'; this.style.color=\\'#d4d4d8\\'">&#9656; ' + c.text + '</button>';
+            choicesHtml += '<button class="dialogue-choice" onclick="chooseDialogue(' + idx + ')">&#9656; ' + c.text + '</button>';
           });
           if (!hasChoices) {
-              choicesHtml += '<button onclick="closeDialogue()" style="display: block; width: 100%; background: transparent; color: var(--ui-primary); border: none; padding: 16px 24px; cursor: pointer; text-align: center; font-weight: bold; font-family: inherit; font-size: 16px; border-top: 1px solid rgba(255,255,255,0.1); transition: all 0.2s;" onmouseover="this.style.backgroundColor=\\'rgba(255,255,255,0.1)\\'" onmouseout="this.style.backgroundColor=\\'transparent\\'">Continue...</button>';
+              choicesHtml += '<button class="dialogue-choice" style="text-align: center;" onclick="closeDialogue()">Continue...</button>';
           }
         } else {
-          choicesHtml += '<button onclick="closeDialogue()" style="display: block; width: 100%; background: transparent; color: var(--ui-primary); border: none; padding: 16px 24px; cursor: pointer; text-align: center; font-weight: bold; font-family: inherit; font-size: 16px; border-top: 1px solid rgba(255,255,255,0.1); transition: all 0.2s;" onmouseover="this.style.backgroundColor=\\'rgba(255,255,255,0.1)\\'" onmouseout="this.style.backgroundColor=\\'transparent\\'">Continue...</button>';
+          choicesHtml += '<button class="dialogue-choice" style="text-align: center;" onclick="closeDialogue()">Continue...</button>';
         }
         choicesHtml += '</div>';
         
+        dialogueBox.className = ''; // Make sure simple-dialogue is removed
+        dialogueBox.onclick = null;
         dialogueBox.innerHTML = html + choicesHtml;
-        dialogueBox.style.display = 'block';
+        dialogueBox.style.display = 'flex';
         
         const textEl = document.getElementById('dialogue-text');
         const text = node.text || '';
@@ -947,20 +1061,10 @@ export function generateExportHtml(project: Project): string {
 
       window.closeDialogue = () => {
         activeDialogue = null;
-        dialogueBox.style.display = 'none';
+        if (dialogueBox) dialogueBox.style.display = 'none';
         if (window.typewriterInterval) clearInterval(window.typewriterInterval);
       };
       
-      // Setup Dialogue Position
-      if (globalSettings.dialoguePosition === 'top') {
-        dialogueBox.style.bottom = 'auto';
-        dialogueBox.style.top = '20px';
-      } else if (globalSettings.dialoguePosition === 'center') {
-        dialogueBox.style.bottom = 'auto';
-        dialogueBox.style.top = '50%';
-        dialogueBox.style.transform = 'translate(-50%, -50%)';
-      }
-
       // Update Game Flags UI
       const updateGameFlagsUI = () => {
         document.querySelectorAll('[data-ui-binding="flag"]').forEach((el) => {
@@ -1091,16 +1195,25 @@ export function generateExportHtml(project: Project): string {
       });
 
       window.showSimpleDialogue = (text, title) => {
-        const dummyTree = {
-          nodes: [{
-            id: 'dummy',
-            speaker: title || '',
-            text: text,
-            choices: []
-          }]
-        };
-        showDialogueNode(dummyTree, 'dummy');
-        setTimeout(() => closeDialogue(), Math.max(2000, text.length * 50 + 1000));
+        const dBox = document.getElementById('dialogue-box');
+        dBox.className = 'simple-dialogue';
+        dBox.innerHTML = '<div class="simple-dialogue-text" id="dialogue-text"></div><div class="simple-dialogue-continue">Click to continue</div>';
+        dBox.style.display = 'flex';
+        dBox.onclick = window.closeDialogue;
+        
+        const textEl = document.getElementById('dialogue-text');
+        let i = 0;
+        if (window.typewriterInterval) clearInterval(window.typewriterInterval);
+        
+        if (typeSpeed <= 0) {
+          textEl.innerText = text;
+        } else {
+          window.typewriterInterval = setInterval(() => {
+            textEl.innerText = text.substring(0, i + 1);
+            i++;
+            if (i >= text.length) clearInterval(window.typewriterInterval);
+          }, typeSpeed);
+        }
       };
 
       // Interactions
@@ -1205,10 +1318,12 @@ export function generateExportHtml(project: Project): string {
               saveGame();
             }
           } else if (interaction === 'dialogue' || interaction === 'flavor_text') {
-            showSimpleDialogue(data, "");
-          } else if (interaction === 'start-dialogue') {
             const treeId = obj.getAttribute('data-dialogue-tree');
-            if (treeId) startDialogue(treeId);
+            if (interaction === 'dialogue' && treeId) {
+              startDialogue(treeId);
+            } else {
+              showSimpleDialogue(data, "");
+            }
           } else if (interaction === 'sound') {
             const soundAsset = assets.find(a => a.id === data);
             if (soundAsset) {
@@ -1593,8 +1708,22 @@ export function generateExportHtml(project: Project): string {
     const asset = project.assets.find((a) => a.id === overlay.assetId);
     if (asset) {
       const hudSrc = asset.dataURL || asset.src || "";
+      const bgSize = overlay.position === "stretch" ? "100% 100%" : (overlay.position ? "contain" : "100% 100%");
+      let bgPos = "center";
+      if (overlay.position === "top-left") bgPos = "top left";
+      if (overlay.position === "top-right") bgPos = "top right";
+      if (overlay.position === "bottom-left") bgPos = "bottom left";
+      if (overlay.position === "bottom-right") bgPos = "bottom right";
+      bgPos = `${bgPos}`; // Just to ensure clean bgPos
+      const ptrEvents = overlay.pointerEvents === "auto" ? "auto" : "none";
+      const scale = overlay.scale ?? 1;
+      // Handle x/y offsets
+      let tx = overlay.offsetX || 0;
+      let ty = overlay.offsetY || 0;
+      const tform = `scale(${scale}) translate(${tx}px, ${ty}px)`;
+      
       hudHtml = `
-      <div id="global-hud-overlay" style="position: absolute; left: 0px; top: 0px; width: ${exportWidth}px; height: ${exportHeight}px; background-image: url('${hudSrc}'); background-size: 100% 100%; pointer-events: none; z-index: 99999; mix-blend-mode: ${overlay.blendMode || "normal"}; opacity: ${overlay.opacity ?? 1};"></div>
+      <div id="global-hud-overlay" style="position: absolute; left: 0px; top: 0px; width: ${exportWidth}px; height: ${exportHeight}px; background-image: url('${hudSrc}'); background-size: ${bgSize}; background-position: ${bgPos}; background-repeat: no-repeat; transform: ${tform}; pointer-events: ${ptrEvents}; z-index: 99999; mix-blend-mode: ${overlay.blendMode || "normal"}; opacity: ${overlay.opacity ?? 1};"></div>
       `;
     }
   }
@@ -1612,9 +1741,10 @@ export function generateExportHtml(project: Project): string {
   </style>
 </head>
 <body>
-  <div id="scale-wrapper" style="width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; overflow: visible; background-color: #1a1a1a;">
-    <div id="game-positioner" style="position: relative; width: ${boundW}px; height: ${boundH}px;">
-      <div id="game-coordinate-space" style="position: absolute; left: ${offsetX}px; top: ${offsetY}px; width: ${exportWidth}px; height: ${exportHeight}px;">
+  <div id="scale-wrapper" style="width: 100vw; height: 100vh; display: flex; flex-direction: ${project.globalSettings?.dialoguePosition === 'below' ? 'column' : 'row'}; justify-content: center; align-items: center; overflow: hidden; background-color: #1a1a1a;">
+    <div id="game-layout-resizer" style="position: relative; flex-shrink: 0; display: flex; justify-content: center; align-items: flex-start;">
+      <div id="game-positioner" style="position: absolute; left: 0; top: 0; width: ${boundW}px; height: ${boundH}px;">
+        <div id="game-coordinate-space" style="position: absolute; left: ${offsetX}px; top: ${offsetY}px; width: ${exportWidth}px; height: ${exportHeight}px;">
         ${hudHtml}
         <div id="game-container" style="position: absolute; inset: 0; overflow: hidden; width: 100%; height: 100%;">
           ${scenesHtml}
@@ -1630,7 +1760,7 @@ export function generateExportHtml(project: Project): string {
             <button id="cutscene-skip-btn" style="position: absolute; top: 1rem; right: 1rem; background: rgba(0,0,0,0.5); color: white; border: none; padding: 0.25rem 0.75rem; border-radius: 4px; cursor: pointer;">Skip</button>
         </div>
 
-        <div id="dialogue-box"></div>
+        ${project.globalSettings?.dialoguePosition !== 'below' ? '<div id="dialogue-box"></div>' : ''}
         <div id="flavor-text"></div>
         <div id="game-transition" style="display: none; position: fixed; inset: 0; z-index: 99999; background: black; opacity: 0; pointer-events: none; transition: opacity 0.5s ease;"></div>
         
@@ -1705,8 +1835,9 @@ export function generateExportHtml(project: Project): string {
       </div>
   </div> <!-- Close game-coordinate-space -->
   </div> <!-- Close game-positioner -->
-  <!-- Close scale-wrapper -->
-  </div>
+  </div> <!-- Close game-layout-resizer -->
+  ${project.globalSettings?.dialoguePosition === 'below' ? '<div id="dialogue-box"></div>' : ''}
+  </div> <!-- Close scale-wrapper -->
   <script id="__GAME_DATA__" type="application/json">${JSON.stringify(strippedProject).split("</script>").join("<\\/script>").split("</SCRIPT>").join("<\\/script>")}</script>
   <script>${js}</script>
 </body>
