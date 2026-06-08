@@ -451,6 +451,9 @@ export interface Project {
     gridSize: number;
     showGhostOutlines: boolean;
     dialoguePosition?: "top" | "bottom" | "center" | "below";
+    dialogueWidthPercent?: number; // default 91
+    dialogueMaxHeightPercent?: number; // default 90
+    dialogueMaxWidthPx?: number; // default 672
     typewriterSpeed?: number;
     hideDefaultInventoryBtn?: boolean;
     hideDefaultCraftingBtn?: boolean;

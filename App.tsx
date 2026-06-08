@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 import {
   Play,
@@ -514,6 +514,16 @@ const App: React.FC = () => {
         newHeight = Math.max(100, Math.min(4000, isResizingCanvas.startHeight + canvasDy));
       }
 
+      if (isResizingCanvas.direction === "br" && e.shiftKey) {
+        // Proportional resizing
+        const aspect = isResizingCanvas.startWidth / isResizingCanvas.startHeight;
+        if (newWidth / aspect > newHeight) {
+          newHeight = Math.round(newWidth / aspect);
+        } else {
+          newWidth = Math.round(newHeight * aspect);
+        }
+      }
+
       setProject((p) => {
         const updatedScenes = p.scenes.map((s) => {
           if (s.id === p.currentSceneId) {
@@ -833,7 +843,7 @@ const App: React.FC = () => {
     };
 
     // Debounce save slightly to avoid thrashing
-    const timeoutId = setTimeout(saveProject, 500);
+    const timeoutId = setTimeout(saveProject, 2000);
     return () => clearTimeout(timeoutId);
   }, [project]);
 
@@ -1117,6 +1127,12 @@ const App: React.FC = () => {
       setPhysicsState({});
     }
   }, [isPlaying, project.currentSceneId]);
+
+  const assetMap = useMemo(() => {
+    const map = new Map<string, Asset>();
+    project.assets.forEach(a => map.set(a.id, a));
+    return map;
+  }, [project.assets]);
 
   // Dragging state for stage objects
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -2176,7 +2192,8 @@ const App: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "game.html";
+      const cleanName = project.name ? project.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() : 'game';
+      a.download = `${cleanName}.html`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -6293,13 +6310,16 @@ const App: React.FC = () => {
                     return (
                       <div
                         onClick={() => setPreviewDialogue(null)}
-                        className={`absolute ${posClass} w-4/5 max-w-lg max-h-[80%] overflow-y-auto custom-scrollbar shadow-2xl backdrop-blur-sm pointer-events-auto cursor-pointer drop-shadow-2xl hover:scale-[1.02] transition-transform z-[9000]`}
+                        className={`absolute ${posClass} overflow-y-auto custom-scrollbar shadow-2xl backdrop-blur-sm pointer-events-auto cursor-pointer drop-shadow-2xl hover:scale-[1.02] transition-transform z-[9000]`}
                         style={{
                           backgroundColor: `${uiBg}ee`,
                           border: `2px solid ${uiPrimary}80`,
                           borderRadius: uiRadius,
                           fontFamily: uiFont,
                           color: "#ffffff",
+                          width: dPos === "below" ? "100%" : `${project.globalSettings.dialogueWidthPercent ?? 91.666}%`,
+                          maxWidth: dPos === "below" ? (project.globalSettings.stageWidth || 800) : (project.globalSettings.dialogueMaxWidthPx ?? 672),
+                          maxHeight: `${project.globalSettings.dialogueMaxHeightPercent ?? 90}%`,
                         }}
                       >
                         <div className="p-4 text-lg text-center font-medium drop-shadow-md">
@@ -6365,13 +6385,16 @@ const App: React.FC = () => {
 
                     return (
                       <div
-                        className={`absolute ${posClass} w-11/12 max-w-2xl max-h-[90%] shrink-0 text-neutral-100 z-[9000] shadow-2xl flex flex-col overflow-hidden backdrop-blur-md filter drop-shadow-2xl dialogue-box`}
+                        className={`absolute ${posClass} shrink-0 text-neutral-100 z-[9000] shadow-2xl flex flex-col overflow-hidden backdrop-blur-md filter drop-shadow-2xl dialogue-box`}
                         style={{
                           backgroundColor: `${uiBg}ee`,
                           border: `2px solid ${uiPrimary}80`,
                           borderRadius: uiRadius,
                           fontFamily: uiFont,
                           boxShadow: `0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px ${uiPrimary}40`,
+                          width: dPos === "below" ? "100%" : `${project.globalSettings.dialogueWidthPercent ?? 91.666}%`,
+                          maxWidth: dPos === "below" ? (project.globalSettings.stageWidth || 800) : (project.globalSettings.dialogueMaxWidthPx ?? 672),
+                          maxHeight: `${project.globalSettings.dialogueMaxHeightPercent ?? 90}%`,
                         }}
                       >
                         <div
@@ -6384,7 +6407,7 @@ const App: React.FC = () => {
                         >
                           {node.speaker || "Unknown"}
                         </div>
-                        <div className="flex shrink-0 p-6 max-h-[40vh] overflow-y-auto custom-scrollbar dialogue-content">
+                        <div className="flex shrink-0 p-6 overflow-y-auto custom-scrollbar dialogue-content">
                           {speakerAsset &&
                             (!node.portraitPosition ||
                               node.portraitPosition === "left") && (
@@ -6402,7 +6425,7 @@ const App: React.FC = () => {
                                 />
                               </div>
                             )}
-                          <div className="text-lg font-medium leading-relaxed flex-1 text-white drop-shadow-sm self-center dialogue-text">
+                          <div className="text-lg font-medium leading-relaxed flex-1 text-white drop-shadow-sm self-center overflow-y-auto max-h-full custom-scrollbar dialogue-text">
                             <TypewriterText
                               text={node.text}
                               speed={
@@ -8483,7 +8506,7 @@ const App: React.FC = () => {
                         });
                       }}
                       className="absolute pointer-events-auto -bottom-3 -right-3 w-6 h-6 z-[5001] cursor-se-resize group flex items-center justify-center select-none bg-neutral-950 border border-neutral-700 hover:border-emerald-500 rounded-full shadow-lg hover:scale-110 active:scale-95 transition-transform"
-                      title="Drag to resize entire scene (width & height)"
+                      title="Drag to resize entire scene (Hold Shift for proportional resizing)"
                     >
                       <svg width="10" height="10" viewBox="0 0 10 10" className="text-neutral-400 group-hover:text-emerald-400 transition-colors stroke-current stroke-2 fill-none">
                         <line x1="2" y1="8" x2="8" y2="2" />
@@ -9147,7 +9170,7 @@ const App: React.FC = () => {
                       </Accordion>
 
                       <Accordion title="Visual Export Layout Arranger">
-                        <div className="bg-neutral-950 p-2 rounded relative flex items-center justify-center border border-neutral-800 mt-2" style={{ height: '300px' }}>
+                        <div className="bg-neutral-950 p-2 rounded relative flex items-center justify-center border border-neutral-800 mt-2" style={{ resize: 'both', overflow: 'hidden', minHeight: '150px', height: '400px', minWidth: '150px' }}>
                           <div className={`relative flex w-full h-full text-[10px] items-center justify-center p-2 rounded bg-neutral-900 border border-neutral-700 ${project.globalSettings.dialoguePosition === 'below' ? 'flex-col' : 'flex-row'}`}>
                             
                             {/* Game Canvas */}
@@ -9155,7 +9178,8 @@ const App: React.FC = () => {
                               className="relative bg-black flex shrink-0 items-center justify-center border border-emerald-500 overflow-hidden"
                               style={{
                                 aspectRatio: `${project.globalSettings.stageWidth || 800} / ${project.globalSettings.stageHeight || 600}`,
-                                maxHeight: project.globalSettings.dialoguePosition === 'below' ? 'calc(100% - 60px)' : '100%',
+                                height: project.globalSettings.dialoguePosition === 'below' ? 'calc(100% - 60px)' : '100%',
+                                maxHeight: '100%',
                                 maxWidth: '100%'
                               }}
                             >
@@ -9210,7 +9234,13 @@ const App: React.FC = () => {
                                       ${project.globalSettings.dialoguePosition === 'center' ? 'top-1/2 -translate-y-1/2' : ''}
                                       ${project.globalSettings.dialoguePosition === 'bottom' || !project.globalSettings.dialoguePosition ? 'bottom-2' : ''}
                                     `}
-                                    style={{ width: '90%', height: '40px', left: '5%', zIndex: 100 }}
+                                    style={{ 
+                                      width: `${project.globalSettings.dialogueWidthPercent ?? 91}%`, 
+                                      height: '40px', 
+                                      left: '50%',
+                                      transform: project.globalSettings.dialoguePosition === 'center' ? 'translate(-50%, -50%)' : 'translateX(-50%)',
+                                      zIndex: 100 
+                                    }}
                                     onClick={() => {
                                       const positions = ["bottom", "top", "center"];
                                       const current = project.globalSettings.dialoguePosition || "bottom";
@@ -9232,8 +9262,8 @@ const App: React.FC = () => {
                             {/* Dialogue below if below */}
                             {project.globalSettings.dialoguePosition === 'below' && (
                                 <div 
-                                  className="w-[90%] shrink-0 border border-cyan-500 bg-cyan-900/50 mt-2 flex flex-col items-center justify-center text-cyan-200 cursor-pointer hover:bg-cyan-400/30 transition-colors rounded-sm"
-                                  style={{ height: '40px' }}
+                                  className="shrink-0 border border-cyan-500 bg-cyan-900/50 mt-2 flex flex-col items-center justify-center text-cyan-200 cursor-pointer hover:bg-cyan-400/30 transition-colors rounded-sm mx-auto"
+                                  style={{ height: '40px', width: `${project.globalSettings.dialogueWidthPercent ?? 91}%`, maxWidth: `${project.globalSettings.dialogueMaxWidthPx ?? 672}px` }}
                                   onClick={() => {
                                       pushHistory({
                                         ...project,
@@ -9262,6 +9292,41 @@ const App: React.FC = () => {
                         <p className="text-[10px] text-neutral-400 mt-2 leading-tight">
                           This preview approximates how your game will layout upon export. Click the Dialogue Box to change its attachment point! Check "Heads Up Display" settings to hide/show corner icons.
                         </p>
+                        <div className="grid grid-cols-2 gap-2 mt-2 border-t border-neutral-800 pt-2">
+                          <div>
+                            <label className="text-xs text-neutral-400 block mb-1">
+                              Box Width (%)
+                            </label>
+                            <input
+                              type="number"
+                              className="w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs text-white"
+                              value={project.globalSettings.dialogueWidthPercent ?? 91}
+                              onChange={(e) => pushHistory({ ...project, globalSettings: { ...project.globalSettings, dialogueWidthPercent: Number(e.target.value) } })}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-neutral-400 block mb-1">
+                              Max Width (px)
+                            </label>
+                            <input
+                              type="number"
+                              className="w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs text-white"
+                              value={project.globalSettings.dialogueMaxWidthPx ?? 672}
+                              onChange={(e) => pushHistory({ ...project, globalSettings: { ...project.globalSettings, dialogueMaxWidthPx: Number(e.target.value) } })}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-neutral-400 block mb-1">
+                              Max Height (%)
+                            </label>
+                            <input
+                              type="number"
+                              className="w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs text-white"
+                              value={project.globalSettings.dialogueMaxHeightPercent ?? 90}
+                              onChange={(e) => pushHistory({ ...project, globalSettings: { ...project.globalSettings, dialogueMaxHeightPercent: Number(e.target.value) } })}
+                            />
+                          </div>
+                        </div>
                       </Accordion>
 
                       <Accordion title="User Interface Theming">
