@@ -218,12 +218,14 @@ export function generateExportHtml(project: Project): string {
       display: none;
       ${(() => {
         const dPos = project.globalSettings?.dialoguePosition || "bottom";
-        if (dPos === "top") return "position: absolute; top: 32px; left: 50%; transform: translateX(-50%); width: 91.666667%; max-width: 672px;";
-        if (dPos === "center") return "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 91.666667%; max-width: 672px;";
-        if (dPos === "below") return "position: relative; margin-top: 24px; width: 100%; max-width: " + (project.globalSettings?.stageWidth || 800) + "px; width: 91.666667%;";
-        return "position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); width: 91.666667%; max-width: 672px;";
+        const wPct = project.globalSettings?.dialogueWidthPercent ?? 91.666;
+        const maxWPx = project.globalSettings?.dialogueMaxWidthPx ?? 672;
+        if (dPos === "top") return `position: absolute; top: 32px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${maxWPx}px;`;
+        if (dPos === "center") return `position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: ${wPct}%; max-width: ${maxWPx}px;`;
+        if (dPos === "below") return `position: relative; margin-top: 24px; width: ${wPct}%; max-width: ${maxWPx}px;`;
+        return `position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${maxWPx}px;`;
       })()}
-      max-height: 90%;
+      max-height: ${project.globalSettings?.dialogueMaxHeightPercent ?? 90}%;
       background-color: var(--ui-bg-alpha);
       color: #f5f5f5;
       padding: 0;
@@ -253,7 +255,6 @@ export function generateExportHtml(project: Project): string {
     .dialogue-content {
       display: flex;
       padding: 24px;
-      max-height: 40vh;
       overflow-y: auto;
       flex-shrink: 0;
     }
@@ -286,6 +287,8 @@ export function generateExportHtml(project: Project): string {
       color: white;
       text-shadow: 0 1px 2px rgba(0,0,0,0.4);
       align-self: center;
+      overflow-y: auto;
+      max-height: 100%;
     }
     .dialogue-choices {
       display: flex;
