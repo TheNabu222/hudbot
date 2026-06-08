@@ -1,0 +1,285 @@
+/* ===== CLICKBOX INSPECTOR (Phase 3D) ===== */
+
+#clickbox-inspector-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.cbi-section {
+  padding: 10px 12px;
+  background: var(--bg-panel, var(--bg-secondary));
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.08);
+  background-image: linear-gradient(145deg, rgba(255,255,255,0.04), transparent 60%);
+}
+
+.cbi-section h4 {
+  margin: 0 0 6px 0;
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.cbi-section .hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin: 0 0 6px 0;
+}
+
+.cbi-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.cbi-row > label {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 70px;
+}
+
+.cbi-row > input[type="number"],
+.cbi-row > input[type="text"],
+.cbi-row > select,
+.cbi-row > input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  background: var(--bg-input);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.cbi-row > input[type="number"] {
+  max-width: 80px;
+}
+
+.cbi-row > input[type="color"] {
+  width: 40px;
+  height: 28px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 0;
+  background: var(--bg-input);
+}
+
+.cbi-row > input[type="checkbox"] {
+  margin-right: 4px;
+}
+
+.cbi-row > label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-primary);
+  min-width: 0;
+  flex: 1;
+}
+
+.cbi-label-input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--bg-input);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+}
+
+/* Header card with action badge */
+.cbi-header {
+  background-image: linear-gradient(145deg, rgba(124,92,252,0.08), transparent 60%);
+}
+
+.cbi-action-badge {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  border-radius: 12px;
+  color: #fff;
+  flex-shrink: 0;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.16);
+  border: 2px solid rgba(255,255,255,0.15);
+}
+
+/* Action params box (inside Click Action section) */
+.cbi-action-params {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+}
+
+/* Conditions list */
+.cbi-cond-row,
+.cbi-chain-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--bg-input);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.cbi-cond-row select,
+.cbi-cond-row input,
+.cbi-chain-row select,
+.cbi-chain-row input {
+  padding: 3px 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.cbi-cond-type,
+.cbi-chain-type {
+  min-width: 110px;
+}
+
+.cbi-cond-del,
+.cbi-chain-del {
+  margin-left: auto;
+  background: rgba(232,84,84,0.15);
+  border: 1px solid rgba(232,84,84,0.35);
+  color: #e85454;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.cbi-cond-del:hover,
+.cbi-chain-del:hover {
+  background: rgba(232,84,84,0.3);
+}
+
+.cbi-chain-num {
+  font-weight: 700;
+  color: var(--text-muted);
+  font-size: 11px;
+  min-width: 16px;
+}
+
+/* Hitbox list item: selected state */
+.hitbox-item {
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hitbox-item.selected {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), 0 2px 0 rgba(0,0,0,0.12);
+  transform: translateY(-1px);
+}
+
+.hitbox-item:hover {
+  transform: translateY(-1px);
+}
+
+.hitbox-color {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.hitbox-action-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: all 0.1s;
+}
+
+.hitbox-action-btn:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+/* Selected hitbox rect on canvas */
+.hitbox-overlay .hitbox-rect.hitbox-selected {
+  stroke-width: 3;
+  stroke-dasharray: none;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+
+/* ============ PREVIEW / EXPORT HOVER FEEDBACK ============ */
+.clickbox-zone {
+  transition: background 0.15s, box-shadow 0.15s, filter 0.15s, transform 0.1s;
+}
+
+.clickbox-zone.fx-highlight:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.clickbox-zone.fx-glow:hover {
+  box-shadow: 0 0 18px 4px rgba(124, 92, 252, 0.55);
+}
+
+.clickbox-zone.fx-outline:hover {
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.85);
+}
+
+.clickbox-zone.fx-pulse:hover {
+  animation: clickboxPulse 0.9s ease-in-out infinite;
+}
+
+@keyframes clickboxPulse {
+  0%, 100% { transform: scale(1);   box-shadow: 0 0 0 0 rgba(124,92,252,0.5); }
+  50%      { transform: scale(1.02);box-shadow: 0 0 0 8px rgba(124,92,252,0.0); }
+}
+
+.clickbox-tooltip {
+  position: absolute;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid rgba(124, 92, 252, 0.5);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 11px;
+  pointer-events: none;
+  z-index: 9999;
+  white-space: nowrap;
+  animation: clickboxTipIn 0.15s ease;
+}
+
+@keyframes clickboxTipIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.clickbox-zone.cb-hidden {
+  display: none !important;
+}
+
+.clickbox-zone.cb-disabled {
+  pointer-events: none !important;
+  opacity: 0.4;
+}
