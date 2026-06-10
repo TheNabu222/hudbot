@@ -87,7 +87,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
         <h2 className="text-xl font-bold flex flex-col gap-1 text-white">
           <span>File Library</span>
           <span className="text-[10px] text-neutral-400 font-normal">
-            (This tab is for uploading files. Return to <strong>Visual Editor</strong> or <strong>Menus & UI</strong> mode and use the left Sidebar <strong>Library</strong> to place these in your game.)
+            Upload, tag, and edit files here. Return to <strong>Compose</strong> and use <strong>Add Something</strong> to place them in your game.
           </span>
         </h2>
         <div className="flex gap-2">

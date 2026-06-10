@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Folder, Image as ImageIcon, Music, Search, X, Video, Star, Info } from 'lucide-react';
+import { Folder, Image as ImageIcon, Music, Search, X, Video, Star, Info, Wand2 } from 'lucide-react';
 import { Asset } from '../types';
 
 interface AssetPickerModalProps {
@@ -11,6 +11,7 @@ interface AssetPickerModalProps {
   canvasAssetIds?: string[];
   onToggleFavorite?: (assetId: string) => void;
   onUpdateAsset?: (assetId: string, updates: Partial<Asset>) => void;
+  onEditImage?: (assetId: string) => void;
   repositoryFolders?: string[];
   onOpenRepositoryFolder?: (path: string) => void;
   onLoadRepositoryRoot?: () => void;
@@ -26,6 +27,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
   canvasAssetIds = [],
   onToggleFavorite,
   onUpdateAsset,
+  onEditImage,
   repositoryFolders = [],
   onOpenRepositoryFolder,
   onLoadRepositoryRoot,
@@ -35,6 +37,14 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
   const [assetSearch, setAssetSearch] = useState('');
   const [editingInfoId, setEditingInfoId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(60);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
 
   useEffect(() => {
     setVisibleCount(60);
@@ -114,7 +124,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
               {isLoadingRepository ? 'Loading folder…' : repositoryFolders.length ? 'Refresh Repo Root' : 'Browse Repo'}
             </button>
           )}
-          <button onClick={onClose} className="p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-white transition-colors">
+          <button aria-label="Close asset picker" onClick={onClose} className="p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-white transition-colors">
             <X size={20} />
           </button>
         </div>
@@ -216,6 +226,20 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                            <Info size={14} />
                          </div>
                       )}
+                      {asset.type === 'image' && onEditImage && (
+                        <button
+                          type="button"
+                          aria-label={`Edit ${asset.name}`}
+                          title="Crop, remove background, recolor, or add filters"
+                          className="absolute bottom-2 right-2 z-20 flex items-center gap-1 rounded-md border border-[#ff4fc8]/50 bg-black/70 px-2 py-1 font-comic text-[10px] font-bold text-[#ff8bd8] opacity-90 shadow-lg backdrop-blur-md transition-all hover:border-[#00ffcc] hover:text-[#00ffcc] group-hover:opacity-100"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onEditImage(asset.id);
+                          }}
+                        >
+                          <Wand2 size={12} /> Edit
+                        </button>
+                      )}
                     </div>
                     {editingInfoId === asset.id ? (
                       <div className="p-3 border-t border-neutral-700/50 flex flex-col gap-2 bg-neutral-900 absolute top-full left-0 right-0 z-[100] rounded-b-lg shadow-xl shadow-black/50 border-x border-b border-emerald-500 max-h-64 overflow-y-auto">
@@ -252,6 +276,15 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                                <span className="text-xs text-neutral-400 w-8 text-right">{Math.round(Math.min(1, asset.volume ?? 1) * 100)}%</span>
                              </div>
                           </div>
+                        )}
+                        {asset.type === 'image' && onEditImage && (
+                          <button
+                            type="button"
+                            onClick={() => onEditImage(asset.id)}
+                            className="flex w-full items-center justify-center gap-1 rounded border border-[#ff4fc8]/40 bg-[#ff4fc8]/10 py-1.5 font-comic text-xs font-bold text-[#ff8bd8] hover:border-[#00ffcc]/60 hover:text-[#00ffcc]"
+                          >
+                            <Wand2 size={13} /> Crop / Remove BG / Filters
+                          </button>
                         )}
                         <button onClick={() => setEditingInfoId(null)} className="w-full py-1 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 text-xs font-semibold rounded mt-1">Done</button>
                       </div>

@@ -1,28 +1,8 @@
 import { Project, Scene } from "../types";
+import { stripDuplicatedAssetSources } from "./projectPersistence";
 
 export function generateExportHtml(project: Project): string {
-  // Strip duplicate base64 srcs from objects since they are already stored in assets
-  const strippedProject = {
-    ...project,
-    scenes: project.scenes.map((s) => ({
-      ...s,
-      objects: s.objects.map((o) => {
-        if (o.src && o.src.startsWith("data:") && project.assets.some(a => a.src === o.src)) {
-          return { ...o, src: "" };
-        }
-        return o;
-      })
-    })),
-    uiMenus: project.uiMenus ? project.uiMenus.map((m) => ({
-      ...m,
-      objects: m.objects.map((o) => {
-        if (o.src && o.src.startsWith("data:") && project.assets.some(a => a.src === o.src)) {
-          return { ...o, src: "" };
-        }
-        return o;
-      })
-    })) : []
-  };
+  const strippedProject = stripDuplicatedAssetSources(project);
 
   const scene = project.scenes.find((s) => s.id === project.currentSceneId) ||
     project.scenes[0] || {

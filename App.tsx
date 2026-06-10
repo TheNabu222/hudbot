@@ -105,6 +105,7 @@ import { TEMPLATES } from "./utils/templates";
 import { ImageEditorModal } from "./components/ImageEditorModal";
 import { exportToTwee, importFromTwee } from "./utils/twineAdapter";
 import { downloadJSON, downloadText, loadJSON, loadText } from "./utils/fileHelpers";
+import { stripDuplicatedAssetSources } from "./utils/projectPersistence";
 import { MapMaker } from "./components/MapMaker";
 import { AISpriteModal } from "./components/AISpriteModal";
 import { AssetPickerModal } from "./components/AssetPickerModal";
@@ -306,6 +307,7 @@ const App: React.FC = () => {
     string[]
   >([]);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [isFinderDragOverStage, setIsFinderDragOverStage] = useState(false);
   const [hoverCursorAssetId, setHoverCursorAssetId] = useState<string | null>(
     null,
   );
@@ -323,6 +325,7 @@ const App: React.FC = () => {
   const [recentAssetIds, setRecentAssetIds] = useState<string[]>([]);
 
   const [editorMode, setEditorMode] = useState<EditorMode>("stage");
+  const editorModeBeforePlayRef = useRef<EditorMode>("stage");
   const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [leftSidebarTab, setLeftSidebarTab] = useState<"librarian" | "theme">(
     "librarian",
@@ -578,50 +581,7 @@ const App: React.FC = () => {
   const handleSaveToSlot = async (slotId: number) => {
     try {
       setSaveStatus("saving");
-      const strippedProject = {
-        ...project,
-        prefabs: (project.prefabs || []).map((o) => {
-          if (
-            o.src &&
-            o.src.startsWith("data:") &&
-            project.assets.some((a) => a.src === o.src)
-          ) {
-            const asset = project.assets.find((a) => a.src === o.src);
-            return { ...o, src: "", _assetId: asset?.id };
-          }
-          return o;
-        }),
-        scenes: project.scenes.map((s) => ({
-          ...s,
-          objects: s.objects.map((o) => {
-            if (
-              o.src &&
-              o.src.startsWith("data:") &&
-              project.assets.some((a) => a.src === o.src)
-            ) {
-              const asset = project.assets.find((a) => a.src === o.src);
-              return { ...o, src: "", _assetId: asset?.id };
-            }
-            return o;
-          }),
-        })),
-        uiMenus: project.uiMenus
-          ? project.uiMenus.map((m) => ({
-              ...m,
-              objects: m.objects.map((o) => {
-                if (
-                  o.src &&
-                  o.src.startsWith("data:") &&
-                  project.assets.some((a) => a.src === o.src)
-                ) {
-                  const asset = project.assets.find((a) => a.src === o.src);
-                  return { ...o, src: "", _assetId: asset?.id };
-                }
-                return o;
-              }),
-            }))
-          : [],
-      };
+      const strippedProject = stripDuplicatedAssetSources(project);
 
       await set(`neocities_project_slot_${slotId}`, strippedProject);
 
@@ -838,51 +798,7 @@ const App: React.FC = () => {
     const saveProject = async () => {
       setSaveStatus("saving");
       try {
-        // Strip out duplicated large base64 strings before saving
-        const strippedProject = {
-          ...project,
-          prefabs: (project.prefabs || []).map((o) => {
-            if (
-              o.src &&
-              o.src.startsWith("data:") &&
-              project.assets.some((a) => a.src === o.src)
-            ) {
-              const asset = project.assets.find((a) => a.src === o.src);
-              return { ...o, src: "", _assetId: asset?.id };
-            }
-            return o;
-          }),
-          scenes: project.scenes.map((s) => ({
-            ...s,
-            objects: s.objects.map((o) => {
-              if (
-                o.src &&
-                o.src.startsWith("data:") &&
-                project.assets.some((a) => a.src === o.src)
-              ) {
-                const asset = project.assets.find((a) => a.src === o.src);
-                return { ...o, src: "", _assetId: asset?.id };
-              }
-              return o;
-            }),
-          })),
-          uiMenus: project.uiMenus
-            ? project.uiMenus.map((m) => ({
-                ...m,
-                objects: m.objects.map((o) => {
-                  if (
-                    o.src &&
-                    o.src.startsWith("data:") &&
-                    project.assets.some((a) => a.src === o.src)
-                  ) {
-                    const asset = project.assets.find((a) => a.src === o.src);
-                    return { ...o, src: "", _assetId: asset?.id };
-                  }
-                  return o;
-                }),
-              }))
-            : [],
-        };
+        const strippedProject = stripDuplicatedAssetSources(project);
         await set("neocities_project", strippedProject);
         setSaveStatus("saved");
       } catch (e) {
@@ -899,50 +815,7 @@ const App: React.FC = () => {
 
   const handleExportProject = () => {
     try {
-      const strippedProject = {
-        ...project,
-        prefabs: (project.prefabs || []).map((o) => {
-          if (
-            o.src &&
-            o.src.startsWith("data:") &&
-            project.assets.some((a) => a.src === o.src)
-          ) {
-            const asset = project.assets.find((a) => a.src === o.src);
-            return { ...o, src: "", _assetId: asset?.id };
-          }
-          return o;
-        }),
-        scenes: project.scenes.map((s) => ({
-          ...s,
-          objects: s.objects.map((o) => {
-            if (
-              o.src &&
-              o.src.startsWith("data:") &&
-              project.assets.some((a) => a.src === o.src)
-            ) {
-              const asset = project.assets.find((a) => a.src === o.src);
-              return { ...o, src: "", _assetId: asset?.id };
-            }
-            return o;
-          }),
-        })),
-        uiMenus: project.uiMenus
-          ? project.uiMenus.map((m) => ({
-              ...m,
-              objects: m.objects.map((o) => {
-                if (
-                  o.src &&
-                  o.src.startsWith("data:") &&
-                  project.assets.some((a) => a.src === o.src)
-                ) {
-                  const asset = project.assets.find((a) => a.src === o.src);
-                  return { ...o, src: "", _assetId: asset?.id };
-                }
-                return o;
-              }),
-            }))
-          : [],
-      };
+      const strippedProject = stripDuplicatedAssetSources(project);
       const jsonStr = JSON.stringify(strippedProject);
       const blob = new Blob([jsonStr], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -1449,15 +1322,181 @@ const App: React.FC = () => {
     return ids;
   };
 
-  const handleDropOnStage = (e: React.DragEvent) => {
+  const readDroppedFile = (
+    file: File,
+  ): Promise<{
+    asset: Asset;
+    width: number;
+    height: number;
+  } | null> =>
+    new Promise((resolve) => {
+      const extension = file.name.split(".").pop()?.toLowerCase() || "";
+      const isImage =
+        file.type.startsWith("image/") ||
+        ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(extension);
+      const isAudio =
+        file.type.startsWith("audio/") ||
+        ["mp3", "wav", "ogg", "m4a", "aac"].includes(extension);
+      const isVideo =
+        file.type.startsWith("video/") ||
+        ["mp4", "webm", "mov"].includes(extension);
+
+      if (!isImage && !isAudio && !isVideo) {
+        resolve(null);
+        return;
+      }
+
+      const maxSize = 5 * 1024 * 1024;
+      if (file.size > maxSize) {
+        showError(`${file.name} is larger than 5MB and was skipped.`);
+        resolve(null);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onerror = () => resolve(null);
+      reader.onload = () => {
+        const src = reader.result as string;
+        const asset: Asset = {
+          id: uuidv4(),
+          name: file.name,
+          src,
+          type: isAudio ? "audio" : isVideo ? "video" : "image",
+          category: isAudio
+            ? "finder/audio"
+            : isVideo
+              ? "finder/video"
+              : "finder/images",
+        };
+
+        if (!isImage) {
+          resolve({
+            asset,
+            width: isAudio ? 72 : 320,
+            height: isAudio ? 72 : 180,
+          });
+          return;
+        }
+
+        const image = new Image();
+        image.onload = () => {
+          const maxDimension = 320;
+          const scale = Math.min(
+            1,
+            maxDimension / Math.max(image.naturalWidth, image.naturalHeight),
+          );
+          resolve({
+            asset,
+            width: Math.max(24, Math.round(image.naturalWidth * scale)),
+            height: Math.max(24, Math.round(image.naturalHeight * scale)),
+          });
+        };
+        image.onerror = () => resolve({ asset, width: 160, height: 160 });
+        image.src = src;
+      };
+      reader.readAsDataURL(file);
+    });
+
+  const handleDropOnStage = async (e: React.DragEvent) => {
     e.preventDefault();
-    if (!stageRef.current) return;
+    e.stopPropagation();
+    setIsFinderDragOverStage(false);
+    if (!stageRef.current || isPlaying) return;
 
     const rect = stageRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / stageZoom;
     const y = (e.clientY - rect.top) / stageZoom;
 
     try {
+      const finderFiles = Array.from(e.dataTransfer.files || []);
+      if (finderFiles.length > 0) {
+        const imported = (
+          await Promise.all(finderFiles.map(readDroppedFile))
+        ).filter(
+          (
+            result,
+          ): result is { asset: Asset; width: number; height: number } =>
+            result !== null,
+        );
+
+        if (imported.length === 0) {
+          showError("Drop images, GIFs, audio, or video files onto the canvas.");
+          return;
+        }
+
+        const isUI = editorMode === "ui_stage";
+        const targetCollection = isUI ? "uiMenus" : "scenes";
+        const targetId = isUI
+          ? project.currentUiMenuId
+          : project.currentSceneId;
+        const targetScene = (project[targetCollection] || []).find(
+          (scene) => scene.id === targetId,
+        );
+        if (!targetScene) return;
+
+        const initialZ =
+          targetScene.objects.length > 0
+            ? Math.max(...targetScene.objects.map((object) => object.zIndex)) +
+              1
+            : 0;
+        const newObjects: SceneObject[] = imported.map(
+          ({ asset, width, height }, index) => ({
+            id: uuidv4(),
+            name: asset.name,
+            src: asset.src,
+            _assetId: asset.id,
+            x: Math.max(0, x - width / 2 + index * 22),
+            y: Math.max(0, y - height / 2 + index * 22),
+            width,
+            height,
+            rotation: 0,
+            zIndex: initialZ + index,
+            opacity: 1,
+            locked: false,
+            cursor: asset.type === "audio" ? "pointer" : "default",
+            animation: "none",
+            interaction:
+              asset.type === "audio"
+                ? "sound"
+                : asset.type === "video"
+                  ? "play_cutscene"
+                  : "none",
+            interactionData:
+              asset.type === "audio" || asset.type === "video"
+                ? asset.id
+                : undefined,
+            isVideo: asset.type === "video",
+            isHitbox: false,
+            isScript: false,
+            isText: asset.type === "audio",
+            isUiElement: false,
+            textContent: asset.type === "audio" ? "🎵" : undefined,
+            textColor: "#ffffff",
+            textFontSize: 32,
+            textFontFamily: "sans-serif",
+            blendMode: "normal",
+            parallaxSpeed: 1,
+            hasPhysics: false,
+          }),
+        );
+
+        const newProject = {
+          ...project,
+          assets: [...imported.map((result) => result.asset), ...project.assets],
+          [targetCollection]: (project[targetCollection] || []).map((scene) =>
+            scene.id === targetId
+              ? { ...scene, objects: [...scene.objects, ...newObjects] }
+              : scene,
+          ),
+        };
+        pushHistory(newProject);
+        setSelectedObjectId(newObjects[newObjects.length - 1].id);
+        showError(
+          `${newObjects.length} file${newObjects.length === 1 ? "" : "s"} imported from Finder ✦`,
+        );
+        return;
+      }
+
       const assetData = e.dataTransfer.getData("application/json");
       if (assetData) {
         const asset = JSON.parse(assetData);
@@ -1612,6 +1651,12 @@ const App: React.FC = () => {
 
   const handleStageDragOver = (e: React.DragEvent) => {
     e.preventDefault();
+    if (isPlaying) return;
+    e.dataTransfer.dropEffect =
+      e.dataTransfer.types.includes("Files") ? "copy" : "move";
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsFinderDragOverStage(true);
+    }
   };
 
   // Resizing state
@@ -2265,6 +2310,14 @@ const App: React.FC = () => {
 
   const togglePlayMode = () => {
     const newState = !isPlaying;
+    if (newState) {
+      editorModeBeforePlayRef.current = editorMode;
+      if (editorMode !== "stage" && editorMode !== "ui_stage") {
+        setEditorMode("stage");
+      }
+    } else {
+      setEditorMode(editorModeBeforePlayRef.current);
+    }
     setIsPlaying(newState);
     setRuntimeOverrides({});
     if (newState) {
@@ -4729,6 +4782,15 @@ const App: React.FC = () => {
                   ref={stageRef}
                   onDrop={handleDropOnStage}
                   onDragOver={handleStageDragOver}
+                  onDragLeave={(event) => {
+                    if (
+                      !event.currentTarget.contains(
+                        event.relatedTarget as Node | null,
+                      )
+                    ) {
+                      setIsFinderDragOverStage(false);
+                    }
+                  }}
                   onPointerDown={(e) => {
                     if (isPlaying) {
                       if (selectedInventoryItemId) {
@@ -4806,6 +4868,25 @@ const App: React.FC = () => {
                     transition: "filter 2s ease",
                   }}
                 >
+                  {isFinderDragOverStage && !isPlaying && (
+                    <div className="pointer-events-none absolute inset-3 z-[19000] flex items-center justify-center rounded-[10px_28px_10px_28px] border-2 border-dashed border-[#00ffcc] bg-[#05040d]/85 shadow-[inset_0_0_60px_rgba(0,255,204,0.12),0_0_35px_rgba(255,0,153,0.18)] backdrop-blur-sm">
+                      <div className="max-w-sm text-center">
+                        <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full border border-pink-400/60 bg-pink-500/15 text-pink-300 shadow-[0_0_22px_rgba(255,0,153,0.22)]">
+                          <Download size={25} />
+                        </div>
+                        <p className="font-comic text-xl font-bold text-white">
+                          Drop it into the world
+                        </p>
+                        <p className="mt-1 text-[11px] text-neutral-400">
+                          Images and GIFs become objects. Audio becomes a sound
+                          trigger. Video becomes a cutscene object.
+                        </p>
+                        <p className="mt-3 text-[9px] font-bold uppercase tracking-[0.2em] text-[#00ffcc]">
+                          release to import ✦
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   <div
                     className={`absolute inset-0 ${isPlaying ? "overflow-hidden" : "overflow-visible"} pointer-events-none`}
                   >
@@ -8684,6 +8765,7 @@ const App: React.FC = () => {
             </main>
 
             {/* Right Sidebar - Properties/Layers */}
+            {!isPlaying && (
             <aside
               className="flex-shrink-0 bg-neutral-900 border-l border-neutral-800 flex flex-col z-20 relative"
               style={{ width: rightSidebarWidth }}
@@ -13241,6 +13323,7 @@ const App: React.FC = () => {
                   ))}
               </div>
             </aside>
+            )}
           </>
         )}
 
@@ -17376,6 +17459,7 @@ const App: React.FC = () => {
               ),
             }));
           }}
+          onEditImage={(id) => setEditingAssetId(id)}
           repositoryFolders={repositoryFolders}
           onOpenRepositoryFolder={(path) => fetchFromGitHub(path)}
           onLoadRepositoryRoot={() => fetchFromGitHub("", true)}
