@@ -49,7 +49,7 @@
     statusbar.innerHTML = `
       <div class="mood-left">
         <span class="mood-icon">✨</span>
-        <span class="mood-message" id="mood-message">Loading consciousness...</span>
+        <span class="mood-message" id="status-msg">Loading consciousness...</span>
       </div>
       <div class="mood-center">
         <span class="mood-save-status" id="mood-save-status">Ready</span>
@@ -76,16 +76,12 @@
         display: flex !important;
         justify-content: space-between;
         align-items: center;
-        padding: 0 20px;
-        font-size: 12px;
+        padding: 0 14px;
+        font-size: 11px;
         font-family: 'VT323', monospace;
-        background: linear-gradient(90deg, 
-          rgba(255,0,204,0.1) 0%, 
-          rgba(0,240,255,0.05) 50%, 
-          rgba(204,255,0,0.1) 100%
-        );
+        background: #0e0e14;
         border-top: 1px solid var(--glass-border, rgba(255,255,255,0.1));
-        height: 36px;
+        height: 30px;
       }
 
       .mood-left {
@@ -188,7 +184,7 @@
   }
 
   function updateMoodDisplay(highlight = false) {
-    const el = document.getElementById('mood-message');
+    const el = document.getElementById('status-msg');
     if (el) {
       el.textContent = currentMood;
       el.classList.toggle('highlight', highlight);

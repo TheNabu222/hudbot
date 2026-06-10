@@ -43,16 +43,16 @@ const responseChoices: Array<{
   label: string;
   icon: React.ElementType;
 }> = [
-  { interaction: "dialogue", label: "Speak / Message", icon: MessageSquare },
+  { interaction: "dialogue", label: "Say or Show Something", icon: MessageSquare },
   { interaction: "sound", label: "Play Sound", icon: Music },
   { interaction: "give-item", label: "Give Item", icon: Gift },
-  { interaction: "collect", label: "Collect & Hide", icon: Gift },
-  { interaction: "set_flag", label: "Set Story Flag", icon: Flag },
-  { interaction: "scene_change", label: "Go to Scene", icon: MapPin },
+  { interaction: "collect", label: "Pick Up and Remove", icon: Gift },
+  { interaction: "set_flag", label: "Remember Something", icon: Flag },
+  { interaction: "scene_change", label: "Go Somewhere Else", icon: MapPin },
   { interaction: "start_quest", label: "Start Quest", icon: BookOpen },
   { interaction: "complete_quest", label: "Complete Quest", icon: BookOpen },
-  { interaction: "open_ui", label: "Open UI", icon: Wand2 },
-  { interaction: "play_cutscene", label: "Play Video", icon: Video },
+  { interaction: "open_ui", label: "Open Menu or HUD", icon: Wand2 },
+  { interaction: "play_cutscene", label: "Play Cutscene", icon: Video },
   { interaction: "link", label: "Open Link", icon: Link },
   { interaction: "toggle_inventory", label: "Open Inventory", icon: Backpack },
 ];
@@ -75,7 +75,7 @@ export const ClickResponseTypePicker: React.FC<{
           : "border-neutral-800 bg-neutral-900 text-neutral-400 hover:text-white"
       }`}
     >
-      No response
+      Do nothing
     </button>
     {responseChoices.map((choice) => {
       const Icon = choice.icon;

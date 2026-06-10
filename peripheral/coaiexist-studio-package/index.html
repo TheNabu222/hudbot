@@ -1084,6 +1084,538 @@
         .layer-item.drag-over {
             border-bottom: 2px solid var(--magenta);
         }
+
+        /* ============================================
+           STUDIO SHELL V2 — QUIET CHROME, LOUD CANVAS
+           ============================================ */
+        :root {
+            --bg-dark: #09090d;
+            --panel-bg: #111118;
+            --panel-raised: #181821;
+            --text-main: #f6f5fb;
+            --text-dim: #9795a6;
+            --glass-bg: rgba(255,255,255,0.035);
+            --glass-border: rgba(255,255,255,0.1);
+            --magenta: #ff2bd6;
+            --cyan: #3cecff;
+            --lime: #c8ff45;
+            --radius: 8px;
+        }
+
+        body {
+            background: var(--bg-dark);
+            background-image: none;
+        }
+
+        body::after {
+            display: none;
+        }
+
+        .editor-wrapper {
+            grid-template-columns: 232px minmax(420px, 1fr) 300px;
+            grid-template-rows: 56px minmax(0, 1fr) 30px;
+        }
+
+        .toolbar {
+            padding: 0 14px;
+            gap: 8px;
+            overflow: visible;
+            background: rgba(14,14,20,0.96);
+            border-bottom-color: rgba(255,255,255,0.08);
+            box-shadow: 0 8px 28px rgba(0,0,0,0.28);
+        }
+
+        .logo {
+            min-width: 196px;
+            margin-right: 4px;
+            font-size: 27px;
+            letter-spacing: 1.5px;
+        }
+
+        .toolbar-group {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 9px;
+            background: rgba(255,255,255,0.025);
+        }
+
+        .toolbar-spacer {
+            flex: 1;
+            min-width: 8px;
+        }
+
+        .btn, .big-button {
+            min-height: 34px;
+            padding: 7px 11px;
+            border-radius: 7px;
+            border-color: rgba(255,255,255,0.11);
+            background: transparent;
+            box-shadow: none;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .btn:hover, .big-button:hover {
+            transform: none;
+            border-color: rgba(255,255,255,0.25);
+            background: rgba(255,255,255,0.07);
+            box-shadow: none;
+        }
+
+        .btn-primary {
+            border-color: var(--magenta);
+            background: var(--magenta);
+            color: #12000f;
+        }
+
+        .btn-primary:hover {
+            border-color: #ff73e7;
+            background: #ff73e7;
+            color: #12000f;
+        }
+
+        .tools-menu {
+            position: relative;
+        }
+
+        .tools-menu > summary {
+            list-style: none;
+        }
+
+        .tools-menu > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .tools-menu[open] > summary {
+            border-color: var(--cyan);
+            color: var(--cyan);
+            background: rgba(60,236,255,0.08);
+        }
+
+        .tools-menu-popover {
+            position: absolute;
+            top: calc(100% + 9px);
+            right: 0;
+            z-index: 300;
+            width: 310px;
+            padding: 10px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
+            border: 1px solid rgba(255,255,255,0.13);
+            border-radius: 10px;
+            background: #171720;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+        }
+
+        .tools-menu-popover .btn,
+        .tools-menu-popover .big-button {
+            justify-content: flex-start;
+            width: 100%;
+        }
+
+        .toolbox {
+            padding: 0 12px 18px;
+            gap: 12px;
+            background: #101016;
+            border-right-color: rgba(255,255,255,0.08);
+            backdrop-filter: none;
+        }
+
+        .toolbox-head {
+            position: sticky;
+            top: 0;
+            z-index: 4;
+            margin: 0 -12px;
+            padding: 14px 12px 12px;
+            background: linear-gradient(#101016 82%, rgba(16,16,22,0));
+        }
+
+        .toolbox-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 10px;
+        }
+
+        .toolbox-title {
+            font-size: 13px;
+            font-weight: 900;
+            letter-spacing: 0.02em;
+        }
+
+        .toolbox-hint {
+            color: var(--text-dim);
+            font-size: 10px;
+        }
+
+        .tool-search {
+            width: 100%;
+            height: 36px;
+            padding: 0 11px;
+            border: 1px solid rgba(255,255,255,0.11);
+            border-radius: 7px;
+            background: #191922;
+            color: var(--text-main);
+            outline: none;
+        }
+
+        .tool-search:focus {
+            border-color: var(--cyan);
+            box-shadow: 0 0 0 3px rgba(60,236,255,0.1);
+        }
+
+        .tool-search-status {
+            min-height: 16px;
+            padding-top: 5px;
+            color: var(--text-dim);
+            font-size: 10px;
+        }
+
+        .tool-filter-tabs {
+            display: flex;
+            gap: 3px;
+            margin-top: 8px;
+            overflow-x: auto;
+        }
+
+        .tool-filter {
+            flex: 1 0 auto;
+            padding: 6px 7px;
+            border: 0;
+            border-radius: 5px;
+            background: transparent;
+            color: var(--text-dim);
+            font-size: 10px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .tool-filter:hover {
+            color: var(--text-main);
+            background: rgba(255,255,255,0.05);
+        }
+
+        .tool-filter.active {
+            color: var(--magenta);
+            background: rgba(255,43,214,0.1);
+        }
+
+        .tool-category {
+            margin: 5px 0 0;
+            color: #b8b6c5;
+            font-size: 10px;
+            letter-spacing: 0.12em;
+        }
+
+        .tool-grid {
+            gap: 6px;
+        }
+
+        .tool-item {
+            min-height: 66px;
+            padding: 9px 6px;
+            gap: 4px;
+            border-radius: 7px;
+            background: #17171f;
+            border-color: rgba(255,255,255,0.08);
+        }
+
+        .tool-item:hover {
+            transform: translateY(-1px);
+            border-color: rgba(60,236,255,0.65);
+            background: #1d1d28;
+            box-shadow: 0 7px 20px rgba(0,0,0,0.2);
+        }
+
+        .tool-icon {
+            font-size: 18px;
+        }
+
+        .tool-label {
+            color: #d7d5df;
+            font-size: 10px;
+        }
+
+        .tool-grid.is-hidden,
+        .tool-category.is-hidden,
+        .tool-item.is-hidden {
+            display: none;
+        }
+
+        .canvas-area {
+            padding: 0 24px 24px;
+            align-items: stretch;
+            background-color: #0c0c11;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+
+        .canvas-command-row {
+            min-height: 48px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+            align-items: center;
+            gap: 12px;
+        }
+
+        .page-tabs-bar {
+            min-width: 0;
+            min-height: 32px;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            align-items: center;
+        }
+
+        .page-tab {
+            min-width: 96px;
+            padding: 6px 10px;
+            border: 1px solid rgba(255,255,255,0.09);
+            border-radius: 7px;
+            background: rgba(255,255,255,0.035);
+        }
+
+        .page-tab.active {
+            border-color: rgba(255,43,214,0.55);
+            background: rgba(255,43,214,0.09);
+            box-shadow: none;
+        }
+
+        .page-tab-add {
+            min-height: 29px;
+            line-height: 1;
+        }
+
+        .canvas-label {
+            justify-self: end;
+            color: var(--text-dim);
+            font-family: 'VT323', monospace;
+            font-size: 15px;
+            letter-spacing: 0.06em;
+        }
+
+        .viewport-controls {
+            margin: 0;
+            gap: 2px;
+            padding: 3px;
+            border-radius: 8px;
+            background: #181820;
+            border-color: rgba(255,255,255,0.09);
+            box-shadow: none;
+        }
+
+        .vp-btn {
+            min-width: 31px;
+            padding: 5px;
+            font-size: 14px;
+        }
+
+        #canvas-container {
+            padding: 0 0 28px;
+            align-items: flex-start;
+        }
+
+        #canvas-frame {
+            border: 1px solid rgba(255,255,255,0.13);
+            box-shadow: 0 22px 70px rgba(0,0,0,0.48);
+        }
+
+        .sidebar {
+            background: #111118;
+            border-left-color: rgba(255,255,255,0.08);
+            backdrop-filter: none;
+        }
+
+        .sidebar-kicker {
+            padding: 14px 14px 6px;
+            color: var(--text-dim);
+            font-size: 10px;
+            font-weight: 900;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .sidebar-header {
+            padding: 0 10px 9px;
+            gap: 3px;
+            border-bottom-color: rgba(255,255,255,0.08);
+        }
+
+        .tab-btn {
+            padding: 8px 6px;
+            border-radius: 6px;
+            border-bottom: 0;
+            text-transform: none;
+            font-size: 11px;
+        }
+
+        .tab-btn.active {
+            border-bottom: 0;
+            color: var(--text-main);
+            background: #242431;
+            text-shadow: none;
+        }
+
+        .sidebar-close {
+            display: none;
+            flex: 0 0 32px;
+        }
+
+        .sidebar-content {
+            padding: 14px;
+        }
+
+        .inspector-empty {
+            min-height: 280px;
+            display: grid;
+            place-content: center;
+            gap: 8px;
+            padding: 24px;
+            text-align: center;
+            color: var(--text-dim);
+        }
+
+        .inspector-empty-icon {
+            font-size: 26px;
+            filter: grayscale(0.2);
+        }
+
+        .inspector-empty strong {
+            color: var(--text-main);
+            font-size: 13px;
+        }
+
+        .inspector-empty span {
+            max-width: 210px;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        .statusbar {
+            padding: 0 14px;
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            background: #0e0e14;
+            border-top: 1px solid rgba(255,255,255,0.07);
+            color: var(--text-dim);
+            font-size: 10px;
+        }
+
+        .status-ready::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            display: inline-block;
+            margin-right: 7px;
+            border-radius: 50%;
+            background: var(--lime);
+            box-shadow: 0 0 8px rgba(200,255,69,0.45);
+        }
+
+        .statusbar-spacer {
+            flex: 1;
+        }
+
+        @media (max-width: 1100px) {
+            .editor-wrapper {
+                grid-template-columns: 210px minmax(400px, 1fr) 280px;
+            }
+
+            .toolbar .btn-label-optional {
+                display: none;
+            }
+
+            .logo {
+                min-width: auto;
+                font-size: 24px;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .editor-wrapper {
+                grid-template-rows: 56px minmax(0, 1fr) 92px 30px;
+            }
+
+            .toolbar {
+                overflow-x: auto;
+            }
+
+            .toolbar-spacer {
+                display: none;
+            }
+
+            .tools-menu-popover {
+                position: fixed;
+                top: 62px;
+                right: 10px;
+            }
+
+            .toolbox {
+                padding: 8px 10px;
+                flex-direction: row;
+                overflow-x: auto;
+                overflow-y: hidden;
+                gap: 10px;
+                white-space: nowrap;
+            }
+
+            .toolbox-head {
+                display: none;
+            }
+
+            .tool-category {
+                display: none;
+            }
+
+            .tool-grid {
+                display: flex;
+                flex: 0 0 auto;
+                gap: 6px;
+            }
+
+            .tool-item {
+                min-width: 68px;
+                min-height: 68px;
+            }
+
+            .sidebar {
+                display: none;
+                position: fixed;
+                top: 56px;
+                right: 0;
+                bottom: 30px;
+                z-index: 200;
+                width: min(88vw, 320px);
+                box-shadow: -20px 0 60px rgba(0,0,0,0.5);
+            }
+
+            .sidebar.active {
+                display: flex;
+            }
+
+            .sidebar-close {
+                display: block;
+            }
+
+            #toggle-sidebar-btn {
+                display: inline-flex !important;
+            }
+
+            .canvas-command-row {
+                grid-template-columns: minmax(0, 1fr) auto;
+            }
+
+            .canvas-label {
+                display: none;
+            }
+        }
     </style>
     
     <!-- Logic Scripts -->
@@ -1094,7 +1626,6 @@
     <script src="page-loader-and-components.js"></script>
     <script src="js-presets.js"></script>
     <script src="css-presets.js"></script>
-    <script src="js-presets.js"></script>
     
     <!-- NEW: COAIEXIST Studio Enhancements -->
     <script type="module" src="./src/store.js"></script>
@@ -1105,7 +1636,6 @@
     <script src="src/theme-extractor-panel.js" defer></script>
     <script src="src/wysiwyg-resize-handles.js" defer></script>
     <script src="src/fun-components.js" defer></script>
-<link rel="stylesheet" href="/index.css">
 </head>
 <body>
     <!-- EXIT PREVIEW BUTTON (FIXED POS) -->
@@ -1129,31 +1659,51 @@
         <!-- TOOLBAR -->
         <div class="toolbar">
             <div class="logo">✨COAIEXIST</div>
-            <button class="btn" id="new-btn">📄 Reset</button>
-            <button class="btn" id="undo-btn" disabled>⏪ Undo</button>
-            <button class="btn" id="redo-btn" disabled>⏩ Redo</button>
-            <button class="btn btn-pink" id="ai-gen-btn">✨ AI Manifest</button>
-            
-            <button class="btn" id="preview-btn">👁️ Preview</button>
-            <button class="btn" id="code-view-btn">﹤/﹥ Source</button>
-
-            <!-- Hardcoded onclick events to guarantee responsiveness -->
-            <button class="btn" id="css-btn">🎨 CSS Lab</button>
-            <button class="btn btn-cyan" id="global-styles-btn">🌍 Theme</button>
-            <button class="btn btn-orange" id="js-btn">⚡ Scripts</button>
-            
-            <button class="btn" id="asset-btn">🖼️ Assets</button>
-            <button class="btn" id="settings-btn">⚙️ Settings</button>
-            <button class="btn" id="theme-toggle-btn">☀️ Mode</button>
-            <button class="btn btn-cyan" id="export-btn">💾 Export</button>
-            <button class="btn" id="grid-toggle-btn">Grid</button>
-            <button class="btn" id="sound-toggle-btn">🔊 Sound: On</button>
+            <div class="toolbar-group" aria-label="Document history">
+                <button class="btn" id="new-btn" title="Reset page">📄 <span class="btn-label-optional">Reset</span></button>
+                <button class="btn" id="undo-btn" disabled title="Undo">↶ <span class="btn-label-optional">Undo</span></button>
+                <button class="btn" id="redo-btn" disabled title="Redo">↷ <span class="btn-label-optional">Redo</span></button>
+            </div>
+            <div class="toolbar-group" aria-label="View modes">
+                <button class="btn" id="preview-btn">👁 Preview</button>
+                <button class="btn" id="code-view-btn">⌘ Source</button>
+            </div>
+            <div class="toolbar-spacer"></div>
+            <button class="btn btn-primary" id="export-btn">Export ↗</button>
+            <details class="tools-menu" id="tools-menu">
+                <summary class="btn">✦ Tools ▾</summary>
+                <div class="tools-menu-popover">
+                    <button class="btn btn-pink" id="ai-gen-btn">✨ AI Manifest</button>
+                    <button class="btn" id="css-btn">🎨 CSS Lab</button>
+                    <button class="btn" id="global-styles-btn">🌍 Theme</button>
+                    <button class="btn" id="js-btn">⚡ Scripts</button>
+                    <button class="btn" id="asset-btn">🖼 Assets</button>
+                    <button class="btn" id="grid-toggle-btn">▦ Grid</button>
+                    <button class="btn" id="sound-toggle-btn">🔊 Sound: On</button>
+                    <button class="btn" id="theme-toggle-btn">☀ Mode</button>
+                    <button class="btn" id="settings-btn">⚙ Settings</button>
+                </div>
+            </details>
             <button class="btn" id="toggle-sidebar-btn" style="display:none;">🍔</button> <!-- Mobile Sidebar Toggle -->
-            <div style="flex:1;"></div>
         </div>
 
         <!-- TOOLBOX -->
         <div class="toolbox">
+            <div class="toolbox-head">
+                <div class="toolbox-title-row">
+                    <div class="toolbox-title">Add to page</div>
+                    <div class="toolbox-hint">click or drag</div>
+                </div>
+                <input class="tool-search" id="tool-search" type="search" placeholder="Search components…" autocomplete="off">
+                <div class="tool-filter-tabs" aria-label="Component categories">
+                    <button class="tool-filter active" data-tool-filter="all">All</button>
+                    <button class="tool-filter" data-tool-filter="structure">Structure</button>
+                    <button class="tool-filter" data-tool-filter="text">Text</button>
+                    <button class="tool-filter" data-tool-filter="media">Media</button>
+                    <button class="tool-filter" data-tool-filter="fun">Fun</button>
+                </div>
+                <div class="tool-search-status" id="tool-search-status">Browse all components</div>
+            </div>
             <!-- Content populated by tools... -->
              <div class="tool-category">COAIEXIST.OS</div>
             <div class="tool-grid">
@@ -1442,17 +1992,17 @@
 
         <!-- CANVAS -->
         <div class="canvas-area" id="canvas-area">
-            <!-- PAGE TABS -->
-            <div class="page-tabs-bar" id="page-tabs-bar">
-                <!-- Tabs generated here -->
-                <button class="page-tab-add" onclick="createNewPage()" title="Create New Page">+</button>
-            </div>
-
-            <div class="viewport-controls">
-                <button class="vp-btn" id="vp-mobile" title="Mobile (375px)">📱</button>
-                <button class="vp-btn" id="vp-tablet" title="Tablet (768px)">📲</button>
-                <button class="vp-btn" id="vp-desktop" title="Laptop (1024px)">💻</button>
-                <button class="vp-btn active" id="vp-full" title="Full Width">🖥️</button>
+            <div class="canvas-command-row">
+                <div class="page-tabs-bar" id="page-tabs-bar">
+                    <button class="page-tab-add" onclick="createNewPage()" title="Create New Page">+</button>
+                </div>
+                <div class="viewport-controls" aria-label="Canvas viewport">
+                    <button class="vp-btn" id="vp-mobile" title="Mobile (375px)">▯</button>
+                    <button class="vp-btn" id="vp-tablet" title="Tablet (768px)">▭</button>
+                    <button class="vp-btn" id="vp-desktop" title="Laptop (1024px)">▰</button>
+                    <button class="vp-btn active" id="vp-full" title="Full Width">◫</button>
+                </div>
+                <div class="canvas-label">LIVE CANVAS</div>
             </div>
             
             <div id="canvas-container">
@@ -1463,16 +2013,19 @@
 
         <!-- INSPECTOR SIDEBAR -->
         <div class="sidebar" id="sidebar">
+            <div class="sidebar-kicker">Inspector</div>
             <div class="sidebar-header">
-                <button class="tab-btn active" id="tab-props">Pro CSS</button>
+                <button class="tab-btn active" id="tab-props">Design</button>
                 <button class="tab-btn" id="tab-text">Text</button>
                 <button class="tab-btn" id="tab-layers">Layers</button>
-                <button class="tab-btn" onclick="document.getElementById('sidebar').classList.remove('active')">×</button>
+                <button class="tab-btn sidebar-close" onclick="document.getElementById('sidebar').classList.remove('active')">×</button>
             </div>
             
-            <div id="panel-props" class="sidebar-content" id="properties-panel">
-                <div style="text-align: center; margin-top: 50%; color: var(--text-dim); font-size: 12px;">
-                    Select an object to<br>hack its matrix.
+            <div id="panel-props" class="sidebar-content">
+                <div class="inspector-empty">
+                    <div class="inspector-empty-icon">⌖</div>
+                    <strong>Nothing selected</strong>
+                    <span>Choose something on the canvas to edit its layout, color, spacing, and effects.</span>
                 </div>
             </div>
             
@@ -1528,8 +2081,12 @@
 
         <!-- STATUS BAR -->
         <div class="statusbar">
-            <span id="status-msg">System Ready</span>
+            <span class="status-ready" id="status-msg">Ready</span>
+            <span>HTML mode</span>
             <span id="mouse-coords">0,0</span>
+            <span class="statusbar-spacer"></span>
+            <span>Autosave active</span>
+            <span>100%</span>
         </div>
     </div>
 
@@ -1954,6 +2511,5 @@
 
     <!-- CORE APPLICATION LOGIC (Instant Load) -->
     <script src="main-app.js"></script>
-</body>
 </body>
 </html>

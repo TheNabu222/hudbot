@@ -330,6 +330,16 @@ const App: React.FC = () => {
   const editorModeBeforePlayRef = useRef<EditorMode>("stage");
   const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [isHelpCenterOpen, setIsHelpCenterOpen] = useState(false);
+  const [studioTheme, setStudioTheme] = useState<"midnight" | "sunny">(() =>
+    localStorage.getItem("cavebot_studio_theme") === "sunny"
+      ? "sunny"
+      : "midnight",
+  );
+  useEffect(() => {
+    localStorage.setItem("cavebot_studio_theme", studioTheme);
+    document.documentElement.style.colorScheme =
+      studioTheme === "sunny" ? "light" : "dark";
+  }, [studioTheme]);
   const [leftSidebarTab, setLeftSidebarTab] = useState<"librarian" | "theme">(
     "librarian",
   );
@@ -3073,7 +3083,7 @@ const App: React.FC = () => {
     currentScene.height || project.globalSettings.stageHeight || 600;
 
   return (
-    <div className="studio-app flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans overflow-hidden">
+    <div className={`studio-app ${studioTheme === "sunny" ? "sunny-theme" : ""} flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans overflow-hidden`}>
       {/* Top Bar */}
       {editorError && (
         <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[9999] bg-red-500 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2">
@@ -3550,6 +3560,22 @@ const App: React.FC = () => {
           </button>
 
           <button
+            type="button"
+            onClick={() =>
+              setStudioTheme((theme) =>
+                theme === "sunny" ? "midnight" : "sunny",
+              )
+            }
+            className="studio-theme-button flex items-center gap-1 px-3 py-1.5 text-sm font-bold transition-colors"
+            title={`Switch to ${studioTheme === "sunny" ? "Midnight" : "Sunny"} mode`}
+          >
+            {studioTheme === "sunny" ? <Moon size={16} /> : <Sun size={16} />}
+            <span className="hidden lg:inline">
+              {studioTheme === "sunny" ? "Midnight" : "Sunny"}
+            </span>
+          </button>
+
+          <button
             onClick={() => setShowAIAssistant((prev) => !prev)}
             className={`studio-ai-button flex items-center gap-1 px-3 py-1.5 text-sm font-medium transition-colors ${showAIAssistant ? "is-active" : ""}`}
           >
@@ -3567,7 +3593,7 @@ const App: React.FC = () => {
         onExport={handleExport}
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="studio-workspace flex flex-1 overflow-hidden">
         {(editorMode === "stage" || editorMode === "ui_stage") && (
           <>
             {/* Left Sidebar */}
@@ -4540,7 +4566,7 @@ const App: React.FC = () => {
 
             {/* Center - Stage */}
             <main
-              className="flex-1 bg-neutral-950 overflow-auto p-4 relative flex flex-col"
+              className="studio-stage-shell flex-1 bg-neutral-950 overflow-auto p-4 relative flex flex-col"
               onPointerDown={() => {
                 if (isPlaying && selectedInventoryItemId) {
                   setSelectedInventoryItemId(null);
@@ -8852,7 +8878,7 @@ const App: React.FC = () => {
             {/* Right Sidebar - Properties/Layers */}
             {!isPlaying && (
             <aside
-              className="flex-shrink-0 bg-neutral-900 border-l border-neutral-800 flex flex-col z-20 relative"
+              className="studio-inspector flex-shrink-0 bg-neutral-900 border-l border-neutral-800 flex flex-col z-20 relative"
               style={{ width: rightSidebarWidth }}
             >
               <div
@@ -9253,12 +9279,12 @@ const App: React.FC = () => {
                 {rightSidebarTab === "properties" &&
                   (!selectedObject ? (
                     <div className="space-y-2">
-                      <Accordion title="Project / Canvas Settings" defaultOpen={true}>
+                      <Accordion title="Game Screen & Room Size" defaultOpen={true}>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <LabelWithHelp
-                              label="Global Screen Width"
-                              helpText="The default total width of your game screen in pixels."
+                              label="Default Game Width"
+                              helpText="The usual width of your playable screen. This is still measured in pixels."
                             />
                             <input
                               type="number"
@@ -9277,8 +9303,8 @@ const App: React.FC = () => {
                           </div>
                           <div>
                             <LabelWithHelp
-                              label="Global Screen Height"
-                              helpText="The default total height of your game screen in pixels."
+                              label="Default Game Height"
+                              helpText="The usual height of your playable screen. This is still measured in pixels."
                             />
                             <input
                               type="number"
@@ -10461,7 +10487,7 @@ const App: React.FC = () => {
 
                           <div className="space-y-3">
                         <LabelWithHelp
-                          label="Object Name"
+                          label="Name"
                           helpText="A unique name to identify this object in the Layers panel."
                         />
                         <input
@@ -10483,8 +10509,8 @@ const App: React.FC = () => {
                         selectedObject.interaction === "none" && (
                           <div className="p-3 bg-indigo-900/20 border border-indigo-500/30 rounded-lg">
                             <LabelWithHelp
-                              label="Quick Setup"
-                              helpText="Quickly configure this object's interaction behavior."
+                              label="Quick Actions"
+                              helpText="Quickly choose the first thing this object should do when clicked."
                               className="mb-2 block text-indigo-300"
                             />
                             <div className="grid grid-cols-2 gap-2">
@@ -10897,10 +10923,10 @@ const App: React.FC = () => {
                         </Accordion>
                       )}
 
-                      <Accordion title="Transform">
+                      <Accordion title="Position & Size">
                         <div className="space-y-3">
                           <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider flex justify-between items-center">
-                            <span>Transform</span>
+                            <span>Position & Size</span>
                             {editorMode === "ui_stage" && (
                               <div className="flex gap-1">
                                 <button
@@ -11028,8 +11054,8 @@ const App: React.FC = () => {
                           <div className="grid grid-cols-2 gap-2">
                             <div>
                               <LabelWithHelp
-                                label="X"
-                                helpText="Horizontal position on the screen. Left is 0."
+                                label="Left / Right (X)"
+                                helpText="How far across the screen it sits. The left edge is 0."
                               />
                               <input
                                 type="number"
@@ -11044,8 +11070,8 @@ const App: React.FC = () => {
                             </div>
                             <div>
                               <LabelWithHelp
-                                label="Y"
-                                helpText="Vertical position on the screen. Top is 0."
+                                label="Top / Bottom (Y)"
+                                helpText="How far down the screen it sits. The top edge is 0."
                               />
                               <input
                                 type="number"
@@ -11092,8 +11118,8 @@ const App: React.FC = () => {
                             </div>
                             <div>
                               <LabelWithHelp
-                                label="Rotation (°)"
-                                helpText="Rotate the element around its center (0-360 degrees)."
+                                label="Turn (°)"
+                                helpText="Turn it around its center. A full turn is 360 degrees."
                               />
                               <input
                                 type="number"
@@ -11118,7 +11144,7 @@ const App: React.FC = () => {
                                   }
                                   className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
                                 />
-                                Flip X
+                                Flip Left / Right
                               </label>
                               <label className="flex items-center gap-1 text-sm text-neutral-300 cursor-pointer">
                                 <input
@@ -11131,7 +11157,7 @@ const App: React.FC = () => {
                                   }
                                   className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
                                 />
-                                Flip Y
+                                Flip Up / Down
                               </label>
                             </div>
                             <div className="col-span-2 pt-2 border-t border-neutral-800 flex items-center justify-between">
@@ -11146,7 +11172,7 @@ const App: React.FC = () => {
                                   }
                                   className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
                                 />
-                                Stretch to fill Screen
+                                Fit to the Whole Room
                               </label>
                               <select 
                                 value={selectedObject.objectFit || "fill"}
@@ -11154,9 +11180,9 @@ const App: React.FC = () => {
                                 className="bg-neutral-800 border border-neutral-700 rounded px-1.5 py-1 text-xs"
                                 disabled={!selectedObject.stretchToScreen}
                               >
-                                <option value="fill">Fill Canvas</option>
-                                <option value="contain">Scale (Contain)</option>
-                                <option value="cover">Crop (Cover)</option>
+                                <option value="fill">Stretch to Every Edge</option>
+                                <option value="contain">Show the Whole Image</option>
+                                <option value="cover">Fill and Trim the Edges</option>
                               </select>
                             </div>
                           </div>
@@ -11471,12 +11497,12 @@ const App: React.FC = () => {
                       )}
 
                       {/* Layering */}
-                      <Accordion title="Visual Layers & Sorting">
+                      <Accordion title="Front, Back & Visibility">
                         <div className="flex items-center justify-between">
                           <span className="text-sm flex items-center gap-1">
                             <LabelWithHelp
-                              label="Layer Order"
-                              helpText="Determines which objects appear in front. Higher numbers are closer to the camera."
+                              label="Front / Back Order"
+                              helpText="Higher numbers place this object in front of lower-numbered objects. Designers may call this layer order or z-index."
                             />
                             : {selectedObject.zIndex}
                           </span>
@@ -11528,8 +11554,8 @@ const App: React.FC = () => {
                         <div>
                           <div className="flex justify-between items-center">
                             <LabelWithHelp
-                              label="Opacity"
-                              helpText="How transparent the object is. 100% is fully visible, 0% is invisible."
+                              label="See-through Amount"
+                              helpText="100% is fully visible. Lower values make the object more transparent. The technical term is opacity."
                             />
                             <span className="text-sm text-neutral-500">
                               {Math.round(selectedObject.opacity * 100)}%
@@ -11565,14 +11591,14 @@ const App: React.FC = () => {
                             htmlFor="ignoreClicksToggle"
                             className="text-sm font-bold text-neutral-300 select-none cursor-pointer"
                           >
-                            Ignore Clicks (Pass-through)
+                            Let Clicks Pass Through
                           </label>
                         </div>
                         <div>
                           <div className="flex justify-between items-center">
                             <LabelWithHelp
-                              label="Parallax"
-                              helpText="Scroll speed. 1 is normal, <1 is background, >1 is foreground."
+                              label="Depth Movement"
+                              helpText="1 is normal. Lower values feel farther away and higher values feel closer. This effect is called parallax."
                             />
                             <span className="text-sm text-neutral-500">
                               {selectedObject.parallaxSpeed !== undefined
@@ -11614,8 +11640,8 @@ const App: React.FC = () => {
                         </label>
                         <div>
                           <LabelWithHelp
-                            label="Custom CSS Classes"
-                            helpText="Add any Tailwind classes here to customize the element (e.g. 'rounded-full border-4 border-red-500')."
+                            label="Extra Style Code (Advanced)"
+                            helpText="Optional CSS utility classes for precise visual control. You can safely ignore this unless you want to work directly with style code."
                           />
                           <input
                             type="text"
@@ -11633,7 +11659,7 @@ const App: React.FC = () => {
 
                       {/* Appearance & Filters */}
                       {!selectedObject.isUiElement && (
-                        <Accordion title="Rendering & Blend Modes">
+                        <Accordion title="Color, Filters & Image Tools">
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-medium text-emerald-400">Tools</span>
                             {!selectedObject.isHitbox &&
@@ -11656,8 +11682,8 @@ const App: React.FC = () => {
                           </div>
                           <div>
                             <LabelWithHelp
-                              label="Visual Blending"
-                              helpText="How this layer mixes visually with layers behind it."
+                              label="How Colors Mix"
+                              helpText="Choose how this object's colors combine with whatever is behind it. The technical term is blend mode."
                             />
                             <select
                               value={selectedObject.blendMode || "normal"}
@@ -11907,7 +11933,7 @@ const App: React.FC = () => {
                       {/* Physics */}
                       {!selectedObject.isUiElement &&
                         !selectedObject.isText && (
-                          <Accordion title="Colliders & Physics">
+                          <Accordion title="Bumping, Falling & Movement">
                             <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-white">
                               <input
                                 type="checkbox"
@@ -11919,7 +11945,7 @@ const App: React.FC = () => {
                                 }
                                 className="rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500"
                               />
-                              Enable Physics
+                              Let It Move and Bump
                             </label>
                             {selectedObject.hasPhysics && (
                               <div className="space-y-3 mt-2 pl-6">
@@ -11934,7 +11960,7 @@ const App: React.FC = () => {
                                     }
                                     className="rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500"
                                   />
-                                  Is Static Object
+                                  Keep It Still
                                 </label>
 
                                 <div>
@@ -11965,7 +11991,7 @@ const App: React.FC = () => {
 
                                 <div>
                                   <div className="flex justify-between text-sm text-neutral-500 mb-1">
-                                    <span>Friction</span>
+                                    <span>Grip</span>
                                     <span>
                                       {selectedObject.physicsFriction ?? 0.1}
                                     </span>
@@ -11991,7 +12017,7 @@ const App: React.FC = () => {
 
                                 <div>
                                   <div className="flex justify-between text-sm text-neutral-500 mb-1">
-                                    <span>Density</span>
+                                    <span>Heaviness</span>
                                     <span>
                                       {selectedObject.physicsDensity ?? 0.05}
                                     </span>
@@ -12025,7 +12051,7 @@ const App: React.FC = () => {
                         )}
 
                       {/* Interaction */}
-                      <Accordion title="Behaviors & Events">
+                      <Accordion title="Clicks, Cursors & Reactions">
                         <div>
                           <LabelWithHelp
                             label="What should the cursor promise?"
@@ -13164,12 +13190,12 @@ const App: React.FC = () => {
 
                       {/* Relationships */}
                       {!selectedObject.isUiElement && (
-                        <Accordion title="Grouping & Links">
+                        <Accordion title="Move Together & Relationships">
                           <div className="grid grid-cols-2 gap-2">
                             <div>
                               <LabelWithHelp
-                                label="Attach to Object"
-                                helpText="Link this object to another so they move together as a group."
+                                label="Move With Another Object"
+                                helpText="Choose another object and these two will travel together."
                               />
                               <select
                                 value={selectedObject.parentObjectId || ""}
@@ -13193,8 +13219,8 @@ const App: React.FC = () => {
                             </div>
                             <div>
                               <LabelWithHelp
-                                label="Character Reputation ID"
-                                helpText="Used to track relationship points with this character."
+                                label="Relationship Tracking Name"
+                                helpText="The private name the game uses to remember relationship points for this character."
                               />
                               <input
                                 type="text"
@@ -13214,11 +13240,11 @@ const App: React.FC = () => {
 
                       {/* RPG / Sim Elements */}
                       {!selectedObject.isUiElement && (
-                        <Accordion title="RPG Systems & Metadata">
+                        <Accordion title="Story & Game Details">
                           <div>
                             <LabelWithHelp
-                              label="Flavor Text (Hover)"
-                              helpText="Text shown briefly when the player hovers over the object."
+                              label="Hover Message"
+                              helpText="A short message shown when the player rests the cursor over this object."
                             />
                             <input
                               type="text"

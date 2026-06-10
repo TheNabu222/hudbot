@@ -2100,6 +2100,117 @@
                     window.addElementHTML(html);
                 });
              });
+
+             // 9. COMPONENT SEARCH
+             const toolSearch = document.getElementById('tool-search');
+             const toolSearchStatus = document.getElementById('tool-search-status');
+             const toolGrids = Array.from(document.querySelectorAll('.toolbox > .tool-grid'));
+             const toolFilters = Array.from(document.querySelectorAll('.tool-filter'));
+             let activeToolFilter = 'all';
+
+             const getToolCategory = (categoryName) => {
+                 const normalized = categoryName.toLowerCase();
+                 if (normalized.includes('structure') || normalized.includes('components')) return 'structure';
+                 if (normalized.includes('typography')) return 'text';
+                 if (normalized.includes('media')) return 'media';
+                 return 'fun';
+             };
+
+             const filterTools = () => {
+                 const query = (toolSearch?.value || '').trim().toLowerCase();
+                 let visibleCount = 0;
+
+                 toolGrids.forEach(grid => {
+                     const category = grid.previousElementSibling;
+                     const categoryName = category?.textContent || '';
+                     const categoryMatches = activeToolFilter === 'all'
+                         || getToolCategory(categoryName) === activeToolFilter;
+                     let gridHasMatch = false;
+
+                     grid.querySelectorAll('.tool-item').forEach(item => {
+                         const label = item.textContent.toLowerCase();
+                         const type = (item.dataset.type || '').toLowerCase();
+                         const matchesQuery = !query || label.includes(query) || type.includes(query);
+                         const isMatch = categoryMatches && matchesQuery;
+                         item.classList.toggle('is-hidden', !isMatch);
+                         if (isMatch) {
+                             visibleCount += 1;
+                             gridHasMatch = true;
+                         }
+                     });
+
+                     grid.classList.toggle('is-hidden', !gridHasMatch);
+                     if (category?.classList.contains('tool-category')) {
+                         category.classList.toggle('is-hidden', !gridHasMatch);
+                     }
+                 });
+
+                 if (toolSearchStatus) {
+                     toolSearchStatus.textContent = query
+                         ? `${visibleCount} component${visibleCount === 1 ? '' : 's'} found`
+                         : `${visibleCount} component${visibleCount === 1 ? '' : 's'} ready`;
+                 }
+             };
+
+             if (toolSearch) {
+                 toolSearch.addEventListener('input', filterTools);
+                 toolSearch.addEventListener('keydown', (event) => {
+                     if (event.key === 'Escape') {
+                         toolSearch.value = '';
+                         filterTools();
+                         toolSearch.blur();
+                     }
+                 });
+                 filterTools();
+             }
+
+             toolFilters.forEach(button => {
+                 button.addEventListener('click', () => {
+                     activeToolFilter = button.dataset.toolFilter || 'all';
+                     toolFilters.forEach(item => item.classList.toggle('active', item === button));
+                     filterTools();
+                 });
+             });
+
+             // 10. KEEP SECONDARY COMMANDS IN THE TOOLS MENU
+             const toolsMenu = document.getElementById('tools-menu');
+             const toolsPopover = toolsMenu?.querySelector('.tools-menu-popover');
+             const secondaryButtonIds = new Set([
+                 'neocities-deploy-btn',
+                 'component-library-btn',
+                 'load-source-page-btn',
+                 'templates-btn',
+                 'fun-comp-toggle',
+                 'world-graph-toggle'
+             ]);
+
+             const organizeSecondaryCommands = () => {
+                 if (!toolsPopover) return;
+                 secondaryButtonIds.forEach(id => {
+                     const button = document.getElementById(id);
+                     if (button && button.parentElement !== toolsPopover) {
+                         button.classList.add('btn');
+                         toolsPopover.appendChild(button);
+                     }
+                 });
+             };
+
+             organizeSecondaryCommands();
+             const toolbar = document.querySelector('.toolbar');
+             if (toolbar && toolsPopover) {
+                 new MutationObserver(organizeSecondaryCommands).observe(toolbar, { childList: true });
+                 toolsPopover.addEventListener('click', (event) => {
+                     if (event.target.closest('button')) toolsMenu.removeAttribute('open');
+                 });
+             }
+
+             // 11. VIEWPORT BUTTON STATE
+             document.querySelectorAll('.vp-btn').forEach(button => {
+                 button.addEventListener('click', () => {
+                     document.querySelectorAll('.vp-btn').forEach(item => item.classList.remove('active'));
+                     button.classList.add('active');
+                 });
+             });
              
              console.log('✅ COAIEXIST Studio Ready.');
         };
