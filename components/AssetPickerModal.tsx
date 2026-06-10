@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Folder, Image as ImageIcon, Music, Search, X, Video, Star, Info } from 'lucide-react';
 import { Asset } from '../types';
 
@@ -11,12 +11,34 @@ interface AssetPickerModalProps {
   canvasAssetIds?: string[];
   onToggleFavorite?: (assetId: string) => void;
   onUpdateAsset?: (assetId: string, updates: Partial<Asset>) => void;
+  repositoryFolders?: string[];
+  onOpenRepositoryFolder?: (path: string) => void;
+  onLoadRepositoryRoot?: () => void;
+  isLoadingRepository?: boolean;
 }
 
-export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSelect, onClose, filterType, recentAssetIds = [], canvasAssetIds = [], onToggleFavorite, onUpdateAsset }) => {
+export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
+  assets,
+  onSelect,
+  onClose,
+  filterType,
+  recentAssetIds = [],
+  canvasAssetIds = [],
+  onToggleFavorite,
+  onUpdateAsset,
+  repositoryFolders = [],
+  onOpenRepositoryFolder,
+  onLoadRepositoryRoot,
+  isLoadingRepository = false,
+}) => {
   const [activeBin, setActiveBin] = useState<string>('all');
   const [assetSearch, setAssetSearch] = useState('');
   const [editingInfoId, setEditingInfoId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(60);
+
+  useEffect(() => {
+    setVisibleCount(60);
+  }, [activeBin, assetSearch, filterType]);
 
   const filteredAssets = assets.filter(a => {
     if (filterType && a.type !== filterType) return false;
@@ -42,6 +64,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSe
       return idxA - idxB;
     });
   }
+  const visibleAssets = filteredAssets.slice(0, visibleCount);
 
   const allCategories = Array.from(new Set<string>(assets.filter(a => !filterType || a.type === filterType).map(a => a.category || '')));
   const subfolders = new Set<string>();
@@ -53,6 +76,14 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSe
       if (remaining) subfolders.add(remaining.split('/')[0]);
     }
   });
+  repositoryFolders.forEach(path => {
+    if (activeBin === '') {
+      if (path) subfolders.add(path.split('/')[0]);
+    } else if (path.startsWith(activeBin + '/')) {
+      const remaining = path.substring(activeBin.length + 1);
+      if (remaining) subfolders.add(remaining.split('/')[0]);
+    }
+  });
   const folders = Array.from(subfolders).filter(Boolean).sort();
 
   return (
@@ -61,10 +92,28 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSe
         
         {/* Header */}
         <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-950">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            {filterType === 'image' ? <ImageIcon size={20} className="text-emerald-500"/> : filterType === 'audio' ? <Music size={20} className="text-indigo-500" /> : filterType === 'video' ? <Video size={20} className="text-blue-500"/> : <Folder size={20} className="text-neutral-500" />}
-            Select Asset
-          </h2>
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              {filterType === 'image' ? <ImageIcon size={20} className="text-emerald-500"/> : filterType === 'audio' ? <Music size={20} className="text-indigo-500" /> : filterType === 'video' ? <Video size={20} className="text-blue-500"/> : <Folder size={20} className="text-neutral-500" />}
+              Select Asset
+            </h2>
+            <p className="text-[10px] text-neutral-500 mt-0.5">
+              Repository folders load only when opened.
+            </p>
+          </div>
+          {onLoadRepositoryRoot && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveBin('');
+                onLoadRepositoryRoot();
+              }}
+              disabled={isLoadingRepository}
+              className="ml-auto mr-2 rounded border border-[#00ffcc]/35 bg-[#00ffcc]/10 px-3 py-1.5 font-comic text-[10px] font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20 disabled:opacity-50"
+            >
+              {isLoadingRepository ? 'Loading folder…' : repositoryFolders.length ? 'Refresh Repo Root' : 'Browse Repo'}
+            </button>
+          )}
           <button onClick={onClose} className="p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-white transition-colors">
             <X size={20} />
           </button>
@@ -119,7 +168,11 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSe
                   {folders.map(sub => (
                     <button 
                       key={sub}
-                      onClick={() => setActiveBin(activeBin ? `${activeBin}/${sub}` : sub)}
+                      onClick={() => {
+                        const nextPath = activeBin ? `${activeBin}/${sub}` : sub;
+                        setActiveBin(nextPath);
+                        onOpenRepositoryFolder?.(nextPath);
+                      }}
                       className="bg-neutral-800 border border-neutral-700/50 rounded-lg p-3 flex items-center gap-3 hover:bg-neutral-700 transition-colors text-left"
                     >
                       <Folder size={18} className="text-emerald-400 shrink-0" />
@@ -131,7 +184,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSe
 
               {/* Assets */}
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 pb-12">
-                {filteredAssets.map(asset => (
+                {visibleAssets.map(asset => (
                   <div 
                     key={asset.id}
                     className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg group hover:border-emerald-500 transition-colors flex flex-col hover:z-50 relative"
@@ -222,6 +275,17 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSe
                   </div>
                 )}
               </div>
+              {visibleAssets.length < filteredAssets.length && (
+                <div className="flex justify-center pb-8">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount((count) => count + 60)}
+                    className="rounded border border-neutral-700 bg-neutral-800 px-4 py-2 font-comic text-xs font-bold text-neutral-300 hover:border-[#00ffcc]/50 hover:text-[#00ffcc]"
+                  >
+                    Show 60 more ({filteredAssets.length - visibleAssets.length} remaining)
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

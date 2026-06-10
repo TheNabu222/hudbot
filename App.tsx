@@ -301,6 +301,10 @@ const App: React.FC = () => {
   const [clipboard, setClipboard] = useState<SceneObject[]>([]);
   const [activeBin, setActiveBin] = useState<string>("all");
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
+  const [repositoryFolders, setRepositoryFolders] = useState<string[]>([]);
+  const [loadedRepositoryFolders, setLoadedRepositoryFolders] = useState<
+    string[]
+  >([]);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [hoverCursorAssetId, setHoverCursorAssetId] = useState<string | null>(
     null,
@@ -715,7 +719,38 @@ const App: React.FC = () => {
   };
 
   const hydrateProject = (parsed: any): Project => {
-    const assets = parsed.assets || [];
+    const referencedAssetValues = new Set<string>();
+    const collectReferencedValues = (value: unknown) => {
+      if (typeof value === "string") {
+        referencedAssetValues.add(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach(collectReferencedValues);
+        return;
+      }
+      if (value && typeof value === "object") {
+        Object.entries(value as Record<string, unknown>).forEach(
+          ([key, child]) => {
+            if (key !== "assets") collectReferencedValues(child);
+          },
+        );
+      }
+    };
+    collectReferencedValues(parsed);
+    const assets = (parsed.assets || []).filter((asset: Asset) => {
+      const isRepositoryAsset =
+        asset.id?.startsWith("github:") ||
+        asset.src?.includes(
+          "raw.githubusercontent.com/thenabu222/entropic-ai/",
+        );
+      if (!isRepositoryAsset) return true;
+      return (
+        asset.isFavorite ||
+        referencedAssetValues.has(asset.id) ||
+        referencedAssetValues.has(asset.src)
+      );
+    });
     return {
       ...parsed,
       prefabs: (parsed.prefabs || []).map((o: any) => {
@@ -2275,79 +2310,68 @@ const App: React.FC = () => {
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 50;
 
-  const fetchFromGitHub = async () => {
+  const fetchFromGitHub = async (folderPath = "", force = false) => {
+    if (!force && loadedRepositoryFolders.includes(folderPath)) return;
     setIsFetchingGithub(true);
     try {
-      let treeData: any[] = [];
-
-      try {
-        const headers: HeadersInit = {};
-        if (import.meta.env.VITE_GITHUB_TOKEN) {
-          headers["Authorization"] =
-            `token ${import.meta.env.VITE_GITHUB_TOKEN}`;
-        }
-
-        // Try to fetch the full recursive tree
-        const response = await fetch(
-          "https://api.github.com/repos/thenabu222/entropic-ai/git/trees/main?recursive=1",
-          { headers },
-        );
-        if (!response.ok) throw new Error(`API Error: ${response.status}`);
-        const data = await response.json();
-        if (data && Array.isArray(data.tree)) {
-          treeData = data.tree;
-        }
-      } catch (err) {
-        console.warn(
-          "Recursive fetch failed, falling back to root directory",
-          err,
-        );
-        // Fallback to root directory if recursive fails (e.g., due to size or rate limits)
-        const headers: HeadersInit = {};
-        if (import.meta.env.VITE_GITHUB_TOKEN) {
-          headers["Authorization"] =
-            `token ${import.meta.env.VITE_GITHUB_TOKEN}`;
-        }
-        const fallbackResponse = await fetch(
-          "https://api.github.com/repos/thenabu222/entropic-ai/contents/",
-          { headers },
-        );
-        if (!fallbackResponse.ok)
-          throw new Error(`Fallback API Error: ${fallbackResponse.status}`);
-        const fallbackData = await fallbackResponse.json();
-        if (Array.isArray(fallbackData)) {
-          treeData = fallbackData.map((f: any) => ({
-            path: f.name,
-            type: f.type === "file" ? "blob" : "tree",
-            download_url: f.download_url,
-          }));
-        }
+      const headers: HeadersInit = {};
+      if (import.meta.env.VITE_GITHUB_TOKEN) {
+        headers["Authorization"] =
+          `token ${import.meta.env.VITE_GITHUB_TOKEN}`;
+      }
+      const encodedFolder = folderPath
+        .split("/")
+        .filter(Boolean)
+        .map((part) => encodeURIComponent(part))
+        .join("/");
+      const response = await fetch(
+        `https://api.github.com/repos/thenabu222/entropic-ai/contents/${encodedFolder}`,
+        { headers },
+      );
+      if (!response.ok) throw new Error(`API Error: ${response.status}`);
+      const directoryItems = await response.json();
+      if (!Array.isArray(directoryItems)) {
+        throw new Error("Repository folder did not return a directory.");
       }
 
-      const validFiles = treeData.filter(
+      const discoveredFolders = directoryItems
+        .filter((item: any) => item.type === "dir")
+        .map((item: any) => item.path as string);
+      setRepositoryFolders((current) =>
+        Array.from(new Set([...current, ...discoveredFolders])).sort(),
+      );
+
+      const validFiles = directoryItems.filter(
         (file: any) =>
-          file.type === "blob" &&
+          file.type === "file" &&
           file.path &&
-          file.path.match(/\.(png|jpg|jpeg|gif|webp|js|ts)$/i),
+          file.path.match(
+            /\.(png|jpg|jpeg|gif|webp|svg|mp3|wav|ogg|m4a|mp4|webm|js|ts)$/i,
+          ),
       );
 
       const newAssets: Asset[] = validFiles.map((file: any) => {
-        const name = file.path.split("/").pop();
+        const name = file.name || file.path.split("/").pop();
         const parts = file.path.split("/");
-        parts.pop(); // remove filename
+        parts.pop();
         const category = parts.length > 0 ? parts.join("/") : "root";
-
-        // Properly encode the path to handle spaces and special characters
         const encodedPath = file.path
           .split("/")
           .map((p: string) => encodeURIComponent(p))
           .join("/");
-
         const isScript = file.path.match(/\.(js|ts)$/i);
+        const isAudio = file.path.match(/\.(mp3|wav|ogg|m4a)$/i);
+        const isVideo = file.path.match(/\.(mp4|webm)$/i);
 
         return {
-          id: uuidv4(),
-          type: isScript ? "script" : "image",
+          id: `github:${file.path}`,
+          type: isScript
+            ? "script"
+            : isAudio
+              ? "audio"
+              : isVideo
+                ? "video"
+                : "image",
           category,
           src:
             file.download_url ||
@@ -2358,47 +2382,35 @@ const App: React.FC = () => {
 
       setProject((p) => {
         let updatedAssets = [...p.assets];
-        const timestamp = Date.now();
         const srcReplacements = new Map<string, string>();
-        const nameReplacements = new Map<string, string>();
 
         newAssets.forEach((newA) => {
           const existingIndex = updatedAssets.findIndex(
-            (a) => a.name === newA.name,
+            (asset) =>
+              asset.id === newA.id ||
+              (asset.src === newA.src && asset.name === newA.name),
           );
-          const newSrc = newA.src + `?t=${timestamp}`;
-          nameReplacements.set(newA.name, newSrc);
 
           if (existingIndex !== -1) {
-            srcReplacements.set(updatedAssets[existingIndex].src, newSrc);
+            srcReplacements.set(
+              updatedAssets[existingIndex].src,
+              newA.src,
+            );
             updatedAssets[existingIndex] = {
               ...updatedAssets[existingIndex],
-              src: newSrc,
+              ...newA,
             };
           } else {
-            updatedAssets.unshift({
-              ...newA,
-              src: newSrc,
-            });
+            updatedAssets.push(newA);
           }
         });
 
-        // Deep replace src in scenes and uiMenus
         const migrateObjects = (scenes: Scene[]) => {
           return scenes.map((scene) => ({
             ...scene,
             objects: scene.objects.map((obj) => {
-              let updatedSrc = obj.src;
-              if (srcReplacements.has(obj.src)) {
-                updatedSrc = srcReplacements.get(obj.src)!;
-              } else if (
-                obj.src &&
-                obj.src.startsWith("data:") &&
-                nameReplacements.has(obj.name)
-              ) {
-                updatedSrc = nameReplacements.get(obj.name)!;
-              }
-              return { ...obj, src: updatedSrc };
+              const updatedSrc = srcReplacements.get(obj.src);
+              return updatedSrc ? { ...obj, src: updatedSrc } : obj;
             }),
           }));
         };
@@ -2410,10 +2422,13 @@ const App: React.FC = () => {
           uiMenus: migrateObjects(p.uiMenus || []),
         };
       });
+      setLoadedRepositoryFolders((current) =>
+        Array.from(new Set([...current, folderPath])),
+      );
     } catch (error: any) {
       console.error("GitHub fetch failed", error);
       showError(
-        `Failed to fetch from GitHub: ${error.message || "Network Error"}. You may have hit the GitHub API rate limit.`,
+        `Failed to open repo folder: ${error.message || "Network Error"}.`,
       );
     } finally {
       setIsFetchingGithub(false);
@@ -2478,12 +2493,6 @@ const App: React.FC = () => {
     window.addEventListener("pointerdown", handleClick);
     return () => window.removeEventListener("pointerdown", handleClick);
   }, [contextMenu]);
-
-  // Auto-fetch from GitHub on mount
-  useEffect(() => {
-    fetchFromGitHub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const moveZIndex = (id: string, dir: 1 | -1) => {
     const obj = currentScene.objects.find((o) => o.id === id);
@@ -3458,6 +3467,7 @@ const App: React.FC = () => {
         {(editorMode === "stage" || editorMode === "ui_stage") && (
           <>
             {/* Left Sidebar */}
+            {false && (
             <aside
               className="hidden bg-neutral-900 border-r border-neutral-800 flex-col relative flex-shrink-0"
               style={{ width: leftSidebarWidth }}
@@ -3494,7 +3504,7 @@ const App: React.FC = () => {
                         <Wand2 size={12} /> AI Make
                       </button>
                       <button
-                        onClick={fetchFromGitHub}
+                        onClick={() => fetchFromGitHub("", true)}
                         disabled={isFetchingGithub}
                         className="flex-1 cursor-pointer text-[10px] uppercase font-bold bg-indigo-500/20 text-indigo-400 px-1.5 py-1 rounded hover:bg-indigo-500/30 disabled:opacity-50 shrink-0"
                       >
@@ -4422,6 +4432,7 @@ const App: React.FC = () => {
                 </div>
               )}
             </aside>
+            )}
 
             {/* Center - Stage */}
             <main
@@ -17365,6 +17376,10 @@ const App: React.FC = () => {
               ),
             }));
           }}
+          repositoryFolders={repositoryFolders}
+          onOpenRepositoryFolder={(path) => fetchFromGitHub(path)}
+          onLoadRepositoryRoot={() => fetchFromGitHub("", true)}
+          isLoadingRepository={isFetchingGithub}
         />
       )}
 
