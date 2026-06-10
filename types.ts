@@ -4,9 +4,16 @@ export type CursorType =
   | "help"
   | "text"
   | "move"
+  | "grab"
+  | "grabbing"
   | "not-allowed"
   | "crosshair"
-  | "zoom-in";
+  | "zoom-in"
+  | "zoom-out"
+  | "ew-resize"
+  | "ns-resize"
+  | "nwse-resize"
+  | "nesw-resize";
 export type AnimationType =
   | "none"
   | "wiggle"
@@ -71,6 +78,16 @@ export type BlendMode =
   | "color"
   | "luminosity";
 export type AssetCategory = string;
+
+export interface ClickResponse {
+  id: string;
+  interaction: InteractionType;
+  interactionData?: string;
+  giveItemId?: string;
+  dialogueTreeId?: string;
+  targetUiId?: string;
+  scriptAssetId?: string;
+}
 
 export interface DialogueChoice {
   id: string;
@@ -188,6 +205,7 @@ export interface SceneObject {
   locked: boolean;
   hidden?: boolean;
   cursor: CursorType;
+  cursorAssetId?: string;
 
   // Animation settings
   animation: AnimationType;
@@ -200,6 +218,7 @@ export interface SceneObject {
 
   interaction: InteractionType;
   interactionData?: string;
+  clickResponses?: ClickResponse[];
   triggerOnEnter?: boolean;
   triggerOnce?: boolean;
   ignoreClicks?: boolean;

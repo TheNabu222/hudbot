@@ -317,7 +317,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                        onClick={() => {
                          const mediaFragment = asset.trimStart || asset.trimEnd ? `#t=${asset.trimStart || 0}${asset.trimEnd ? ',' + asset.trimEnd : ''}` : '';
                          const audio = new Audio(asset.src + mediaFragment);
-                         audio.volume = asset.volume ?? 1;
+                         audio.volume = Math.min(1, asset.volume ?? 1);
                          audio.play();
                        }}
                     >
@@ -382,8 +382,8 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                         </div>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-xs text-neutral-500">Vol</span>
-                          <input type="range" min="0" max="2" step="0.1" value={asset.volume ?? 1} onChange={e => updateProject({ assets: project.assets.map(a => a.id === asset.id ? { ...a, volume: parseFloat(e.target.value) } : a)})} className="flex-1 accent-indigo-500 h-1 bg-neutral-800 rounded-full appearance-none outline-none" />
-                          <span className="text-[10px] text-neutral-400 w-6 text-right">{asset.volume ?? 1}x</span>
+                          <input type="range" min="0" max="1" step="0.05" value={Math.min(1, asset.volume ?? 1)} onChange={e => updateProject({ assets: project.assets.map(a => a.id === asset.id ? { ...a, volume: parseFloat(e.target.value) } : a)})} className="flex-1 accent-indigo-500 h-1 bg-neutral-800 rounded-full appearance-none outline-none" />
+                          <span className="text-[10px] text-neutral-400 w-8 text-right">{Math.round(Math.min(1, asset.volume ?? 1) * 100)}%</span>
                         </div>
                      </div>
                   )}

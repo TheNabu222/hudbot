@@ -118,6 +118,12 @@ import {
   DeviceFrameCalibrator,
   DeviceFrameOverlay,
 } from "./components/DeviceFrameCalibrator";
+import {
+  ClickResponseEditor,
+  ClickResponseTypePicker,
+} from "./components/ClickResponseEditor";
+import { AnimatedCursor } from "./components/AnimatedCursor";
+import { CursorBehaviorPicker } from "./components/CursorBehaviorPicker";
 import { get, set } from "idb-keyval";
 
 export interface SaveSlotMeta {
@@ -296,6 +302,13 @@ const App: React.FC = () => {
   const [activeBin, setActiveBin] = useState<string>("all");
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [hoverCursorAssetId, setHoverCursorAssetId] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!isPlaying) setHoverCursorAssetId(null);
+  }, [isPlaying]);
 
   // RPG Systems State
   const [activeQuestId, setActiveQuestId] = useState<string | null>(null);
@@ -972,12 +985,15 @@ const App: React.FC = () => {
         if (!bgmRef.current) {
           bgmRef.current = new Audio(fullSrc);
           bgmRef.current.loop = true;
-          bgmRef.current.volume = audioAsset.volume ?? 1;
-        } else if (bgmRef.current.src !== fullSrc || bgmRef.current.volume !== (audioAsset.volume ?? 1)) {
+          bgmRef.current.volume = Math.min(1, audioAsset.volume ?? 1);
+        } else if (
+          bgmRef.current.src !== fullSrc ||
+          bgmRef.current.volume !== Math.min(1, audioAsset.volume ?? 1)
+        ) {
           bgmRef.current.pause();
           bgmRef.current = new Audio(fullSrc);
           bgmRef.current.loop = true;
-          bgmRef.current.volume = audioAsset.volume ?? 1;
+          bgmRef.current.volume = Math.min(1, audioAsset.volume ?? 1);
         }
         bgmRef.current
           .play()
@@ -2486,18 +2502,24 @@ const App: React.FC = () => {
   };
   const previewDialogue = previewDialogueText;
 
-  const handleObjectClick = (obj: SceneObject) => {
+  const handleObjectClick = (obj: SceneObject, isChainedResponse = false) => {
     if (!isPlaying) return;
-    if (obj.triggerOnce && triggeredObjects.has(obj.id)) return;
+    if (!isChainedResponse && obj.triggerOnce && triggeredObjects.has(obj.id))
+      return;
 
-    if (obj.triggerOnce) {
+    if (!isChainedResponse && obj.triggerOnce) {
       setTriggeredObjects((prev) => new Set(prev).add(obj.id));
     }
 
     if (obj.audioSrc) {
       const audioAsset = project.assets.find((a) => a.id === obj.audioSrc);
       if (audioAsset) {
-        const audio = new Audio(audioAsset.src);
+        const mediaFragment =
+          audioAsset.trimStart || audioAsset.trimEnd
+            ? `#t=${audioAsset.trimStart || 0}${audioAsset.trimEnd ? `,${audioAsset.trimEnd}` : ""}`
+            : "";
+        const audio = new Audio(audioAsset.src + mediaFragment);
+        audio.volume = Math.min(1, audioAsset.volume ?? 1);
         audio.play().catch((e) => console.error("SFX playback failed", e));
       }
     }
@@ -2836,7 +2858,7 @@ const App: React.FC = () => {
       if (audioAsset) {
         const mediaFragment = audioAsset.trimStart || audioAsset.trimEnd ? `#t=${audioAsset.trimStart || 0}${audioAsset.trimEnd ? ',' + audioAsset.trimEnd : ''}` : '';
         const audio = new Audio(audioAsset.src + mediaFragment);
-        audio.volume = audioAsset.volume ?? 1;
+        audio.volume = Math.min(1, audioAsset.volume ?? 1);
         audio.play().catch((e) => console.error("SFX playback failed", e));
       }
     } else if (obj.interaction === "run_script" && obj.scriptAssetId) {
@@ -2877,6 +2899,37 @@ const App: React.FC = () => {
           targetSceneId: obj.scriptAssetId || undefined,
         });
       }
+    }
+
+    if (!isChainedResponse && obj.clickResponses?.length) {
+      obj.clickResponses.forEach((response) => {
+        handleObjectClick(
+          {
+            ...obj,
+            id:
+              response.interaction === "collect"
+                ? obj.id
+                : `${obj.id}::${response.id}`,
+            interaction: response.interaction,
+            interactionData: response.interactionData,
+            giveItemId: response.giveItemId,
+            dialogueTreeId: response.dialogueTreeId,
+            targetUiId: response.targetUiId,
+            scriptAssetId: response.scriptAssetId,
+            clickResponses: [],
+            triggerOnce: false,
+            audioSrc: undefined,
+            requireItemId: undefined,
+            consumeRequiredItem: false,
+            requiredSkill: "none",
+            needsEffect: undefined,
+            reputationEffect: undefined,
+            grantSkill: undefined,
+            timeCost: undefined,
+          },
+          true,
+        );
+      });
     }
   };
 
@@ -3406,7 +3459,7 @@ const App: React.FC = () => {
           <>
             {/* Left Sidebar */}
             <aside
-              className="bg-neutral-900 border-r border-neutral-800 flex flex-col relative flex-shrink-0"
+              className="hidden bg-neutral-900 border-r border-neutral-800 flex-col relative flex-shrink-0"
               style={{ width: leftSidebarWidth }}
             >
               <div
@@ -4389,6 +4442,61 @@ const App: React.FC = () => {
                 }
               }}
             >
+              {!isPlaying && (
+                <div className="absolute left-4 top-4 z-[5100] flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAssetPickerCb({
+                        onSelect: (id) => {
+                          const asset = project.assets.find(
+                            (candidate) => candidate.id === id,
+                          );
+                          if (asset) handleInsertAssetToStage(asset);
+                          setAssetPickerCb(null);
+                        },
+                      })
+                    }
+                    className="flex items-center gap-2 rounded-[4px_12px_4px_12px] border border-emerald-400/60 bg-neutral-950/95 px-3 py-2 font-comic text-xs font-bold text-white shadow-[0_0_18px_rgba(0,255,204,0.16)] backdrop-blur hover:bg-emerald-500/15"
+                  >
+                    <Plus size={15} className="text-emerald-300" />
+                    Add Something
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleInsertAssetToStage({
+                        id: uuidv4(),
+                        name: "Clickable Area",
+                        type: "hitbox",
+                        category: "tools",
+                        src: "",
+                      })
+                    }
+                    className="rounded border border-pink-500/40 bg-neutral-950/90 p-2 text-pink-300 hover:bg-pink-500/15"
+                    title="Add clickable area"
+                  >
+                    <MousePointerClick size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleInsertAssetToStage({
+                        id: uuidv4(),
+                        name: "Text",
+                        type: "text",
+                        category: "tools",
+                        src: "",
+                      })
+                    }
+                    className="rounded border border-pink-500/40 bg-neutral-950/90 p-2 text-pink-300 hover:bg-pink-500/15"
+                    title="Add text"
+                  >
+                    <Type size={14} />
+                  </button>
+                </div>
+              )}
+
               {/* Quick Edit Toggle for Canvas */}
               {(editorMode === "stage" || editorMode === "ui_stage") &&
                 !isPlaying && (
@@ -4537,9 +4645,10 @@ const App: React.FC = () => {
                   transform: `scale(${stageZoom})`,
                   transformOrigin: "center center",
                   cursor:
-                    (isPlaying || true) &&
-                    project.globalSettings.customCursorAssetId
-                      ? `url('${project.assets.find((a) => a.id === project.globalSettings.customCursorAssetId)?.src}'), auto`
+                    isPlaying &&
+                    (hoverCursorAssetId ||
+                      project.globalSettings.customCursorAssetId)
+                      ? "none"
                       : undefined,
                 }}
               >
@@ -4843,6 +4952,9 @@ const App: React.FC = () => {
                               }}
                               onPointerEnter={() => {
                                 if (!isPlaying) return;
+                                if (obj.cursorAssetId) {
+                                  setHoverCursorAssetId(obj.cursorAssetId);
+                                }
                                 if (obj.triggerOnEnter === true) {
                                   if (
                                     obj.triggerOnce &&
@@ -4862,6 +4974,11 @@ const App: React.FC = () => {
                                       new Set(prev).add(obj.id),
                                     );
                                   }
+                                }
+                              }}
+                              onPointerLeave={() => {
+                                if (obj.cursorAssetId) {
+                                  setHoverCursorAssetId(null);
                                 }
                               }}
                               onContextMenu={(e) => {
@@ -4919,7 +5036,9 @@ const App: React.FC = () => {
                                         )?.blocksClicks,
                                     )
                                     ? "default"
-                                    : obj.cursor
+                                    : obj.cursorAssetId
+                                      ? "none"
+                                      : obj.cursor
                                   : obj.locked
                                     ? "default"
                                     : "move",
@@ -5639,6 +5758,16 @@ const App: React.FC = () => {
                                 onPointerDown={(e) =>
                                   handleObjectPointerDown(e, obj)
                                 }
+                                onPointerEnter={() => {
+                                  if (isPlaying && obj.cursorAssetId) {
+                                    setHoverCursorAssetId(obj.cursorAssetId);
+                                  }
+                                }}
+                                onPointerLeave={() => {
+                                  if (obj.cursorAssetId) {
+                                    setHoverCursorAssetId(null);
+                                  }
+                                }}
                                 onPointerMove={handleObjectPointerMove}
                                 onPointerUp={handleObjectPointerUp}
                                 className={`absolute ${animClass}`}
@@ -5654,7 +5783,10 @@ const App: React.FC = () => {
                                     ? (isPlaying ? 0 : 0.2)
                                     : obj.opacity === 0 ? 0.01 : obj.opacity,
                                   transform: `rotate(${renderRot}deg)`,
-                                  cursor: obj.cursor,
+                                  cursor:
+                                    isPlaying && obj.cursorAssetId
+                                      ? "none"
+                                      : obj.cursor,
                                   backgroundColor: "rgba(255, 255, 255, 0.01)",
                                   mixBlendMode: obj.blendMode || "normal",
                                   pointerEvents: obj.ignoreClicks
@@ -11718,25 +11850,80 @@ const App: React.FC = () => {
                       <Accordion title="Behaviors & Events">
                         <div>
                           <LabelWithHelp
-                            label="Cursor on Hover"
-                            helpText="The mouse pointer style when hovering over this object."
+                            label="What should the cursor promise?"
+                            helpText="The cursor previews what clicking this object will do."
                           />
-                          <select
+                          <CursorBehaviorPicker
                             value={selectedObject.cursor}
-                            onChange={(e) =>
+                            interaction={selectedObject.interaction}
+                            isDraggable={selectedObject.isDraggable}
+                            onChange={(cursor) =>
                               updateObject(selectedObject.id, {
-                                cursor: e.target.value as CursorType,
+                                cursor,
                               })
                             }
-                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
-                          >
-                            <option value="default">Default</option>
-                            <option value="pointer">Pointer (Hand)</option>
-                            <option value="help">Help (Question)</option>
-                            <option value="text">Conversation (Text)</option>
-                            <option value="crosshair">Crosshair</option>
-                            <option value="zoom-in">Eye (Look)</option>
-                          </select>
+                          />
+
+                          <div className="mt-2 rounded border border-neutral-800 bg-neutral-950/70 p-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <p className="font-comic text-[11px] font-bold text-white">
+                                  Animated / custom cursor
+                                </p>
+                                <p className="text-[9px] text-neutral-500">
+                                  Overrides the cursor only while hovering here.
+                                  GIFs stay animated.
+                                </p>
+                              </div>
+                              {selectedObject.cursorAssetId ? (
+                                <div className="flex items-center gap-1.5">
+                                  <div className="h-9 w-9 overflow-hidden rounded border border-pink-500/30 bg-black p-1">
+                                    <img
+                                      src={
+                                        project.assets.find(
+                                          (asset) =>
+                                            asset.id ===
+                                            selectedObject.cursorAssetId,
+                                        )?.src
+                                      }
+                                      alt=""
+                                      className="h-full w-full object-contain"
+                                    />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateObject(selectedObject.id, {
+                                        cursorAssetId: undefined,
+                                      })
+                                    }
+                                    className="rounded border border-red-500/30 p-1.5 text-red-400 hover:bg-red-500/10"
+                                    aria-label="Remove custom cursor"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setAssetPickerCb({
+                                      filterType: "image",
+                                      onSelect: (id) => {
+                                        updateObject(selectedObject.id, {
+                                          cursorAssetId: id,
+                                        });
+                                        setAssetPickerCb(null);
+                                      },
+                                    })
+                                  }
+                                  className="shrink-0 rounded border border-pink-500/35 bg-pink-500/10 px-2 py-1.5 text-[10px] font-bold text-pink-200 hover:bg-pink-500/20"
+                                >
+                                  Choose image
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         </div>
 
                         <label className="flex items-center gap-2 cursor-pointer mt-4 mb-2 bg-neutral-900 p-2 rounded">
@@ -11849,94 +12036,254 @@ const App: React.FC = () => {
 
                         <div>
                           <LabelWithHelp
-                            label="On Click SFX"
-                            helpText="Optional sound to play whenever this object is clicked, regardless of its interaction type."
+                            label="Click Sound"
+                            helpText="Layer a sound effect over the scene's background music whenever this object is clicked."
                           />
-                          <select
-                            value={selectedObject.audioSrc || ""}
-                            onChange={(e) =>
-                              updateObject(selectedObject.id, {
-                                audioSrc: e.target.value,
-                              })
-                            }
-                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 mb-3 focus:border-emerald-500 focus:outline-none"
-                          >
-                            <option value="">None</option>
-                            {project.assets
-                              .filter((a) => a.type === "audio")
-                              .map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.name}
-                                </option>
-                              ))}
-                          </select>
+                          {(() => {
+                            const soundAsset = project.assets.find(
+                              (asset) =>
+                                asset.id === selectedObject.audioSrc &&
+                                asset.type === "audio",
+                            );
+                            const updateSoundAsset = (
+                              updates: Partial<Asset>,
+                            ) => {
+                              if (!soundAsset) return;
+                              setProject((current) => ({
+                                ...current,
+                                assets: current.assets.map((asset) =>
+                                  asset.id === soundAsset.id
+                                    ? { ...asset, ...updates }
+                                    : asset,
+                                ),
+                              }));
+                            };
+                            const previewSound = () => {
+                              if (!soundAsset) return;
+                              const fragment =
+                                soundAsset.trimStart || soundAsset.trimEnd
+                                  ? `#t=${soundAsset.trimStart || 0}${soundAsset.trimEnd ? `,${soundAsset.trimEnd}` : ""}`
+                                  : "";
+                              const audio = new Audio(
+                                soundAsset.src + fragment,
+                              );
+                              audio.volume = Math.min(
+                                1,
+                                soundAsset.volume ?? 1,
+                              );
+                              audio.play().catch(() => undefined);
+                            };
+
+                            return soundAsset ? (
+                              <div className="mt-1 mb-3 rounded border border-[#00ffcc]/25 bg-neutral-950/80 p-2.5">
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={previewSound}
+                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#00ffcc]/40 bg-[#00ffcc]/10 text-[#00ffcc] hover:bg-[#00ffcc]/20"
+                                    aria-label="Preview click sound"
+                                  >
+                                    <Play size={14} />
+                                  </button>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate font-comic text-[11px] font-bold text-white">
+                                      {soundAsset.name}
+                                    </p>
+                                    <p className="text-[9px] text-neutral-500">
+                                      Plays over background music
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateObject(selectedObject.id, {
+                                        audioSrc: undefined,
+                                      })
+                                    }
+                                    className="rounded p-1.5 text-red-400 hover:bg-red-500/10"
+                                    aria-label="Remove click sound"
+                                  >
+                                    <X size={13} />
+                                  </button>
+                                </div>
+
+                                <div className="mt-2 grid grid-cols-2 gap-2 border-t border-neutral-800 pt-2">
+                                  <label className="text-[9px] text-neutral-500">
+                                    Start at
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.1"
+                                      value={soundAsset.trimStart || 0}
+                                      onChange={(event) =>
+                                        updateSoundAsset({
+                                          trimStart: Math.max(
+                                            0,
+                                            parseFloat(event.target.value) || 0,
+                                          ),
+                                        })
+                                      }
+                                      className="mt-1 w-full rounded border border-neutral-800 bg-black px-2 py-1 text-[10px] text-white"
+                                    />
+                                  </label>
+                                  <label className="text-[9px] text-neutral-500">
+                                    Stop at
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.1"
+                                      value={soundAsset.trimEnd || ""}
+                                      placeholder="full file"
+                                      onChange={(event) =>
+                                        updateSoundAsset({
+                                          trimEnd: event.target.value
+                                            ? Math.max(
+                                                0,
+                                                parseFloat(
+                                                  event.target.value,
+                                                ) || 0,
+                                              )
+                                            : undefined,
+                                        })
+                                      }
+                                      className="mt-1 w-full rounded border border-neutral-800 bg-black px-2 py-1 text-[10px] text-white"
+                                    />
+                                  </label>
+                                </div>
+                                <label className="mt-2 flex items-center gap-2 text-[9px] text-neutral-500">
+                                  Volume
+                                  <input
+                                    type="range"
+                                    min="0"
+                                    max="1"
+                                    step="0.05"
+                                    value={Math.min(
+                                      1,
+                                      soundAsset.volume ?? 1,
+                                    )}
+                                    onChange={(event) =>
+                                      updateSoundAsset({
+                                        volume: parseFloat(event.target.value),
+                                      })
+                                    }
+                                    className="min-w-0 flex-1 accent-[#00ffcc]"
+                                  />
+                                  <span className="w-8 text-right text-[#00ffcc]">
+                                    {Math.round(
+                                      Math.min(
+                                        1,
+                                        soundAsset.volume ?? 1,
+                                      ) * 100,
+                                    )}
+                                    %
+                                  </span>
+                                </label>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setAssetPickerCb({
+                                    filterType: "audio",
+                                    onSelect: (id) => {
+                                      updateObject(selectedObject.id, {
+                                        audioSrc: id,
+                                      });
+                                      setAssetPickerCb(null);
+                                    },
+                                  })
+                                }
+                                className="mt-1 mb-3 flex w-full items-center justify-center gap-2 rounded border border-[#00ffcc]/30 bg-[#00ffcc]/5 px-3 py-2 font-comic text-[11px] font-bold text-[#00ffcc] hover:bg-[#00ffcc]/10"
+                              >
+                                <Music size={13} />
+                                Add sound effect
+                              </button>
+                            );
+                          })()}
 
                           <LabelWithHelp
-                            label="On Click Action"
-                            helpText="What happens when the player clicks this object."
+                            label="First Click Response"
+                            helpText="Choose the first thing this object does. Add more responses underneath."
                           />
-                          <select
+                          <ClickResponseTypePicker
                             value={selectedObject.interaction}
-                            onChange={(e) =>
+                            onChange={(interaction) =>
                               updateObject(selectedObject.id, {
-                                interaction: e.target.value as InteractionType,
+                                interaction,
                               })
                             }
-                            className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
-                          >
-                            <option value="none">None (No Action)</option>
+                          />
 
-                            <optgroup label="Story & Dialogues">
-                              <option value="dialogue">Start Conversation (Dialogue Tree)</option>
-                              <option value="set_flag">Trigger Story Event (Flags)</option>
-                              <option value="skill_check">Skill Check (Attributes/Dice)</option>
-                            </optgroup>
+                          <details className="mt-2 rounded border border-neutral-800 bg-neutral-950/60">
+                            <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-neutral-500 hover:text-white">
+                              More / system responses
+                            </summary>
+                            <div className="border-t border-neutral-800 p-2">
+                              <select
+                                value={selectedObject.interaction}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    interaction: e.target
+                                      .value as InteractionType,
+                                  })
+                                }
+                                className="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1.5 text-sm"
+                              >
+                                <option value="none">None (No Action)</option>
 
-                            <optgroup label="Items & Inventory">
-                              <option value="give-item">Give Item to Player</option>
-                              <option value="collect">Collect Item (And Hide Object)</option>
-                              <option value="open_crafting">Open Crafting Menu</option>
-                            </optgroup>
+                                <optgroup label="Story & Dialogues">
+                                  <option value="dialogue">Start Conversation (Dialogue Tree)</option>
+                                  <option value="set_flag">Trigger Story Event (Flags)</option>
+                                  <option value="skill_check">Skill Check (Attributes/Dice)</option>
+                                </optgroup>
 
-                            <optgroup label="Navigation & Scenes (Maps)">
-                              <option value="scene_change">Change Room / Teleport Map</option>
-                              <option value="open_map">Open Fast Travel Map</option>
-                            </optgroup>
+                                <optgroup label="Items & Inventory">
+                                  <option value="give-item">Give Item to Player</option>
+                                  <option value="collect">Collect Item (And Hide Object)</option>
+                                  <option value="open_crafting">Open Crafting Menu</option>
+                                </optgroup>
 
-                            <optgroup label="Quests & Lore">
-                              <option value="start_quest">Start Quest</option>
-                              <option value="complete_quest">Complete Quest (Force)</option>
-                              <option value="open_quest_log">Open Quest Log</option>
-                              <option value="open_almanac">Open Almanac / Lore</option>
-                              <option value="open_relationships">Open Relationships Menu</option>
-                            </optgroup>
+                                <optgroup label="Navigation & Scenes (Maps)">
+                                  <option value="scene_change">Change Room / Teleport Map</option>
+                                  <option value="open_map">Open Fast Travel Map</option>
+                                </optgroup>
 
-                            <optgroup label="Overlays & Interface">
-                              <option value="open_ui">Open Custom UI Canvas</option>
-                              <option value="close_ui">Close UI Canvas</option>
-                              <option value="toggle_inventory">Toggle Built-in Inventory</option>
-                              <option value="open_skills">Open Skills Menu</option>
-                              <option value="open_settings">Open Player Settings</option>
-                            </optgroup>
+                                <optgroup label="Quests & Lore">
+                                  <option value="start_quest">Start Quest</option>
+                                  <option value="complete_quest">Complete Quest (Force)</option>
+                                  <option value="open_quest_log">Open Quest Log</option>
+                                  <option value="open_almanac">Open Almanac / Lore</option>
+                                  <option value="open_relationships">Open Relationships Menu</option>
+                                </optgroup>
 
-                            <optgroup label="Media & Code">
-                              <option value="play_cutscene">Play Fullscreen Video (Cutscene)</option>
-                              <option value="sound">Play SFX / Audio</option>
-                              <option value="run_script">Execute Custom Script</option>
-                              <option value="link">Open Web URL</option>
-                              <option value="modify_number">Modify Number Var (Progress/Text)</option>
-                            </optgroup>
+                                <optgroup label="Overlays & Interface">
+                                  <option value="open_ui">Open Custom UI Canvas</option>
+                                  <option value="close_ui">Close UI Canvas</option>
+                                  <option value="toggle_inventory">Toggle Built-in Inventory</option>
+                                  <option value="open_skills">Open Skills Menu</option>
+                                  <option value="open_settings">Open Player Settings</option>
+                                </optgroup>
 
-                            <optgroup label="System Controls">
-                              <option value="save_game">Save Game State</option>
-                              <option value="load_game">Load Game State</option>
-                              <option value="restart_scene">Restart Current Region</option>
-                              <option value="restart_game">Restart Full Game</option>
-                              <option value="toggle_fullscreen">Toggle Fullscreen</option>
-                              <option value="toggle_mute">Toggle Audio Mute</option>
-                              <option value="exit_game">Close Game Execution</option>
-                            </optgroup>
-                          </select>
+                                <optgroup label="Media & Code">
+                                  <option value="play_cutscene">Play Fullscreen Video (Cutscene)</option>
+                                  <option value="sound">Play SFX / Audio</option>
+                                  <option value="run_script">Execute Custom Script</option>
+                                  <option value="link">Open Web URL</option>
+                                  <option value="modify_number">Modify Number Var (Progress/Text)</option>
+                                </optgroup>
+
+                                <optgroup label="System Controls">
+                                  <option value="save_game">Save Game State</option>
+                                  <option value="load_game">Load Game State</option>
+                                  <option value="restart_scene">Restart Current Region</option>
+                                  <option value="restart_game">Restart Full Game</option>
+                                  <option value="toggle_fullscreen">Toggle Fullscreen</option>
+                                  <option value="toggle_mute">Toggle Audio Mute</option>
+                                  <option value="exit_game">Close Game Execution</option>
+                                </optgroup>
+                              </select>
+                            </div>
+                          </details>
 
                           {selectedObject.interaction !== "none" && (
                             <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-neutral-800">
@@ -11970,6 +12317,22 @@ const App: React.FC = () => {
                               </label>
                             </div>
                           )}
+
+                          <ClickResponseEditor
+                            responses={selectedObject.clickResponses || []}
+                            assets={project.assets}
+                            scenes={project.scenes}
+                            dialogueTrees={project.dialogueTrees || []}
+                            inventoryItems={project.inventoryItems || []}
+                            quests={project.quests || []}
+                            gameFlags={project.gameFlags || []}
+                            uiMenus={project.uiMenus || []}
+                            onChange={(clickResponses) =>
+                              updateObject(selectedObject.id, {
+                                clickResponses,
+                              })
+                            }
+                          />
                         </div>
 
                         {selectedObject.interaction === "sound" && (
@@ -17004,6 +17367,19 @@ const App: React.FC = () => {
           }}
         />
       )}
+
+      <AnimatedCursor
+        src={
+          isPlaying
+            ? project.assets.find(
+                (asset) =>
+                  asset.id ===
+                  (hoverCursorAssetId ||
+                    project.globalSettings.customCursorAssetId),
+              )?.src
+            : undefined
+        }
+      />
 
       {showAIAssistant && (
         <AIAssistant

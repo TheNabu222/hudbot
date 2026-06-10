@@ -195,8 +195,8 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({ assets, onSe
                              </div>
                              <div className="flex items-center gap-2">
                                <span className="text-xs text-neutral-400">Vol:</span>
-                               <input type="range" min="0" max="2" step="0.1" value={asset.volume ?? 1} onChange={e => onUpdateAsset!(asset.id, { volume: parseFloat(e.target.value) })} className="flex-1 accent-emerald-500 h-1 bg-neutral-800 rounded-full appearance-none outline-none" />
-                               <span className="text-xs text-neutral-400 w-6 text-right">{asset.volume ?? 1}x</span>
+                               <input type="range" min="0" max="1" step="0.05" value={Math.min(1, asset.volume ?? 1)} onChange={e => onUpdateAsset!(asset.id, { volume: parseFloat(e.target.value) })} className="flex-1 accent-emerald-500 h-1 bg-neutral-800 rounded-full appearance-none outline-none" />
+                               <span className="text-xs text-neutral-400 w-8 text-right">{Math.round(Math.min(1, asset.volume ?? 1) * 100)}%</span>
                              </div>
                           </div>
                         )}

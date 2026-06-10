@@ -91,16 +91,23 @@ export function generateExportHtml(project: Project): string {
   const css = `
     :root {
       --time-filter: brightness(1) sepia(0) hue-rotate(0deg);
-      ${(() => {
-        if (!project.globalSettings?.customCursorAssetId) return "";
-        const cAsset = project.assets.find((a) => a.id === project.globalSettings?.customCursorAssetId);
-        if (!cAsset) return "";
-        const src = cAsset.dataURL || cAsset.src || "";
-        return `--custom-cursor: url('${src}'), auto;`;
-      })()}
     }
-    * {
-      ${project.globalSettings?.customCursorAssetId ? `cursor: var(--custom-cursor) !important;` : ""}
+    .animated-cursor-active,
+    .animated-cursor-active * {
+      cursor: none !important;
+    }
+    #animated-game-cursor {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 40px;
+      height: 40px;
+      object-fit: contain;
+      pointer-events: none;
+      z-index: 2147483647;
+      opacity: 0;
+      transform: translate3d(-100px, -100px, 0);
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.65));
     }
     body {
       margin: 0;
@@ -643,7 +650,7 @@ export function generateExportHtml(project: Project): string {
       z-index: ${obj.zIndex ?? 100};
       opacity: ${obj.opacity === 0 ? 0.01 : (obj.opacity ?? 1)};
       transform: rotate(${obj.rotation || 0}deg);
-      cursor: ${obj.cursor || "pointer"};
+      cursor: ${obj.cursorAssetId ? "none" : obj.cursor || "pointer"};
       mix-blend-mode: ${obj.blendMode || "normal"};
       ${peStr}
       ${animStyle}
@@ -677,6 +684,8 @@ export function generateExportHtml(project: Project): string {
       data-ui-secondary="${obj.uiColorSecondary || ""}"
       data-show-flag="${(obj.showIfFlag || "").replace(/"/g, "&quot;")}"
       data-hide-flag="${(obj.hideIfFlag || "").replace(/"/g, "&quot;")}"
+      data-click-responses="${encodeURIComponent(JSON.stringify(obj.clickResponses || []))}"
+      data-cursor-asset="${obj.cursorAssetId || ""}"
     `;
 
     if (obj.isHitbox) {
@@ -864,6 +873,38 @@ export function generateExportHtml(project: Project): string {
     const inventoryItems = gameData.inventoryItems || [];
     const globalSettings = gameData.globalSettings || {};
     let activeDialogue = null;
+
+    const animatedCursor = document.getElementById('animated-game-cursor');
+    const globalCursorAssetId = globalSettings.customCursorAssetId || '';
+    const findCursorAsset = (assetId) => assets.find(asset => asset.id === assetId);
+    const setAnimatedCursor = (assetId) => {
+      const cursorAsset = findCursorAsset(assetId || globalCursorAssetId);
+      if (!animatedCursor || !cursorAsset) {
+        if (animatedCursor) animatedCursor.style.opacity = '0';
+        document.body.classList.remove('animated-cursor-active');
+        return;
+      }
+      animatedCursor.src = cursorAsset.dataURL || cursorAsset.src || '';
+      document.body.classList.add('animated-cursor-active');
+    };
+    document.addEventListener('pointermove', (event) => {
+      if (!animatedCursor || !document.body.classList.contains('animated-cursor-active')) return;
+      animatedCursor.style.transform = 'translate3d(' + (event.clientX - 4) + 'px,' + (event.clientY - 4) + 'px,0)';
+      animatedCursor.style.opacity = '1';
+    });
+    document.documentElement.addEventListener('mouseleave', () => {
+      if (animatedCursor) animatedCursor.style.opacity = '0';
+    });
+    document.querySelectorAll('.scene-object').forEach((objectElement) => {
+      objectElement.addEventListener('pointerenter', () => {
+        const objectCursorAssetId = objectElement.getAttribute('data-cursor-asset');
+        if (objectCursorAssetId) setAnimatedCursor(objectCursorAssetId);
+      });
+      objectElement.addEventListener('pointerleave', () => {
+        setAnimatedCursor(globalCursorAssetId);
+      });
+    });
+    setAnimatedCursor(globalCursorAssetId);
 
     // Game State
     let defaultNeeds = { rest: 100, hunger: 100, connection: 100, spiritual: 100, novelty: 100 };
@@ -1262,8 +1303,9 @@ export function generateExportHtml(project: Project): string {
 
         let lastClickTime = 0;
         const handleClick = (e) => {
-          if (Date.now() - lastClickTime < 300) return;
-          lastClickTime = Date.now();
+          const isChainedResponse = !!e.__chainedResponse;
+          if (!isChainedResponse && Date.now() - lastClickTime < 300) return;
+          if (!isChainedResponse) lastClickTime = Date.now();
           
           try {
             console.log('Object clicked:', obj.id, 'class:', obj.className);
@@ -1318,7 +1360,11 @@ export function generateExportHtml(project: Project): string {
           if (audioSrc && audioSrc !== '') {
             const soundAsset = assets.find(a => a.id === audioSrc);
             if (soundAsset) {
-              const audio = new Audio(soundAsset.src);
+              const mediaFragment = soundAsset.trimStart || soundAsset.trimEnd
+                ? '#t=' + (soundAsset.trimStart || 0) + (soundAsset.trimEnd ? ',' + soundAsset.trimEnd : '')
+                : '';
+              const audio = new Audio(soundAsset.src + mediaFragment);
+              audio.volume = Math.min(1, soundAsset.volume ?? 1);
               audio.play().catch(e => console.warn("SFX play failed", e));
             }
           }
@@ -1508,6 +1554,48 @@ export function generateExportHtml(project: Project): string {
             }
           }
           
+          if (!isChainedResponse) {
+            try {
+              const responses = JSON.parse(
+                decodeURIComponent(obj.getAttribute('data-click-responses') || '%5B%5D')
+              );
+              const responseAttributes = {
+                interaction: 'data-interaction',
+                interactionData: 'data-interaction-data',
+                giveItemId: 'data-give-item',
+                targetUiId: 'data-target-ui',
+                dialogueTreeId: 'data-dialogue-tree',
+                scriptAssetId: 'data-script-src'
+              };
+              const originalValues = {};
+              Object.values(responseAttributes).forEach(attribute => {
+                originalValues[attribute] = obj.getAttribute(attribute);
+              });
+
+              responses.forEach(response => {
+                Object.entries(responseAttributes).forEach(([key, attribute]) => {
+                  let value = response[key] || '';
+                  if (key === 'scriptAssetId' && value) {
+                    const scriptAsset = assets.find(asset => asset.id === value);
+                    value = scriptAsset ? scriptAsset.src : value;
+                  }
+                  obj.setAttribute(attribute, value);
+                });
+                handleClick({
+                  __chainedResponse: true,
+                  currentTarget: obj,
+                });
+              });
+
+              Object.entries(originalValues).forEach(([attribute, value]) => {
+                if (value === null) obj.removeAttribute(attribute);
+                else obj.setAttribute(attribute, value);
+              });
+            } catch (error) {
+              console.warn('Could not run additional click responses', error);
+            }
+          }
+
           if (interaction !== 'save_game') saveGame();
           } catch(err) {
             console.error(err);
@@ -1801,6 +1889,7 @@ export function generateExportHtml(project: Project): string {
   </style>
 </head>
 <body>
+  <img id="animated-game-cursor" alt="" aria-hidden="true" />
   <div id="scale-wrapper" style="width: 100vw; height: 100vh; display: flex; flex-direction: ${project.globalSettings?.dialoguePosition === 'below' ? 'column' : 'row'}; justify-content: center; align-items: center; overflow: hidden; background-color: #1a1a1a;">
     <div id="game-layout-resizer" style="position: relative; flex-shrink: 0; display: flex; justify-content: center; align-items: flex-start;">
       <div id="game-positioner" style="position: absolute; left: 0; top: 0; width: ${layoutWidth}px; height: ${layoutHeight}px;">
