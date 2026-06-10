@@ -469,6 +469,17 @@ export interface Project {
     enableRelationshipsHud?: boolean;
     enableSettingsHud?: boolean;
     customCursorAssetId?: string; // ID of the custom cursor asset
+    deviceFrame?: {
+      assetId: string;
+      outerWidth: number;
+      outerHeight: number;
+      screen: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      };
+    };
     hudOverlay?: {
       assetId?: string;
       opacity?: number;

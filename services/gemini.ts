@@ -7,14 +7,22 @@
 import { GoogleGenAI } from "@google/genai";
 import { extractHtmlFromText } from "../utils/html";
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const getAiClient = () => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "Gemini is optional and currently disconnected. Add a GEMINI_API_KEY to use AI tools.",
+    );
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 export const IMAGE_SYSTEM_PROMPT = "Generate an isolated object/scene on a simple background.";
 export const VOXEL_PROMPT = "I have provided an image. Code a beautiful voxel art scene inspired by this image. Write threejs code as a single-page.";
 
 export const generateImage = async (prompt: string, aspectRatio: string = '1:1', optimize: boolean = true): Promise<string> => {
   try {
+    const ai = getAiClient();
     let finalPrompt = prompt;
 
     // Apply the shortened optimization prompt if enabled
@@ -58,6 +66,7 @@ export const generateImage = async (prompt: string, aspectRatio: string = '1:1',
 
 export const analyzeAssetVibe = async (base64Image: string): Promise<{ description: string, tags: string[], palette: string[] }> => {
   try {
+    const ai = getAiClient();
     const base64Data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
     const mimeType = base64Image.includes(',') ? base64Image.split(';')[0].split(':')[1] : 'image/png';
 
@@ -110,6 +119,7 @@ export const generateVoxelScene = async (
   let fullHtml = "";
 
   try {
+    const ai = getAiClient();
     // Using gemini-2.5-flash for free tier usage
     const response = await ai.models.generateContentStream({
       model: 'gemini-2.5-flash',

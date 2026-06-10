@@ -109,6 +109,15 @@ import { MapMaker } from "./components/MapMaker";
 import { AISpriteModal } from "./components/AISpriteModal";
 import { AssetPickerModal } from "./components/AssetPickerModal";
 import { AssetLibraryManager } from "./components/AssetLibraryManager";
+import {
+  EditorMode,
+  StudioWorkflowNav,
+} from "./components/StudioWorkflowNav";
+import {
+  DeviceFrameCalibration,
+  DeviceFrameCalibrator,
+  DeviceFrameOverlay,
+} from "./components/DeviceFrameCalibrator";
 import { get, set } from "idb-keyval";
 
 export interface SaveSlotMeta {
@@ -296,17 +305,7 @@ const App: React.FC = () => {
   const [newNeedText, setNewNeedText] = useState("");
   const [recentAssetIds, setRecentAssetIds] = useState<string[]>([]);
 
-  const [editorMode, setEditorMode] = useState<
-    | "stage"
-    | "dialogue"
-    | "items"
-    | "scenes"
-    | "ui_maker"
-    | "ui_stage"
-    | "rpg_systems"
-    | "map_maker"
-    | "assets"
-  >("stage");
+  const [editorMode, setEditorMode] = useState<EditorMode>("stage");
   const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [leftSidebarTab, setLeftSidebarTab] = useState<"librarian" | "theme">(
     "librarian",
@@ -450,6 +449,9 @@ const App: React.FC = () => {
     null,
   );
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+  const [calibratingFrameAssetId, setCalibratingFrameAssetId] = useState<
+    string | null
+  >(null);
 
   const didDragRef = useRef(false);
 
@@ -1590,8 +1592,8 @@ const App: React.FC = () => {
 
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       setDragOffset({
-        x: (e.clientX - rect.left) / stageZoom,
-        y: (e.clientY - rect.top) / stageZoom,
+        x: ((e.clientX - rect.left) / rect.width) * obj.width,
+        y: ((e.clientY - rect.top) / rect.height) * obj.height,
       });
 
       try {
@@ -1695,8 +1697,14 @@ const App: React.FC = () => {
     if (isPlaying) {
       if (runtimeDraggingId && stageRef.current) {
         const rect = stageRef.current.getBoundingClientRect();
-        let newX = (e.clientX - rect.left) / stageZoom - dragOffset.x;
-        let newY = (e.clientY - rect.top) / stageZoom - dragOffset.y;
+        const stageWidth =
+          currentScene.width || project.globalSettings.stageWidth || 800;
+        const stageHeight =
+          currentScene.height || project.globalSettings.stageHeight || 600;
+        let newX =
+          ((e.clientX - rect.left) / rect.width) * stageWidth - dragOffset.x;
+        let newY =
+          ((e.clientY - rect.top) / rect.height) * stageHeight - dragOffset.y;
         setRuntimeOverrides((prev) => ({
           ...prev,
           [runtimeDraggingId]: { x: newX, y: newY },
@@ -2202,6 +2210,50 @@ const App: React.FC = () => {
       showError("Failed to export HTML: " + err);
       console.error(err);
     }
+  };
+
+  const togglePlayMode = () => {
+    const newState = !isPlaying;
+    setIsPlaying(newState);
+    setRuntimeOverrides({});
+    if (newState) {
+      setTriggeredObjects(new Set());
+      setPlayerInventory([]);
+      setCollectedObjects([]);
+      setPlayerFlags([]);
+      setActiveQuests(
+        project.quests?.filter((q) => q.autoStart).map((q) => q.id) || [],
+      );
+      setCompletedQuests([]);
+      const defaultNeeds: Record<string, number> = {};
+      const customNeeds = project.globalSettings?.customNeeds?.length
+        ? project.globalSettings.customNeeds
+        : ["rest", "hunger", "connection", "spiritual", "novelty"];
+      customNeeds.forEach((need) => (defaultNeeds[need] = 100));
+      setPlayerNeeds(defaultNeeds);
+
+      const defaultSkills: Record<string, number> = {};
+      const customSkills = project.globalSettings?.customSkills?.length
+        ? project.globalSettings.customSkills
+        : ["naturalist", "occultist", "scribal"];
+      customSkills.forEach((skill) => (defaultSkills[skill] = 1));
+      setPlayerSkills(defaultSkills);
+      setGameTime(8);
+    } else {
+      setPlayerInventory([]);
+      setCollectedObjects([]);
+      setTriggeredObjects(new Set());
+    }
+    setActiveUiMenus(
+      newState
+        ? (project.uiMenus || [])
+            .filter((menu) => menu.isOpenByDefault)
+            .map((menu) => menu.id)
+        : [],
+    );
+    setActiveDialogue(null);
+    setPreviewDialogue(null);
+    setIsInventoryOpen(false);
   };
 
   const [page, setPage] = useState(1);
@@ -2841,17 +2893,30 @@ const App: React.FC = () => {
     return a.name.localeCompare(b.name);
   });
 
-  const uiBg = project.globalSettings.uiColorBackground || "#1a0033";
+  const uiBg = project.globalSettings.uiColorBackground || "#08060d";
   const uiPrimary =
     (isPlaying ? playerUiColor : null) ||
     project.globalSettings.uiColorPrimary ||
-    "#00ffff";
+    "#00ffcc";
   const uiSecondary = project.globalSettings.uiColorSecondary || "#94a3b8";
   const uiFont = project.globalSettings.uiFontFamily || "sans-serif";
   const uiRadius = `${project.globalSettings.uiBorderRadius ?? 8}px`;
+  const deviceFrame = project.globalSettings.deviceFrame;
+  const deviceFrameAsset = deviceFrame
+    ? project.assets.find((asset) => asset.id === deviceFrame.assetId)
+    : undefined;
+  const showDeviceFrame = !!(
+    isPlaying &&
+    deviceFrame &&
+    deviceFrameAsset
+  );
+  const logicalStageWidth =
+    currentScene.width || project.globalSettings.stageWidth || 800;
+  const logicalStageHeight =
+    currentScene.height || project.globalSettings.stageHeight || 600;
 
   return (
-    <div className="flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans overflow-hidden">
+    <div className="studio-app flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans overflow-hidden">
       {/* Top Bar */}
       {editorError && (
         <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[9999] bg-red-500 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2">
@@ -2936,14 +3001,16 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-      <header className="flex items-center justify-between gap-4 px-4 py-2 bg-neutral-950 border-b border-neutral-800 relative z-[2100] custom-scrollbar min-h-[50px] shrink-0">
-        <div className="flex items-center gap-3 shrink-0">
-          <h1 className="text-base font-bold text-emerald-400 hidden lg:block">
-            NGB
-          </h1>
+      <header className="studio-titlebar flex items-center justify-between gap-4 px-4 py-2 relative z-[2100] custom-scrollbar min-h-[58px] shrink-0">
+        <div className="flex items-center gap-3 shrink-0 min-w-0">
+          <div className="studio-brand hidden md:flex" aria-label="Cavebot Studio">
+            <span className="studio-brand__sigil">✦</span>
+            <span className="studio-brand__name">CAVEBOT</span>
+            <span className="studio-brand__edition">divine freeware</span>
+          </div>
           <button
             onClick={() => setIsTemplateModalOpen(true)}
-            className="flex items-center gap-1 bg-amber-500 hover:bg-amber-400 text-black px-2 py-1 rounded text-xs font-bold transition-colors shadow-sm"
+            className="studio-new-button flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold transition-colors shadow-sm"
           >
             <Plus size={12} /> New
           </button>
@@ -2951,127 +3018,13 @@ const App: React.FC = () => {
             type="text"
             value={project.name}
             onChange={(e) => setProject({ ...project, name: e.target.value })}
-            className="w-32 lg:w-48 bg-neutral-900 border border-neutral-700/50 rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
+            className="studio-project-name w-36 lg:w-56 px-2.5 py-1.5 text-sm focus:outline-none transition-colors"
             placeholder="Game Title"
+            aria-label="Project title"
           />
         </div>
 
-        <div className="flex bg-neutral-900/80 p-1 rounded-lg border border-neutral-800/50 shadow-inner overflow-x-auto max-w-full custom-scrollbar items-center justify-start flex-shrink">
-          <div className="flex items-center gap-0.5 whitespace-nowrap">
-            <button
-              onClick={() => setEditorMode("assets")}
-              className={`px-2 lg:px-3 py-1 rounded text-xs lg:text-sm font-semibold transition-all duration-200 ${editorMode === "assets" ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5 flex items-center gap-1.5"}`}
-            >
-              <FolderOpen
-                size={14}
-                className={
-                  editorMode === "assets" ? "opacity-100" : "opacity-70"
-                }
-              />{" "}
-              Media Files
-            </button>
-
-            <div className="w-px h-5 bg-neutral-700/50 mx-1"></div>
-
-            <button
-              onClick={() => setEditorMode("stage")}
-              className={`px-2 lg:px-3 py-1 rounded text-xs lg:text-sm font-semibold transition-all duration-200 ${editorMode === "stage" ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5 flex items-center gap-1.5"}`}
-            >
-              <ImageIcon
-                size={14}
-                className={
-                  editorMode === "stage" ? "opacity-100" : "opacity-70"
-                }
-              />{" "}
-              Visual Editor
-            </button>
-            <button
-              onClick={() => setEditorMode("scenes")}
-              className={`px-2 lg:px-3 py-1 rounded text-xs lg:text-sm font-semibold transition-all duration-200 ${editorMode === "scenes" ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5 flex items-center gap-1.5"}`}
-            >
-              <Layers
-                size={14}
-                className={
-                  editorMode === "scenes" ? "opacity-100" : "opacity-70"
-                }
-              />{" "}
-              Rooms & Areas
-            </button>
-            <button
-              onClick={() => setEditorMode("map_maker")}
-              className={`px-2 lg:px-3 py-1 rounded text-xs lg:text-sm font-semibold transition-all duration-200 ${editorMode === "map_maker" ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5 flex items-center gap-1.5"}`}
-            >
-              <MapIcon
-                size={14}
-                className={
-                  editorMode === "map_maker" ? "opacity-100" : "opacity-70"
-                }
-              />{" "}
-              Maps
-            </button>
-            <button
-              onClick={() => setEditorMode("ui_maker")}
-              className={`px-2 lg:px-3 py-1 rounded text-xs lg:text-sm font-semibold transition-all duration-200 ${editorMode === "ui_maker" ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5 flex items-center gap-1.5"}`}
-            >
-              <LayoutTemplate
-                size={14}
-                className={
-                  editorMode === "ui_maker" ? "opacity-100" : "opacity-70"
-                }
-              />{" "}
-              Menus & UI
-            </button>
-            {editorMode === "ui_stage" && (
-              <button
-                onClick={() => setEditorMode("ui_stage")}
-                className={`px-2 lg:px-3 py-1 rounded text-xs lg:text-sm font-semibold transition-all duration-200 bg-indigo-600 text-white flex items-center gap-1.5 ml-1 shadow-sm`}
-              >
-                <LayoutTemplate size={14} /> UI Stage
-              </button>
-            )}
-
-            <div className="w-px h-5 bg-neutral-700/50 mx-1"></div>
-
-            <button
-              onClick={() => setEditorMode("dialogue")}
-              className={`px-2 lg:px-3 py-1 rounded text-xs lg:text-sm font-semibold transition-all duration-200 ${editorMode === "dialogue" ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5 flex items-center gap-1.5"}`}
-            >
-              <MessageSquare
-                size={14}
-                className={
-                  editorMode === "dialogue" ? "opacity-100" : "opacity-70"
-                }
-              />{" "}
-              Story & Text
-            </button>
-            <button
-              onClick={() => setEditorMode("items")}
-              className={`px-2 lg:px-3 py-1 rounded text-xs lg:text-sm font-semibold transition-all duration-200 ${editorMode === "items" ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5 flex items-center gap-1.5"}`}
-            >
-              <Backpack
-                size={14}
-                className={
-                  editorMode === "items" ? "opacity-100" : "opacity-70"
-                }
-              />{" "}
-              Player Items
-            </button>
-            <button
-              onClick={() => setEditorMode("rpg_systems")}
-              className={`px-2 lg:px-3 py-1 rounded text-xs lg:text-sm font-semibold transition-all duration-200 ${editorMode === "rpg_systems" ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5 flex items-center gap-1.5"}`}
-            >
-              <Shield
-                size={14}
-                className={
-                  editorMode === "rpg_systems" ? "opacity-100" : "opacity-70"
-                }
-              />{" "}
-              Game Rules
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           {/* Save Status Indicator */}
           <div className="flex items-center gap-1 mr-2 text-sm font-mono">
             {saveStatus === "saving" && (
@@ -3432,73 +3385,21 @@ const App: React.FC = () => {
 
           <button
             onClick={() => setShowAIAssistant((prev) => !prev)}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm font-medium transition-colors ${showAIAssistant ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/50" : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200 border border-transparent"}`}
+            className={`studio-ai-button flex items-center gap-1 px-3 py-1.5 text-sm font-medium transition-colors ${showAIAssistant ? "is-active" : ""}`}
           >
             <Bot size={16} />
-            AI Assistant
-          </button>
-
-          <div className="w-px h-6 bg-neutral-800 mx-1"></div>
-
-          <button
-            onClick={() => {
-              const newState = !isPlaying;
-              setIsPlaying(newState);
-              setRuntimeOverrides({});
-              if (newState) {
-                setTriggeredObjects(new Set());
-                setPlayerInventory([]);
-                setCollectedObjects([]);
-                setPlayerFlags([]);
-                setActiveQuests(
-                  project.quests?.filter((q) => q.autoStart).map((q) => q.id) ||
-                    [],
-                );
-                setCompletedQuests([]);
-                const defNeeds: Record<string, number> = {};
-                const cNeeds = project.globalSettings?.customNeeds?.length
-                  ? project.globalSettings.customNeeds
-                  : ["rest", "hunger", "connection", "spiritual", "novelty"];
-                cNeeds.forEach((n) => (defNeeds[n] = 100));
-                setPlayerNeeds(defNeeds);
-
-                const defSkills: Record<string, number> = {};
-                const cSkills = project.globalSettings?.customSkills?.length
-                  ? project.globalSettings.customSkills
-                  : ["naturalist", "occultist", "scribal"];
-                cSkills.forEach((s) => (defSkills[s] = 1));
-                setPlayerSkills(defSkills);
-                setGameTime(8);
-              } else {
-                setPlayerInventory([]);
-                setCollectedObjects([]);
-                setTriggeredObjects(new Set());
-              }
-              setActiveUiMenus(
-                newState
-                  ? (project.uiMenus || [])
-                      .filter((m) => m.isOpenByDefault)
-                      .map((m) => m.id)
-                  : [],
-              );
-              setActiveDialogue(null);
-              setPreviewDialogue(null);
-              setIsInventoryOpen(false);
-            }}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm font-medium transition-colors ${isPlaying ? "bg-amber-500/20 text-amber-400" : "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"}`}
-          >
-            <Play size={16} />
-            {isPlaying ? "Stop" : "Play"}
-          </button>
-          <button
-            onClick={handleExport}
-            className="flex items-center gap-1 px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 rounded text-sm font-medium transition-colors"
-          >
-            <Download size={16} />
-            Export
+            <span className="hidden xl:inline">Oracle</span>
           </button>
         </div>
       </header>
+
+      <StudioWorkflowNav
+        editorMode={editorMode}
+        isPlaying={isPlaying}
+        onModeChange={setEditorMode}
+        onTogglePlay={togglePlayMode}
+        onExport={handleExport}
+      />
 
       <div className="flex flex-1 overflow-hidden">
         {(editorMode === "stage" || editorMode === "ui_stage") && (
@@ -4543,13 +4444,13 @@ const App: React.FC = () => {
                       </svg>
                     </div>
                     <div
-                      className={`relative flex items-center rounded-md transition-all ${editorMode === "stage" ? "bg-indigo-600 text-white shadow-inner" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+                      className={`flex items-center gap-2 rounded-md px-2 transition-all ${editorMode === "stage" ? "bg-indigo-600 text-white shadow-inner" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
                     >
-                      <div className="pl-3 pr-1 py-1.5 pointer-events-none absolute font-bold text-sm">
-                        🎮 Edit Scene:
-                      </div>
+                      <span className="pointer-events-none whitespace-nowrap font-comic text-xs font-bold">
+                        🎮 Scene
+                      </span>
                       <select
-                        className={`appearance-none bg-transparent outline-none pl-[98px] pr-8 py-1.5 text-sm font-bold w-48 cursor-pointer ${editorMode === "stage" ? "text-white" : "text-neutral-300"}`}
+                        className={`bg-neutral-950/55 outline-none px-2 py-1 text-xs font-bold w-32 cursor-pointer border border-white/10 rounded-sm ${editorMode === "stage" ? "text-white" : "text-neutral-300"}`}
                         value={project.currentSceneId}
                         onChange={(e) => {
                           setEditorMode("stage");
@@ -4570,19 +4471,16 @@ const App: React.FC = () => {
                           </option>
                         ))}
                       </select>
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">
-                        <ChevronDown size={14} />
-                      </div>
                     </div>
 
                     <div
-                      className={`relative flex items-center rounded-md transition-all ${editorMode === "ui_stage" ? "bg-emerald-600 text-white shadow-inner" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+                      className={`flex items-center gap-2 rounded-md px-2 transition-all ${editorMode === "ui_stage" ? "bg-emerald-600 text-white shadow-inner" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
                     >
-                      <div className="pl-3 pr-1 py-1.5 pointer-events-none absolute font-bold text-sm">
-                        ✨ Edit UI:
-                      </div>
+                      <span className="pointer-events-none whitespace-nowrap font-comic text-xs font-bold">
+                        ✨ UI
+                      </span>
                       <select
-                        className={`appearance-none bg-transparent outline-none pl-[80px] pr-8 py-1.5 text-sm font-bold w-44 cursor-pointer ${editorMode === "ui_stage" ? "text-white" : "text-neutral-300"}`}
+                        className={`bg-neutral-950/55 outline-none px-2 py-1 text-xs font-bold w-28 cursor-pointer border border-white/10 rounded-sm ${editorMode === "ui_stage" ? "text-white" : "text-neutral-300"}`}
                         value={project.currentUiMenuId || ""}
                         onChange={(e) => {
                           if (!e.target.value) return;
@@ -4610,9 +4508,6 @@ const App: React.FC = () => {
                           </option>
                         ))}
                       </select>
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">
-                        <ChevronDown size={14} />
-                      </div>
                     </div>
 
                     <button
@@ -4633,14 +4528,12 @@ const App: React.FC = () => {
               <div
                 className={`relative mx-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 overflow-visible ${isPlaying ? "border-transparent" : "border-neutral-800 border"}`}
                 style={{
-                  width:
-                    currentScene.width ||
-                    project.globalSettings.stageWidth ||
-                    800,
-                  height:
-                    currentScene.height ||
-                    project.globalSettings.stageHeight ||
-                    600,
+                  width: showDeviceFrame
+                    ? deviceFrame!.outerWidth
+                    : logicalStageWidth,
+                  height: showDeviceFrame
+                    ? deviceFrame!.outerHeight
+                    : logicalStageHeight,
                   transform: `scale(${stageZoom})`,
                   transformOrigin: "center center",
                   cursor:
@@ -4767,8 +4660,16 @@ const App: React.FC = () => {
                       objectId: null,
                     });
                   }}
-                  className={`absolute inset-0 shadow-2xl transition-all overflow-visible ${editorMode === "ui_stage" ? "ring-4 ring-indigo-500/40 shadow-[0_0_30px_rgba(99,102,241,0.2)]" : "ring-2 ring-pink-500 shadow-[0_0_40px_rgba(0,0,0,0.5)] z-10"}`}
+                  className={`absolute shadow-2xl transition-all overflow-visible ${editorMode === "ui_stage" ? "ring-4 ring-indigo-500/40 shadow-[0_0_30px_rgba(99,102,241,0.2)]" : "ring-2 ring-pink-500 shadow-[0_0_40px_rgba(0,0,0,0.5)] z-10"}`}
                   style={{
+                    left: showDeviceFrame ? deviceFrame!.screen.x : 0,
+                    top: showDeviceFrame ? deviceFrame!.screen.y : 0,
+                    width: logicalStageWidth,
+                    height: logicalStageHeight,
+                    transform: showDeviceFrame
+                      ? `scale(${deviceFrame!.screen.width / logicalStageWidth}, ${deviceFrame!.screen.height / logicalStageHeight})`
+                      : undefined,
+                    transformOrigin: "top left",
                     backgroundColor: currentScene.backgroundColor,
                     backgroundImage: project.globalSettings.snapToGrid
                       ? `linear-gradient(to right, #ffffff10 1px, transparent 1px), linear-gradient(to bottom, #ffffff10 1px, transparent 1px)`
@@ -6336,7 +6237,7 @@ const App: React.FC = () => {
                   })()}
 
                 {/* HUD Overlay Preview */}
-                {(isPlaying || editorMode === "ui_stage" || editorMode === "code") && project.globalSettings.hudOverlay?.assetId && (
+                {(isPlaying || editorMode === "ui_stage") && project.globalSettings.hudOverlay?.assetId && (
                   <div 
                     className="absolute inset-0 pointer-events-none z-[8500]"
                     style={{
@@ -8451,6 +8352,14 @@ const App: React.FC = () => {
                   </>
                 )}
 
+                {showDeviceFrame && (
+                  <DeviceFrameOverlay
+                    calibration={deviceFrame!}
+                    imageSrc={deviceFrameAsset!.src}
+                    className="pointer-events-none z-[4000]"
+                  />
+                )}
+
                 {/* Drag-to-resize handles for canvas (stage) boundary */}
                 {!isPlaying && (
                   <>
@@ -9188,7 +9097,7 @@ const App: React.FC = () => {
                                 {/* HUD Icons Approximation */}
                                 <div className="absolute top-2 right-2 flex flex-col gap-1 pointer-events-none">
                                   {!project.globalSettings.hideDefaultInventoryBtn && <div className="w-4 h-4 bg-purple-500/50 border border-purple-500 rounded flex items-center justify-center text-[6px]">Inv</div>}
-                                  {(project.quests && project.quests.length > 0) && !project.globalSettings.hideDefaultQuestBtn && <div className="w-4 h-4 bg-purple-500/50 border border-purple-500 rounded flex items-center justify-center text-[6px]">Qsts</div>}
+                                  {(project.quests && project.quests.length > 0) && !project.globalSettings.hideDefaultQuestLogBtn && <div className="w-4 h-4 bg-purple-500/50 border border-purple-500 rounded flex items-center justify-center text-[6px]">Qsts</div>}
                                   {!project.globalSettings.hideDefaultMapBtn && <div className="w-4 h-4 bg-purple-500/50 border border-purple-500 rounded flex items-center justify-center text-[6px]">Map</div>}
                                 </div>
                                 
@@ -9523,6 +9432,162 @@ const App: React.FC = () => {
 
                       <Accordion title="Heads Up Display (HUD)">
                         <div className="space-y-4 bg-neutral-950/50 p-2 rounded">
+                          <div className="flex flex-col gap-2 border-b border-emerald-500/20 pb-3">
+                            <div>
+                              <span className="font-comic text-sm font-bold text-emerald-300">
+                                Device Frame
+                              </span>
+                              <p className="mt-0.5 text-[10px] leading-relaxed text-neutral-500">
+                                Wrap the game in a CRT, television, computer, or
+                                other frame. You only need to mark the blank
+                                screen once.
+                              </p>
+                            </div>
+
+                            {deviceFrame && deviceFrameAsset ? (
+                              <div className="flex items-center gap-3 rounded border border-emerald-500/25 bg-emerald-500/5 p-2">
+                                <img
+                                  src={deviceFrameAsset.src}
+                                  alt=""
+                                  className="h-16 w-20 rounded border border-neutral-700 bg-black object-contain"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate text-xs font-bold text-white">
+                                    {deviceFrameAsset.name}
+                                  </div>
+                                  <div className="mt-1 text-[10px] text-emerald-300">
+                                    Screen marked and ready
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setCalibratingFrameAssetId(
+                                          deviceFrame.assetId,
+                                        )
+                                      }
+                                      className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-300 hover:bg-emerald-500/20"
+                                    >
+                                      Mark Screen Again
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setAssetPickerCb({
+                                          onSelect: (id) => {
+                                            setAssetPickerCb(null);
+                                            setCalibratingFrameAssetId(id);
+                                          },
+                                          filterType: "image",
+                                        })
+                                      }
+                                      className="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-[10px] font-bold text-neutral-300 hover:bg-neutral-700"
+                                    >
+                                      Choose Another
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        pushHistory({
+                                          ...project,
+                                          globalSettings: {
+                                            ...project.globalSettings,
+                                            deviceFrame: undefined,
+                                          },
+                                        })
+                                      }
+                                      className="rounded px-2 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/10"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setAssetPickerCb({
+                                      onSelect: (id) => {
+                                        setAssetPickerCb(null);
+                                        setCalibratingFrameAssetId(id);
+                                      },
+                                      filterType: "image",
+                                    })
+                                  }
+                                  className="rounded border border-emerald-500/45 bg-emerald-500/10 px-3 py-2 font-comic text-xs font-bold text-emerald-300 hover:bg-emerald-500/20"
+                                >
+                                  Choose Frame
+                                </button>
+                                <label className="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs font-bold text-neutral-300 hover:bg-neutral-700">
+                                  Upload Frame
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={(event) => {
+                                      const file = event.target.files?.[0];
+                                      if (!file) return;
+                                      const reader = new FileReader();
+                                      reader.onload = () => {
+                                        const src = String(reader.result || "");
+                                        const assetId = uuidv4();
+                                        const newAsset: Asset = {
+                                          id: assetId,
+                                          src,
+                                          name: file.name.replace(
+                                            /\.[^.]+$/,
+                                            "",
+                                          ),
+                                          type: "image",
+                                          category: "device_frames",
+                                          tags: ["device-frame", "ui"],
+                                        };
+                                        setProject((current) => ({
+                                          ...current,
+                                          assets: [newAsset, ...current.assets],
+                                        }));
+                                        setCalibratingFrameAssetId(assetId);
+                                      };
+                                      reader.readAsDataURL(file);
+                                      event.target.value = "";
+                                    }}
+                                  />
+                                </label>
+                              </div>
+                            )}
+
+                            {deviceFrame && deviceFrameAsset && (
+                              <div
+                                className="relative mx-auto overflow-hidden rounded border border-neutral-700 bg-black"
+                                style={{
+                                  aspectRatio: `${deviceFrame.outerWidth} / ${deviceFrame.outerHeight}`,
+                                  width: "min(100%, 280px)",
+                                }}
+                              >
+                                <div
+                                  className="absolute bg-neutral-900"
+                                  style={{
+                                    left: `${(deviceFrame.screen.x / deviceFrame.outerWidth) * 100}%`,
+                                    top: `${(deviceFrame.screen.y / deviceFrame.outerHeight) * 100}%`,
+                                    width: `${(deviceFrame.screen.width / deviceFrame.outerWidth) * 100}%`,
+                                    height: `${(deviceFrame.screen.height / deviceFrame.outerHeight) * 100}%`,
+                                  }}
+                                >
+                                  <span className="absolute inset-0 flex items-center justify-center font-pixel text-xs text-emerald-300">
+                                    GAME
+                                  </span>
+                                </div>
+                                <DeviceFrameOverlay
+                                  calibration={deviceFrame}
+                                  imageSrc={deviceFrameAsset.src}
+                                  className="pointer-events-none"
+                                />
+                              </div>
+                            )}
+                          </div>
+
                           {/* HUD Overlay */}
                           <div className="flex flex-col gap-1 border-b border-neutral-800 pb-2">
                             <span className="text-xs font-bold text-neutral-500 uppercase">
@@ -11989,10 +12054,13 @@ const App: React.FC = () => {
                               </label>
                               {selectedObject.interactionData && (
                                 <button
-                                  onClick={() => setEditorMode("quests")}
+                                  onClick={() => {
+                                    setRpgTab("quests");
+                                    setEditorMode("rpg_systems");
+                                  }}
                                   className="text-[10px] text-yellow-400 hover:text-yellow-300 flex items-center gap-1 font-bold tracking-wide uppercase bg-yellow-500/10 hover:bg-yellow-500/20 px-2 py-0.5 rounded"
                                 >
-                                  <Map size={10} /> Edit Quest
+                                  <MapIcon size={10} /> Edit Quest
                                 </button>
                               )}
                             </div>
@@ -12164,7 +12232,10 @@ const App: React.FC = () => {
                                 <div className="flex items-center gap-1">
                                   {selectedObject.requireItemId && (
                                       <button
-                                        onClick={() => setEditorMode("inventory")}
+                                        onClick={() => {
+                                          setItemsTab("items");
+                                          setEditorMode("items");
+                                        }}
                                         className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-bold tracking-wide uppercase bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded"
                                       >
                                         <Package size={10} /> Edit Item
@@ -12205,7 +12276,8 @@ const App: React.FC = () => {
                                       };
                                       setProject(newProject);
                                       pushHistory(newProject);
-                                      setEditorMode("inventory");
+                                      setItemsTab("items");
+                                      setEditorMode("items");
                                     }}
                                     className="text-[10px] text-emerald-400 font-bold uppercase tracking-wide flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded"
                                   >
@@ -12261,7 +12333,10 @@ const App: React.FC = () => {
                                     <div className="flex items-center gap-1">
                                       {selectedObject.giveItemId && (
                                         <button
-                                          onClick={() => setEditorMode("inventory")}
+                                          onClick={() => {
+                                            setItemsTab("items");
+                                            setEditorMode("items");
+                                          }}
                                           className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-bold tracking-wide uppercase bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded"
                                         >
                                           <Package size={10} /> Edit Item Settings
@@ -12307,7 +12382,8 @@ const App: React.FC = () => {
                                           };
                                           setProject(newProject);
                                           pushHistory(newProject);
-                                          setEditorMode("inventory");
+                                          setItemsTab("items");
+                                          setEditorMode("items");
                                         }}
                                         className="text-[10px] text-emerald-400 font-bold uppercase tracking-wide flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded"
                                       >
@@ -12420,7 +12496,7 @@ const App: React.FC = () => {
                                   }}
                                   className="text-[10px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-bold tracking-wide uppercase bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded"
                                 >
-                                  <Map size={10} /> Edit Map
+                                  <ImageIcon size={10} /> Edit Scene
                                 </button>
                               )}
                             </div>
@@ -12463,7 +12539,7 @@ const App: React.FC = () => {
                                   }}
                                   className="text-[10px] text-fuchsia-400 hover:text-fuchsia-300 flex items-center gap-1 font-bold tracking-wide uppercase bg-fuchsia-500/10 hover:bg-fuchsia-500/20 px-2 py-0.5 rounded"
                                 >
-                                  <Layout size={10} /> Edit UI
+                                  <LayoutTemplate size={10} /> Edit UI
                                 </button>
                               )}
                             </div>
@@ -16855,6 +16931,37 @@ const App: React.FC = () => {
           onClose={() => setEditingAssetId(null)}
         />
       )}
+
+      {calibratingFrameAssetId &&
+        (() => {
+          const frameAsset = project.assets.find(
+            (asset) => asset.id === calibratingFrameAssetId,
+          );
+          if (!frameAsset) return null;
+          return (
+            <DeviceFrameCalibrator
+              assetId={frameAsset.id}
+              imageSrc={frameAsset.src}
+              initialCalibration={
+                project.globalSettings.deviceFrame?.assetId === frameAsset.id
+                  ? (project.globalSettings
+                      .deviceFrame as DeviceFrameCalibration)
+                  : undefined
+              }
+              onCancel={() => setCalibratingFrameAssetId(null)}
+              onSave={(calibration) => {
+                pushHistory({
+                  ...project,
+                  globalSettings: {
+                    ...project.globalSettings,
+                    deviceFrame: calibration,
+                  },
+                });
+                setCalibratingFrameAssetId(null);
+              }}
+            />
+          );
+        })()}
 
       {assetPickerCb && (
         <AssetPickerModal

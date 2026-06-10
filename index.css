@@ -1,7 +1,338 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=VT323&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+  .studio-app {
+    --studio-cyan: #00ffcc;
+    --studio-pink: #ff1fc8;
+    --studio-lapis: #255cff;
+    --studio-gold: #ffe45c;
+    --studio-pearl: #fff9ff;
+    --studio-lavender: #eadcff;
+    --studio-obsidian: #08060d;
+    --studio-ink: #0c1020;
+    position: relative;
+    isolation: isolate;
+    background:
+      radial-gradient(circle at 12% -10%, rgb(37 92 255 / 18%), transparent 31%),
+      radial-gradient(circle at 88% -14%, rgb(255 31 200 / 15%), transparent 34%),
+      var(--studio-obsidian);
+  }
+
+  .studio-app::before {
+    position: fixed;
+    z-index: 99999;
+    inset: 0;
+    pointer-events: none;
+    content: "";
+    opacity: 0.12;
+    mix-blend-mode: soft-light;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 3px,
+      rgb(0 255 204 / 13%) 4px
+    );
+  }
+
+  .studio-titlebar {
+    border-bottom: 1px solid rgb(0 255 204 / 30%);
+    background:
+      linear-gradient(180deg, rgb(20 27 47 / 98%), rgb(8 6 13 / 98%)),
+      var(--studio-obsidian);
+    box-shadow:
+      inset 0 -1px rgb(255 31 200 / 20%),
+      0 8px 30px rgb(0 0 0 / 35%);
+  }
+
+  .studio-brand {
+    position: relative;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 142px;
+    color: var(--studio-pearl);
+  }
+
+  .studio-brand__sigil {
+    color: var(--studio-gold);
+    font-family: Cinzel, Georgia, serif;
+    font-size: 1.2rem;
+    filter: drop-shadow(0 0 5px rgb(255 228 92 / 70%));
+  }
+
+  .studio-brand__name {
+    color: var(--studio-cyan);
+    font-family: VT323, "Courier New", monospace;
+    font-size: 1.65rem;
+    line-height: 0.8;
+    letter-spacing: 0.08em;
+    text-shadow:
+      1px 1px 0 var(--studio-pink),
+      0 0 10px rgb(0 255 204 / 45%);
+  }
+
+  .studio-brand__edition {
+    position: absolute;
+    left: 1.7rem;
+    top: 1.2rem;
+    color: #cfbde8;
+    font-family: Herculanum, Papyrus, fantasy;
+    font-size: 0.5rem;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+
+  .studio-new-button {
+    border: 1px outset #ffe986;
+    border-radius: 3px 9px 3px 9px;
+    color: #17100a;
+    font-family: "Comic Sans MS", "Comic Sans", cursive;
+    background: linear-gradient(180deg, #fff3a6, #ffc92c);
+    box-shadow:
+      2px 2px 0 rgb(255 31 200 / 75%),
+      0 0 12px rgb(255 228 92 / 25%);
+  }
+
+  .studio-new-button:hover {
+    background: linear-gradient(180deg, #fff9cc, #ffe45c);
+    transform: translateY(-1px);
+  }
+
+  .studio-project-name {
+    border: 1px inset rgb(160 140 175 / 80%);
+    border-radius: 2px;
+    color: var(--studio-pearl);
+    font-family: Tahoma, "Trebuchet MS", sans-serif;
+    background: rgb(5 8 18 / 90%);
+    box-shadow: inset 2px 2px 6px rgb(0 0 0 / 55%);
+  }
+
+  .studio-project-name:focus {
+    border-color: var(--studio-cyan);
+    box-shadow:
+      inset 2px 2px 6px rgb(0 0 0 / 55%),
+      0 0 0 2px rgb(0 255 204 / 14%);
+  }
+
+  .studio-ai-button {
+    border: 1px solid rgb(255 31 200 / 35%);
+    border-radius: 999px;
+    color: #cfbde8;
+    font-family: Papyrus, Herculanum, fantasy;
+    background: rgb(255 31 200 / 8%);
+  }
+
+  .studio-ai-button:hover,
+  .studio-ai-button.is-active {
+    border-color: var(--studio-pink);
+    color: var(--studio-pearl);
+    background: rgb(255 31 200 / 20%);
+    box-shadow: 0 0 14px rgb(255 31 200 / 24%);
+  }
+
+  .studio-workflow {
+    position: relative;
+    z-index: 2050;
+    flex: 0 0 auto;
+    border-bottom: 1px solid rgb(39 51 77 / 90%);
+    color: var(--studio-pearl);
+    background: rgb(8 11 22 / 98%);
+    box-shadow: 0 9px 22px rgb(0 0 0 / 28%);
+  }
+
+  .studio-workflow__rail {
+    padding: 0.35rem 0.75rem 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .studio-workflow__steps {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(116px, 1fr));
+    gap: 0.3rem;
+    min-width: 760px;
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+
+  .studio-step {
+    position: relative;
+    display: flex;
+    min-height: 38px;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0.4rem 0.65rem 0.45rem;
+    overflow: hidden;
+    border: 1px solid rgb(52 54 77 / 90%);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+    color: #baa7d1;
+    font-family: "Comic Sans MS", "Comic Sans", cursive;
+    background: linear-gradient(180deg, rgb(23 29 49 / 95%), rgb(12 16 32 / 95%));
+    transition: 140ms ease;
+  }
+
+  .studio-step::after {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    content: "";
+    opacity: 0;
+    background: var(--studio-cyan);
+    box-shadow: 0 0 10px var(--studio-cyan);
+  }
+
+  .studio-step:hover {
+    z-index: 1;
+    border-color: rgb(0 255 204 / 48%);
+    color: var(--studio-pearl);
+    transform: translateY(-1px);
+  }
+
+  .studio-step.is-active {
+    border-color: rgb(255 31 200 / 70%);
+    color: var(--studio-pearl);
+    background:
+      linear-gradient(180deg, rgb(255 31 200 / 19%), rgb(13 16 34 / 98%));
+    box-shadow:
+      inset 0 1px rgb(255 255 255 / 8%),
+      0 -4px 18px rgb(255 31 200 / 12%);
+  }
+
+  .studio-step.is-active::after {
+    opacity: 1;
+  }
+
+  .studio-step--play {
+    color: #a9ffeb;
+  }
+
+  .studio-step--publish {
+    color: #fff0a3;
+  }
+
+  .studio-step__number {
+    color: var(--studio-cyan);
+    font-family: Cinzel, Georgia, serif;
+    font-size: 0.58rem;
+    letter-spacing: 0.08em;
+    opacity: 0.82;
+  }
+
+  .studio-step__label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .studio-workflow__context {
+    display: flex;
+    min-height: 54px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.45rem 0.9rem;
+    border-top: 1px solid rgb(255 255 255 / 4%);
+    background:
+      linear-gradient(90deg, rgb(37 92 255 / 8%), transparent 42%, rgb(255 31 200 / 7%)),
+      #0c1020;
+  }
+
+  .studio-workflow__copy {
+    display: flex;
+    min-width: 240px;
+    flex-direction: column;
+    gap: 0.05rem;
+  }
+
+  .studio-workflow__eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--studio-cyan);
+    font-family: Papyrus, Herculanum, fantasy;
+    font-size: 0.76rem;
+    letter-spacing: 0.035em;
+  }
+
+  .studio-workflow__detail {
+    overflow: hidden;
+    color: #a08caf;
+    font-family: Tahoma, "Trebuchet MS", sans-serif;
+    font-size: 0.68rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .studio-subtools {
+    display: flex;
+    min-width: 0;
+    align-items: stretch;
+    justify-content: flex-end;
+    gap: 0.35rem;
+    overflow-x: auto;
+  }
+
+  .studio-subtool {
+    display: flex;
+    min-width: max-content;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid rgb(52 54 77 / 90%);
+    border-radius: 4px 11px 4px 11px;
+    color: #baa7d1;
+    text-align: left;
+    background: rgb(23 29 49 / 76%);
+    transition: 140ms ease;
+  }
+
+  .studio-subtool:hover {
+    border-color: rgb(0 255 204 / 45%);
+    color: var(--studio-pearl);
+  }
+
+  .studio-subtool.is-active {
+    border-color: var(--studio-cyan);
+    color: var(--studio-pearl);
+    background: linear-gradient(135deg, rgb(0 255 204 / 14%), rgb(37 92 255 / 12%));
+    box-shadow:
+      inset 0 0 12px rgb(0 255 204 / 6%),
+      0 0 10px rgb(0 255 204 / 9%);
+  }
+
+  .studio-subtool > svg {
+    flex: 0 0 auto;
+    color: var(--studio-pink);
+  }
+
+  .studio-subtool.is-active > svg {
+    color: var(--studio-cyan);
+  }
+
+  .studio-subtool span {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .studio-subtool strong {
+    font-family: "Comic Sans MS", "Comic Sans", cursive;
+    font-size: 0.68rem;
+    line-height: 1.1;
+  }
+
+  .studio-subtool small {
+    color: #73627f;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 0.52rem;
+    line-height: 1.1;
+  }
+}
 
 @layer utilities {
   .hide-scrollbar {
@@ -14,14 +345,32 @@
 }
 
 @layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
   body {
     background-image: 
-      linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+      linear-gradient(rgba(0, 255, 204, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 255, 204, 0.025) 1px, transparent 1px);
     background-size: 24px 24px;
-    background-color: #0c0c0e;
-    letter-spacing: 0.5px;
-    color: #f4f4f5;
+    background-color: #08060d;
+    letter-spacing: 0.2px;
+    color: #fff9ff;
+    font-family: Tahoma, "Trebuchet MS", sans-serif;
   }
   
   /* Removed global border-radius override to soften UI */
@@ -32,18 +381,50 @@
     height: 10px;
   }
   ::-webkit-scrollbar-track {
-    background: #0f0f11;
+    background: #08060d;
   }
   ::-webkit-scrollbar-thumb {
-    background: #27272a;
-    border: 2px solid #0f0f11;
-    border-radius: 9999px;
+    background: linear-gradient(#255cff, #ff1fc8);
+    border: 2px solid #08060d;
+    border-radius: 2px 8px 2px 8px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #3f3f46;
+    background: linear-gradient(#00ffcc, #ff1fc8);
   }
   
   /* Button and input styling handles by Tailwind in App.tsx */
+}
+
+@media (max-width: 980px) {
+  .studio-workflow__context {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .studio-workflow__copy {
+    width: 100%;
+  }
+
+  .studio-subtools {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .studio-titlebar {
+    padding-right: 0.5rem;
+    padding-left: 0.5rem;
+  }
+
+  .studio-workflow__detail {
+    display: none;
+  }
+
+  .studio-workflow__context {
+    min-height: 44px;
+  }
 }
 
 .light-theme {

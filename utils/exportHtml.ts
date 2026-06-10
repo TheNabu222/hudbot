@@ -74,6 +74,19 @@ export function generateExportHtml(project: Project): string {
   const boundH = boundMaxY - boundMinY;
   const offsetX = -boundMinX;
   const offsetY = -boundMinY;
+  const deviceFrame = project.globalSettings?.deviceFrame;
+  const deviceFrameAsset = deviceFrame
+    ? project.assets.find((asset) => asset.id === deviceFrame.assetId)
+    : undefined;
+  const hasDeviceFrame = !!(deviceFrame && deviceFrameAsset);
+  const layoutWidth = hasDeviceFrame ? deviceFrame.outerWidth : boundW;
+  const layoutHeight = hasDeviceFrame ? deviceFrame.outerHeight : boundH;
+  const deviceScreenScaleX = hasDeviceFrame
+    ? deviceFrame.screen.width / exportWidth
+    : 1;
+  const deviceScreenScaleY = hasDeviceFrame
+    ? deviceFrame.screen.height / exportHeight
+    : 1;
 
   const css = `
     :root {
@@ -912,8 +925,8 @@ export function generateExportHtml(project: Project): string {
       
       let currentScale = 1;
       const resizeGame = () => {
-        const gameW = ${boundW};
-        let gameH = ${boundH};
+        const gameW = ${layoutWidth};
+        let gameH = ${layoutHeight};
         
         const winW = window.innerWidth;
         const winH = window.innerHeight;
@@ -1731,6 +1744,50 @@ export function generateExportHtml(project: Project): string {
     }
   }
 
+  let deviceFrameHtml = "";
+  if (hasDeviceFrame && deviceFrame && deviceFrameAsset) {
+    const frameSrc = deviceFrameAsset.dataURL || deviceFrameAsset.src || "";
+    const slices = [
+      { x: 0, y: 0, width: deviceFrame.outerWidth, height: deviceFrame.screen.y },
+      {
+        x: 0,
+        y: deviceFrame.screen.y,
+        width: deviceFrame.screen.x,
+        height: deviceFrame.screen.height,
+      },
+      {
+        x: deviceFrame.screen.x + deviceFrame.screen.width,
+        y: deviceFrame.screen.y,
+        width:
+          deviceFrame.outerWidth -
+          deviceFrame.screen.x -
+          deviceFrame.screen.width,
+        height: deviceFrame.screen.height,
+      },
+      {
+        x: 0,
+        y: deviceFrame.screen.y + deviceFrame.screen.height,
+        width: deviceFrame.outerWidth,
+        height:
+          deviceFrame.outerHeight -
+          deviceFrame.screen.y -
+          deviceFrame.screen.height,
+      },
+    ].filter((slice) => slice.width > 0 && slice.height > 0);
+    deviceFrameHtml = `
+      <div id="device-frame" style="position:absolute; inset:0; z-index:4000; pointer-events:none; user-select:none;">
+        ${slices
+          .map(
+            (slice) => `
+          <div style="position:absolute; overflow:hidden; left:${slice.x}px; top:${slice.y}px; width:${slice.width}px; height:${slice.height}px;">
+            <img src="${frameSrc}" alt="" draggable="false" style="position:absolute; max-width:none; width:${deviceFrame.outerWidth}px; height:${deviceFrame.outerHeight}px; left:${-slice.x}px; top:${-slice.y}px; pointer-events:none; user-select:none;" />
+          </div>`,
+          )
+          .join("")}
+      </div>
+    `;
+  }
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1746,8 +1803,9 @@ export function generateExportHtml(project: Project): string {
 <body>
   <div id="scale-wrapper" style="width: 100vw; height: 100vh; display: flex; flex-direction: ${project.globalSettings?.dialoguePosition === 'below' ? 'column' : 'row'}; justify-content: center; align-items: center; overflow: hidden; background-color: #1a1a1a;">
     <div id="game-layout-resizer" style="position: relative; flex-shrink: 0; display: flex; justify-content: center; align-items: flex-start;">
-      <div id="game-positioner" style="position: absolute; left: 0; top: 0; width: ${boundW}px; height: ${boundH}px;">
-        <div id="game-coordinate-space" style="position: absolute; left: ${offsetX}px; top: ${offsetY}px; width: ${exportWidth}px; height: ${exportHeight}px;">
+      <div id="game-positioner" style="position: absolute; left: 0; top: 0; width: ${layoutWidth}px; height: ${layoutHeight}px;">
+        ${deviceFrameHtml}
+        <div id="game-coordinate-space" style="position: absolute; left: ${hasDeviceFrame ? deviceFrame!.screen.x : offsetX}px; top: ${hasDeviceFrame ? deviceFrame!.screen.y : offsetY}px; width: ${exportWidth}px; height: ${exportHeight}px; transform: scale(${deviceScreenScaleX}, ${deviceScreenScaleY}); transform-origin: top left;">
         ${hudHtml}
         <div id="game-container" style="position: absolute; inset: 0; overflow: hidden; width: 100%; height: 100%;">
           ${scenesHtml}
