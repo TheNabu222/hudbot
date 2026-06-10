@@ -79,6 +79,50 @@ export type BlendMode =
   | "luminosity";
 export type AssetCategory = string;
 
+export type RuleConditionType =
+  | "flag"
+  | "item"
+  | "quest_active"
+  | "quest_completed"
+  | "skill"
+  | "need"
+  | "relationship"
+  | "time";
+
+export type RuleComparator =
+  | "is"
+  | "is_not"
+  | "at_least"
+  | "at_most"
+  | "greater_than"
+  | "less_than";
+
+export interface RuleCondition {
+  id: string;
+  type: RuleConditionType;
+  targetId: string;
+  comparator: RuleComparator;
+  value?: number | boolean;
+}
+
+export interface RuntimeGameState {
+  version: 1;
+  currentSceneId: string;
+  inventory: string[];
+  flags: Record<string, boolean>;
+  skills: Record<string, number>;
+  needs: Record<string, number>;
+  relationships: Record<string, number>;
+  activeQuests: string[];
+  completedQuests: string[];
+  collectedObjects: string[];
+  activeUiMenus: string[];
+  triggeredRuleIds: string[];
+  runtimePositions: Record<string, { x: number; y: number }>;
+  time: number;
+  day: number;
+}
+
 export interface ClickResponse {
   id: string;
   interaction: InteractionType;
@@ -87,6 +131,9 @@ export interface ClickResponse {
   dialogueTreeId?: string;
   targetUiId?: string;
   scriptAssetId?: string;
+  conditionMode?: "all" | "any";
+  conditions?: RuleCondition[];
+  triggerOnce?: boolean;
 }
 
 export interface DialogueChoice {

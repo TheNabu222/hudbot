@@ -107,6 +107,10 @@ import { ImageEditorModal } from "./components/ImageEditorModal";
 import { exportToTwee, importFromTwee } from "./utils/twineAdapter";
 import { downloadJSON, downloadText, loadJSON, loadText } from "./utils/fileHelpers";
 import { stripDuplicatedAssetSources } from "./utils/projectPersistence";
+import {
+  createRuntimeGameState,
+  evaluateRuleConditions,
+} from "./utils/runtimeRules";
 import { MapMaker } from "./components/MapMaker";
 import { AISpriteModal } from "./components/AISpriteModal";
 import { AssetPickerModal } from "./components/AssetPickerModal";
@@ -294,6 +298,9 @@ const App: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [stageZoom, setStageZoom] = useState<number>(1);
   const [triggeredObjects, setTriggeredObjects] = useState<Set<string>>(
+    new Set(),
+  );
+  const [triggeredResponseIds, setTriggeredResponseIds] = useState<Set<string>>(
     new Set(),
   );
   const [contextMenu, setContextMenu] = useState<{
@@ -2381,6 +2388,7 @@ const App: React.FC = () => {
         project.quests?.filter((q) => q.autoStart).map((q) => q.id) || [],
       );
       setCompletedQuests([]);
+      setTriggeredResponseIds(new Set());
       const defaultNeeds: Record<string, number> = {};
       const customNeeds = project.globalSettings?.customNeeds?.length
         ? project.globalSettings.customNeeds
@@ -2399,6 +2407,7 @@ const App: React.FC = () => {
       setPlayerInventory([]);
       setCollectedObjects([]);
       setTriggeredObjects(new Set());
+      setTriggeredResponseIds(new Set());
     }
     setActiveUiMenus(
       newState
@@ -2920,12 +2929,21 @@ const App: React.FC = () => {
       setPreviewDialogue(obj.interactionData);
     } else if (obj.interaction === "save_game") {
       const stateToSave = {
+        version: 1,
+        currentSceneId: project.currentSceneId,
         inventory: playerInventory,
         needs: playerNeeds,
         time: gameTime,
+        day: 1,
         skills: playerSkills,
         collectedObjects: collectedObjects,
         flags: playerFlags,
+        relationships: playerFactions,
+        activeQuests,
+        completedQuests,
+        activeUiMenus,
+        triggeredRuleIds: [...triggeredResponseIds],
+        runtimePositions: runtimeOverrides,
       };
       localStorage.setItem(
         `neocities_game_save_${project.id}`,
@@ -2944,6 +2962,21 @@ const App: React.FC = () => {
           if (parsed.collectedObjects)
             setCollectedObjects(parsed.collectedObjects);
           if (parsed.flags) setPlayerFlags(parsed.flags);
+          if (parsed.relationships) setPlayerFactions(parsed.relationships);
+          if (parsed.activeQuests) setActiveQuests(parsed.activeQuests);
+          if (parsed.completedQuests)
+            setCompletedQuests(parsed.completedQuests);
+          if (parsed.activeUiMenus) setActiveUiMenus(parsed.activeUiMenus);
+          if (parsed.triggeredRuleIds)
+            setTriggeredResponseIds(new Set(parsed.triggeredRuleIds));
+          if (parsed.runtimePositions)
+            setRuntimeOverrides(parsed.runtimePositions);
+          if (parsed.currentSceneId) {
+            setProject((previous) => ({
+              ...previous,
+              currentSceneId: parsed.currentSceneId,
+            }));
+          }
           setPreviewDialogue("Game Loaded!");
         } catch (e) {
           setPreviewDialogue("Load failed: Corrupted save data.");
@@ -3016,7 +3049,49 @@ const App: React.FC = () => {
     }
 
     if (!isChainedResponse && obj.clickResponses?.length) {
+      const ruleState = createRuntimeGameState(project.currentSceneId, {
+        inventory: [...playerInventory],
+        flags: Object.fromEntries(playerFlags.map((flag) => [flag, true])),
+        skills: { ...playerSkills },
+        needs: { ...playerNeeds },
+        relationships: { ...playerFactions },
+        activeQuests: [...activeQuests],
+        completedQuests: [...completedQuests],
+        collectedObjects: [...collectedObjects],
+        activeUiMenus: [...activeUiMenus],
+        triggeredRuleIds: [...triggeredResponseIds],
+        runtimePositions: { ...runtimeOverrides },
+        time: gameTime,
+      });
+
       obj.clickResponses.forEach((response) => {
+        const responseKey = `${obj.id}::${response.id}`;
+        if (
+          response.triggerOnce &&
+          (triggeredResponseIds.has(responseKey) ||
+            ruleState.triggeredRuleIds.includes(responseKey))
+        ) {
+          return;
+        }
+        if (
+          !evaluateRuleConditions(
+            response.conditions,
+            response.conditionMode || "all",
+            ruleState,
+          )
+        ) {
+          return;
+        }
+
+        if (response.triggerOnce) {
+          ruleState.triggeredRuleIds.push(responseKey);
+          setTriggeredResponseIds((previous) => {
+            const next = new Set(previous);
+            next.add(responseKey);
+            return next;
+          });
+        }
+
         handleObjectClick(
           {
             ...obj,
@@ -3043,6 +3118,36 @@ const App: React.FC = () => {
           },
           true,
         );
+
+        if (response.interaction === "set_flag" && response.interactionData) {
+          ruleState.flags[response.interactionData] = true;
+        } else if (
+          (response.interaction === "give-item" ||
+            response.interaction === "collect") &&
+          response.giveItemId
+        ) {
+          ruleState.inventory.push(response.giveItemId);
+        } else if (
+          response.interaction === "start_quest" &&
+          response.interactionData
+        ) {
+          ruleState.activeQuests.push(response.interactionData);
+        } else if (
+          response.interaction === "complete_quest" &&
+          response.interactionData
+        ) {
+          ruleState.activeQuests = ruleState.activeQuests.filter(
+            (questId) => questId !== response.interactionData,
+          );
+          ruleState.completedQuests.push(response.interactionData);
+        } else if (
+          response.interaction === "scene_change" &&
+          response.interactionData
+        ) {
+          ruleState.currentSceneId = response.interactionData;
+        } else if (response.interaction === "open_ui" && response.targetUiId) {
+          ruleState.activeUiMenus.push(response.targetUiId);
+        }
       });
     }
   };
@@ -12531,6 +12636,25 @@ const App: React.FC = () => {
                             quests={project.quests || []}
                             gameFlags={project.gameFlags || []}
                             uiMenus={project.uiMenus || []}
+                            skillIds={
+                              project.globalSettings.customSkills?.length
+                                ? project.globalSettings.customSkills
+                                : ["naturalist", "occultist", "scribal"]
+                            }
+                            needIds={
+                              project.globalSettings.customNeeds?.length
+                                ? project.globalSettings.customNeeds
+                                : [
+                                    "rest",
+                                    "hunger",
+                                    "connection",
+                                    "spiritual",
+                                    "novelty",
+                                  ]
+                            }
+                            relationshipIds={(project.factions || []).map(
+                              (faction) => faction.id,
+                            )}
                             onChange={(clickResponses) =>
                               updateObject(selectedObject.id, {
                                 clickResponses,

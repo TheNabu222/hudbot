@@ -1,5 +1,10 @@
 import { Project, Scene } from "../types";
 import { stripDuplicatedAssetSources } from "./projectPersistence";
+import {
+  compareRuleValue,
+  evaluateRuleCondition,
+  evaluateRuleConditions,
+} from "./runtimeRules";
 
 export function generateExportHtml(project: Project): string {
   const strippedProject = stripDuplicatedAssetSources(project);
@@ -886,6 +891,10 @@ export function generateExportHtml(project: Project): string {
     });
     setAnimatedCursor(globalCursorAssetId);
 
+    const compareRuleValue = ${compareRuleValue.toString()};
+    const evaluateRuleCondition = ${evaluateRuleCondition.toString()};
+    const evaluateRuleConditions = ${evaluateRuleConditions.toString()};
+
     // Game State
     let defaultNeeds = { rest: 100, hunger: 100, connection: 100, spiritual: 100, novelty: 100 };
     if (globalSettings.customNeeds && globalSettings.customNeeds.length > 0) {
@@ -900,13 +909,21 @@ export function generateExportHtml(project: Project): string {
     }
 
     let state = {
+      version: 1,
+      currentSceneId: '${project.currentSceneId}',
       needs: defaultNeeds,
       skills: defaultSkills,
       inventory: [],
       flags: {},
+      relationships: {},
       activeQuests: gameData.quests?.filter(q => q.autoStart).map(q => q.id) || [],
       completedQuests: [],
-      time: 8 // 0-24
+      collectedObjects: [],
+      activeUiMenus: [],
+      triggeredRuleIds: [],
+      runtimePositions: {},
+      time: 8,
+      day: 1
     };
 
     // Load from LocalStorage
@@ -916,6 +933,11 @@ export function generateExportHtml(project: Project): string {
         state = { ...state, ...JSON.parse(saved) };
       }
     } catch(e) {}
+    state.triggeredRuleIds = state.triggeredRuleIds || [];
+    state.collectedObjects = state.collectedObjects || [];
+    state.activeUiMenus = state.activeUiMenus || [];
+    state.relationships = state.relationships || {};
+    state.runtimePositions = state.runtimePositions || {};
 
     let saveGame = () => {
       try {
@@ -939,6 +961,22 @@ export function generateExportHtml(project: Project): string {
       const flavorText = document.getElementById('flavor-text');
       const container = document.getElementById('game-container');
       const gamePositioner = document.getElementById('game-positioner');
+
+      if (state.currentSceneId) {
+        document.querySelectorAll('.game-scene').forEach(el => {
+          el.style.display = el.id === 'scene-' + state.currentSceneId ? 'block' : 'none';
+        });
+      }
+      state.activeUiMenus.forEach(menuId => {
+        const menu = document.getElementById('ui-menu-' + menuId);
+        if (menu) menu.style.display = 'block';
+      });
+      Object.entries(state.runtimePositions).forEach(([objectId, position]) => {
+        const element = document.getElementById(objectId);
+        if (!element || !position) return;
+        element.style.left = Number(position.x || 0) + 'px';
+        element.style.top = Number(position.y || 0) + 'px';
+      });
       
       // Scale game to fit screen
       const scaleWrapper = document.getElementById('scale-wrapper');
@@ -1260,6 +1298,9 @@ export function generateExportHtml(project: Project): string {
         if (state['collected_' + obj.id]) {
           obj.style.display = 'none';
         }
+        if (state.collectedObjects.includes(obj.id)) {
+          obj.style.display = 'none';
+        }
 
         // Apply any immediate flag visibility checks to ensure objects are hidden correctly
         // before interaction events are even dispatched, but updateGameFlagsUI handles the bulk.
@@ -1357,6 +1398,9 @@ export function generateExportHtml(project: Project): string {
             if (interaction === 'collect') {
               obj.style.display = 'none';
               state['collected_' + obj.id] = true;
+              if (!state.collectedObjects.includes(obj.id)) {
+                state.collectedObjects.push(obj.id);
+              }
               saveGame();
             }
           } else if (interaction === 'dialogue' || interaction === 'flavor_text') {
@@ -1423,6 +1467,7 @@ export function generateExportHtml(project: Project): string {
             const targetScene = document.getElementById('scene-' + data);
             if (targetScene) {
               targetScene.style.display = 'block';
+              state.currentSceneId = data;
               playBgm(targetScene.getAttribute('data-bgm') || null);
             } else {
               dialogueBox.innerHTML = 'Error: Cannot load scene ' + data;
@@ -1432,13 +1477,21 @@ export function generateExportHtml(project: Project): string {
             const targetUi = obj.getAttribute('data-target-ui');
             if (targetUi) {
               const el = document.getElementById('ui-menu-' + targetUi);
-              if (el) el.style.display = 'block';
+              if (el) {
+                el.style.display = 'block';
+                if (!state.activeUiMenus.includes(targetUi)) {
+                  state.activeUiMenus.push(targetUi);
+                }
+              }
             }
           } else if (interaction === 'close_ui') {
             const targetUi = obj.getAttribute('data-target-ui');
             if (targetUi) {
               const el = document.getElementById('ui-menu-' + targetUi);
-              if (el) el.style.display = 'none';
+              if (el) {
+                el.style.display = 'none';
+                state.activeUiMenus = state.activeUiMenus.filter(id => id !== targetUi);
+              }
             } else {
               // Close highest z-index visible ui menu? It's easier just to close all, or actually, the DOM structure is flat. Let's just find the last visible one.
               const visibleMenus = Array.from(document.querySelectorAll('.ui-menu-layer')).filter(el => el.style.display !== 'none');
@@ -1553,6 +1606,16 @@ export function generateExportHtml(project: Project): string {
               });
 
               responses.forEach(response => {
+                const responseKey = obj.id + '::' + response.id;
+                if (response.triggerOnce && state.triggeredRuleIds.includes(responseKey)) {
+                  return;
+                }
+                if (!evaluateRuleConditions(response.conditions || [], response.conditionMode || 'all', state)) {
+                  return;
+                }
+                if (response.triggerOnce) {
+                  state.triggeredRuleIds.push(responseKey);
+                }
                 Object.entries(responseAttributes).forEach(([key, attribute]) => {
                   let value = response[key] || '';
                   if (key === 'scriptAssetId' && value) {
