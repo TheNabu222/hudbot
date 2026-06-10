@@ -77,6 +77,7 @@ import {
   History,
   Clock,
   Calendar,
+  BookOpen,
 } from "lucide-react";
 import Matter from "matter-js";
 import { AIAssistant } from "./components/AIAssistant";
@@ -125,6 +126,7 @@ import {
 } from "./components/ClickResponseEditor";
 import { AnimatedCursor } from "./components/AnimatedCursor";
 import { CursorBehaviorPicker } from "./components/CursorBehaviorPicker";
+import { HelpCenterModal } from "./components/HelpCenterModal";
 import { get, set } from "idb-keyval";
 
 export interface SaveSlotMeta {
@@ -327,6 +329,7 @@ const App: React.FC = () => {
   const [editorMode, setEditorMode] = useState<EditorMode>("stage");
   const editorModeBeforePlayRef = useRef<EditorMode>("stage");
   const [showAIAssistant, setShowAIAssistant] = useState(false);
+  const [isHelpCenterOpen, setIsHelpCenterOpen] = useState(false);
   const [leftSidebarTab, setLeftSidebarTab] = useState<"librarian" | "theme">(
     "librarian",
   );
@@ -507,6 +510,7 @@ const App: React.FC = () => {
     startWidth: number;
     startHeight: number;
   } | null>(null);
+  const [isCanvasResizeMode, setIsCanvasResizeMode] = useState(false);
 
   useEffect(() => {
     if (editorMode === "stage") {
@@ -515,6 +519,16 @@ const App: React.FC = () => {
       setHideEditorHud(false);
     }
   }, [editorMode]);
+
+  useEffect(() => {
+    if (
+      isPlaying ||
+      (editorMode !== "stage" && editorMode !== "ui_stage")
+    ) {
+      setIsCanvasResizeMode(false);
+      setIsResizingCanvas(null);
+    }
+  }, [editorMode, isPlaying]);
 
   useEffect(() => {
     if (!isResizingCanvas) return;
@@ -1669,6 +1683,8 @@ const App: React.FC = () => {
     objX: 0,
     objY: 0,
     anchor: "se",
+    preserveAspect: false,
+    aspect: 1,
   });
 
   const [rotatingId, setRotatingId] = useState<string | null>(null);
@@ -1758,6 +1774,12 @@ const App: React.FC = () => {
       objX: obj.x,
       objY: obj.y,
       anchor,
+      preserveAspect:
+        !obj.isHitbox &&
+        !obj.isText &&
+        !obj.isScript &&
+        !obj.isUiElement,
+      aspect: obj.height > 0 ? obj.width / obj.height : 1,
     });
     try {
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -1839,11 +1861,31 @@ const App: React.FC = () => {
         newY = resizeStart.objY + (resizeStart.h - newH);
       }
 
+      if (
+        resizeStart.preserveAspect &&
+        !e.altKey &&
+        resizeStart.anchor.length === 2
+      ) {
+        const widthChange = Math.abs(newW - resizeStart.w);
+        const heightChange = Math.abs(newH - resizeStart.h);
+        if (widthChange >= heightChange * resizeStart.aspect) {
+          newH = Math.max(10, newW / resizeStart.aspect);
+        } else {
+          newW = Math.max(10, newH * resizeStart.aspect);
+        }
+        if (resizeStart.anchor.includes("w")) {
+          newX = resizeStart.objX + (resizeStart.w - newW);
+        }
+        if (resizeStart.anchor.includes("n")) {
+          newY = resizeStart.objY + (resizeStart.h - newH);
+        }
+      }
+
       updateObjectTransient(resizingId, {
-        width: newW,
-        height: newH,
-        x: newX,
-        y: newY,
+        width: Math.round(newW),
+        height: Math.round(newH),
+        x: Math.round(newX),
+        y: Math.round(newY),
       });
       return;
     }
@@ -3499,6 +3541,15 @@ const App: React.FC = () => {
           </div>
 
           <button
+            onClick={() => setIsHelpCenterOpen(true)}
+            className="studio-ai-button flex items-center gap-1 px-3 py-1.5 text-sm font-medium transition-colors"
+            title="Open the Cavebot Field Guide"
+          >
+            <BookOpen size={16} />
+            <span className="hidden md:inline">Help</span>
+          </button>
+
+          <button
             onClick={() => setShowAIAssistant((prev) => !prev)}
             className={`studio-ai-button flex items-center gap-1 px-3 py-1.5 text-sm font-medium transition-colors ${showAIAssistant ? "is-active" : ""}`}
           >
@@ -4694,11 +4745,25 @@ const App: React.FC = () => {
                       {hideEditorHud ? <EyeOff size={14} /> : <Eye size={14} />}
                       <span>{hideEditorHud ? "HUD: Hidden" : "HUD: Visible"}</span>
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsCanvasResizeMode((active) => !active)}
+                      className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-bold transition-all ${
+                        isCanvasResizeMode
+                          ? "border-amber-400 bg-amber-500/20 text-amber-200"
+                          : "border-neutral-700 bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white"
+                      }`}
+                      title="Explicitly enter room-boundary resizing so it cannot be triggered accidentally"
+                    >
+                      <Maximize2 size={14} />
+                      {isCanvasResizeMode ? "Done Resizing Room" : "Resize Room"}
+                    </button>
                   </div>
                 )}
 
               <div
-                className={`relative mx-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 overflow-visible ${isPlaying ? "border-transparent" : "border-neutral-800 border"}`}
+                className={`relative ml-0 mr-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 overflow-visible ${isPlaying ? "border-transparent" : "border-neutral-800 border"}`}
                 style={{
                   width: showDeviceFrame
                     ? deviceFrame!.outerWidth
@@ -4707,7 +4772,7 @@ const App: React.FC = () => {
                     ? deviceFrame!.outerHeight
                     : logicalStageHeight,
                   transform: `scale(${stageZoom})`,
-                  transformOrigin: "center center",
+                  transformOrigin: "top left",
                   cursor:
                     isPlaying &&
                     (hoverCursorAssetId ||
@@ -5651,6 +5716,7 @@ const App: React.FC = () => {
                                   {/* nw */}
                                   <div
                                     className="absolute -top-2 -left-2 w-4 h-4 bg-emerald-500 rounded-full cursor-nw-resize shadow-md transition-transform hover:scale-110"
+                                    title="Resize object proportionally. Hold Alt for free stretch."
                                     onPointerDown={(e) =>
                                       handleResizePointerDown(e, obj, "nw")
                                     }
@@ -5658,6 +5724,7 @@ const App: React.FC = () => {
                                   {/* ne */}
                                   <div
                                     className="absolute -top-2 -right-2 w-4 h-4 bg-emerald-500 rounded-full cursor-ne-resize shadow-md transition-transform hover:scale-110"
+                                    title="Resize object proportionally. Hold Alt for free stretch."
                                     onPointerDown={(e) =>
                                       handleResizePointerDown(e, obj, "ne")
                                     }
@@ -5665,17 +5732,29 @@ const App: React.FC = () => {
                                   {/* sw */}
                                   <div
                                     className="absolute -bottom-2 -left-2 w-4 h-4 bg-emerald-500 rounded-full cursor-sw-resize shadow-md transition-transform hover:scale-110"
+                                    title="Resize object proportionally. Hold Alt for free stretch."
                                     onPointerDown={(e) =>
                                       handleResizePointerDown(e, obj, "sw")
                                     }
                                   />
                                   {/* se */}
                                   <div
-                                    className="absolute -bottom-2 -right-2 w-4 h-4 bg-emerald-500 rounded-full cursor-se-resize shadow-md transition-transform hover:scale-110"
+                                    className="absolute -bottom-3 -right-3 flex h-6 w-6 items-center justify-center rounded-md border-2 border-neutral-950 bg-emerald-400 text-[11px] font-black text-neutral-950 shadow-lg transition-transform hover:scale-110 cursor-se-resize"
+                                    title="Resize object proportionally. Hold Alt for free stretch."
                                     onPointerDown={(e) =>
                                       handleResizePointerDown(e, obj, "se")
                                     }
-                                  />
+                                  >
+                                    ↘
+                                  </div>
+                                  {resizingId === obj.id && (
+                                    <div className="pointer-events-none absolute -bottom-10 right-0 z-[8000] whitespace-nowrap rounded border border-emerald-400/60 bg-neutral-950/95 px-2 py-1 font-mono text-[10px] font-bold text-emerald-300 shadow-xl">
+                                      {Math.round(obj.width)} × {Math.round(obj.height)}
+                                      {resizeStart.preserveAspect && !obj.isUiElement
+                                        ? " · proportional"
+                                        : ""}
+                                    </div>
+                                  )}
                                 </>
                               )}
                             </div>
@@ -8585,8 +8664,14 @@ const App: React.FC = () => {
                 )}
 
                 {/* Drag-to-resize handles for canvas (stage) boundary */}
-                {!isPlaying && (
+                {!isPlaying && isCanvasResizeMode && (
                   <>
+                    <div className="pointer-events-none absolute left-1/2 top-3 z-[7000] -translate-x-1/2 rounded-full border border-amber-400/60 bg-neutral-950/95 px-3 py-1.5 font-comic text-xs font-bold text-amber-200 shadow-xl">
+                      ROOM BOUNDARY · {logicalStageWidth} × {logicalStageHeight}
+                      <span className="ml-2 text-neutral-400">
+                        drag the striped edges · Shift keeps proportions
+                      </span>
+                    </div>
                     {/* Right edge handle */}
                     <div
                       onPointerDown={(e) => {
@@ -8600,10 +8685,10 @@ const App: React.FC = () => {
                           startHeight: currentScene.height || project.globalSettings.stageHeight || 600,
                         });
                       }}
-                      className="absolute top-0 bottom-0 pointer-events-auto -right-2 w-4 z-[5000] cursor-col-resize group flex items-center justify-center select-none"
+                      className="absolute top-0 bottom-0 pointer-events-auto -right-3 w-6 z-[5000] cursor-col-resize group flex items-center justify-center select-none bg-amber-400/5 hover:bg-amber-400/15"
                       title="Drag to resize scene width"
                     >
-                      <div className="h-12 w-1.5 rounded-full bg-neutral-700/80 group-hover:bg-emerald-500 hover:scale-x-125 transition-all border border-neutral-900 shadow-lg" />
+                      <div className="h-16 w-2 rounded-full border border-neutral-900 bg-amber-400/80 shadow-lg transition-all group-hover:scale-x-125 group-hover:bg-amber-300" />
                     </div>
 
                     {/* Bottom edge handle */}
@@ -8619,10 +8704,10 @@ const App: React.FC = () => {
                           startHeight: currentScene.height || project.globalSettings.stageHeight || 600,
                         });
                       }}
-                      className="absolute left-0 right-0 pointer-events-auto -bottom-2 h-4 z-[5000] cursor-row-resize group flex items-center justify-center select-none"
+                      className="absolute left-0 right-0 pointer-events-auto -bottom-3 h-6 z-[5000] cursor-row-resize group flex items-center justify-center select-none bg-amber-400/5 hover:bg-amber-400/15"
                       title="Drag to resize scene height"
                     >
-                      <div className="w-12 h-1.5 rounded-full bg-neutral-700/80 group-hover:bg-emerald-500 hover:scale-y-125 transition-all border border-neutral-900 shadow-lg" />
+                      <div className="h-2 w-16 rounded-full border border-neutral-900 bg-amber-400/80 shadow-lg transition-all group-hover:scale-y-125 group-hover:bg-amber-300" />
                     </div>
 
                     {/* Bottom-right corner handle */}
@@ -8638,7 +8723,7 @@ const App: React.FC = () => {
                           startHeight: currentScene.height || project.globalSettings.stageHeight || 600,
                         });
                       }}
-                      className="absolute pointer-events-auto -bottom-3 -right-3 w-6 h-6 z-[5001] cursor-se-resize group flex items-center justify-center select-none bg-neutral-950 border border-neutral-700 hover:border-emerald-500 rounded-full shadow-lg hover:scale-110 active:scale-95 transition-transform"
+                      className="absolute pointer-events-auto -bottom-4 -right-4 w-9 h-9 z-[5001] cursor-se-resize group flex items-center justify-center select-none bg-amber-400 border-2 border-neutral-950 text-neutral-950 rounded-lg shadow-xl hover:bg-amber-300 hover:scale-110 active:scale-95 transition-transform"
                       title="Drag to resize entire scene (Hold Shift for proportional resizing)"
                     >
                       <svg width="10" height="10" viewBox="0 0 10 10" className="text-neutral-400 group-hover:text-emerald-400 transition-colors stroke-current stroke-2 fill-none">
@@ -17465,6 +17550,10 @@ const App: React.FC = () => {
           onLoadRepositoryRoot={() => fetchFromGitHub("", true)}
           isLoadingRepository={isFetchingGithub}
         />
+      )}
+
+      {isHelpCenterOpen && (
+        <HelpCenterModal onClose={() => setIsHelpCenterOpen(false)} />
       )}
 
       <AnimatedCursor
