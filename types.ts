@@ -266,6 +266,8 @@ export interface SceneObject {
   interaction: InteractionType;
   interactionData?: string;
   clickResponses?: ClickResponse[];
+  conditionMode?: "all" | "any";
+  conditions?: RuleCondition[];
   triggerOnEnter?: boolean;
   triggerOnce?: boolean;
   ignoreClicks?: boolean;

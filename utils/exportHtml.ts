@@ -669,6 +669,9 @@ export function generateExportHtml(project: Project): string {
       data-ui-secondary="${obj.uiColorSecondary || ""}"
       data-show-flag="${(obj.showIfFlag || "").replace(/"/g, "&quot;")}"
       data-hide-flag="${(obj.hideIfFlag || "").replace(/"/g, "&quot;")}"
+      data-rule-conditions="${encodeURIComponent(JSON.stringify(obj.conditions || []))}"
+      data-rule-condition-mode="${obj.conditionMode || "all"}"
+      data-rule-once="${!!obj.triggerOnce}"
       data-click-responses="${encodeURIComponent(JSON.stringify(obj.clickResponses || []))}"
       data-cursor-asset="${obj.cursorAssetId || ""}"
     `;
@@ -1330,6 +1333,22 @@ export function generateExportHtml(project: Project): string {
           
           try {
             console.log('Object clicked:', obj.id, 'class:', obj.className);
+            if (!isChainedResponse) {
+              const primaryConditions = JSON.parse(
+                decodeURIComponent(obj.getAttribute('data-rule-conditions') || '%5B%5D')
+              );
+              const primaryConditionMode = obj.getAttribute('data-rule-condition-mode') || 'all';
+              const primaryRunsOnce = obj.getAttribute('data-rule-once') === 'true';
+              if (!evaluateRuleConditions(primaryConditions, primaryConditionMode, state)) {
+                return;
+              }
+              if (primaryRunsOnce && state.triggeredRuleIds.includes(obj.id)) {
+                return;
+              }
+              if (primaryRunsOnce) {
+                state.triggeredRuleIds.push(obj.id);
+              }
+            }
             // flavorText.innerText = "Clicked " + obj.id;
             // flavorText.style.opacity = 1;
             // setTimeout(() => flavorText.style.opacity = 0, 1000);

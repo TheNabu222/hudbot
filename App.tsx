@@ -131,6 +131,7 @@ import {
 import { AnimatedCursor } from "./components/AnimatedCursor";
 import { CursorBehaviorPicker } from "./components/CursorBehaviorPicker";
 import { HelpCenterModal } from "./components/HelpCenterModal";
+import { RuleConditionEditor } from "./components/RuleConditionEditor";
 import { get, set } from "idb-keyval";
 
 export interface SaveSlotMeta {
@@ -2627,11 +2628,37 @@ const App: React.FC = () => {
 
   const handleObjectClick = (obj: SceneObject, isChainedResponse = false) => {
     if (!isPlaying) return;
-    if (!isChainedResponse && obj.triggerOnce && triggeredObjects.has(obj.id))
-      return;
-
-    if (!isChainedResponse && obj.triggerOnce) {
-      setTriggeredObjects((prev) => new Set(prev).add(obj.id));
+    if (!isChainedResponse) {
+      const primaryRuleState = createRuntimeGameState(project.currentSceneId, {
+        inventory: [...playerInventory],
+        flags: Object.fromEntries(playerFlags.map((flag) => [flag, true])),
+        skills: { ...playerSkills },
+        needs: { ...playerNeeds },
+        relationships: { ...playerFactions },
+        activeQuests: [...activeQuests],
+        completedQuests: [...completedQuests],
+        collectedObjects: [...collectedObjects],
+        activeUiMenus: [...activeUiMenus],
+        triggeredRuleIds: [
+          ...triggeredObjects,
+          ...triggeredResponseIds,
+        ],
+        runtimePositions: { ...runtimeOverrides },
+        time: gameTime,
+      });
+      if (
+        !evaluateRuleConditions(
+          obj.conditions,
+          obj.conditionMode || "all",
+          primaryRuleState,
+        )
+      ) {
+        return;
+      }
+      if (obj.triggerOnce && triggeredObjects.has(obj.id)) return;
+      if (obj.triggerOnce) {
+        setTriggeredObjects((prev) => new Set(prev).add(obj.id));
+      }
     }
 
     if (obj.audioSrc) {
@@ -2942,7 +2969,10 @@ const App: React.FC = () => {
         activeQuests,
         completedQuests,
         activeUiMenus,
-        triggeredRuleIds: [...triggeredResponseIds],
+        triggeredRuleIds: [
+          ...triggeredObjects,
+          ...triggeredResponseIds,
+        ],
         runtimePositions: runtimeOverrides,
       };
       localStorage.setItem(
@@ -2968,7 +2998,22 @@ const App: React.FC = () => {
             setCompletedQuests(parsed.completedQuests);
           if (parsed.activeUiMenus) setActiveUiMenus(parsed.activeUiMenus);
           if (parsed.triggeredRuleIds)
-            setTriggeredResponseIds(new Set(parsed.triggeredRuleIds));
+            {
+              setTriggeredObjects(
+                new Set(
+                  parsed.triggeredRuleIds.filter(
+                    (ruleId: string) => !ruleId.includes("::"),
+                  ),
+                ),
+              );
+              setTriggeredResponseIds(
+                new Set(
+                  parsed.triggeredRuleIds.filter((ruleId: string) =>
+                    ruleId.includes("::"),
+                  ),
+                ),
+              );
+            }
           if (parsed.runtimePositions)
             setRuntimeOverrides(parsed.runtimePositions);
           if (parsed.currentSceneId) {
@@ -12611,19 +12656,47 @@ const App: React.FC = () => {
                                   Trigger on Mouse Enter (Hover / Map Trigger)
                                 </span>
                               </label>
-                              <label className="flex items-center gap-2 text-sm text-neutral-400 cursor-pointer hover:text-white">
-                                <input
-                                  type="checkbox"
-                                  checked={!!selectedObject.triggerOnce}
-                                  onChange={(e) =>
-                                    updateObject(selectedObject.id, {
-                                      triggerOnce: e.target.checked,
-                                    })
+                              <div className="rounded border border-neutral-800 bg-neutral-950/50 p-2">
+                                <RuleConditionEditor
+                                  title="Only run the first response if…"
+                                  conditions={selectedObject.conditions || []}
+                                  conditionMode={
+                                    selectedObject.conditionMode || "all"
                                   }
-                                  className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                                  triggerOnce={!!selectedObject.triggerOnce}
+                                  gameFlags={project.gameFlags || []}
+                                  inventoryItems={
+                                    project.inventoryItems || []
+                                  }
+                                  quests={project.quests || []}
+                                  skillIds={
+                                    project.globalSettings.customSkills?.length
+                                      ? project.globalSettings.customSkills
+                                      : [
+                                          "naturalist",
+                                          "occultist",
+                                          "scribal",
+                                        ]
+                                  }
+                                  needIds={
+                                    project.globalSettings.customNeeds?.length
+                                      ? project.globalSettings.customNeeds
+                                      : [
+                                          "rest",
+                                          "hunger",
+                                          "connection",
+                                          "spiritual",
+                                          "novelty",
+                                        ]
+                                  }
+                                  relationshipIds={(
+                                    project.factions || []
+                                  ).map((faction) => faction.id)}
+                                  onChange={(updates) =>
+                                    updateObject(selectedObject.id, updates)
+                                  }
                                 />
-                                <span>Fire only once per Play session</span>
-                              </label>
+                              </div>
                             </div>
                           )}
 

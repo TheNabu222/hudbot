@@ -161,12 +161,23 @@ const helpSections: HelpSection[] = [
       {
         title: "Multiple click responses",
         detail:
-          "Add a response stack rather than choosing only one action. A click can play a sound, animate, show text, set a flag, give an item, and open dialogue in sequence.",
+          "Choose the first response, then use Add response to build an ordered stack. One click can show dialogue, set a remembered fact, give an item, start a quest, travel, play media, and open an interface in sequence.",
       },
       {
-        title: "Conditions and one-shot actions",
+        title: "When → If → Then rules",
         detail:
-          "Gate responses behind flags, inventory, quests, skills, or other state. One-shot triggers prevent a response from repeating after it has fired.",
+          "When the object is clicked, Cavebot checks the conditions attached to each response, then runs only the responses that qualify. The first response and every additional response can have their own rules.",
+        tip: "Open Clicks, Cursors & Reactions. Under a response, choose Add condition. Conditions can check story flags, inventory, active or completed quests, skill levels, needs, relationships, and time.",
+      },
+      {
+        title: "All conditions or any condition",
+        detail:
+          "Choose all conditions when every requirement must be true. Choose any condition when one matching requirement is enough. Responses with no conditions always run.",
+      },
+      {
+        title: "Remember after running once",
+        detail:
+          "Enable the one-time option when a response should never repeat after it succeeds. Fired responses are included in player saves, so loading the game does not accidentally repeat them.",
       },
       {
         title: "Hover and cursor feedback",
