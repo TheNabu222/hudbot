@@ -1636,6 +1636,7 @@
     <script src="src/theme-extractor-panel.js" defer></script>
     <script src="src/wysiwyg-resize-handles.js" defer></script>
     <script src="src/fun-components.js" defer></script>
+    <script src="src/world-archetypes.js" defer></script>
 </head>
 <body>
     <!-- EXIT PREVIEW BUTTON (FIXED POS) -->
@@ -1994,7 +1995,7 @@
         <div class="canvas-area" id="canvas-area">
             <div class="canvas-command-row">
                 <div class="page-tabs-bar" id="page-tabs-bar">
-                    <button class="page-tab-add" onclick="createNewPage()" title="Create New Page">+</button>
+                    <button class="page-tab-add" onclick="window.worldArchetypes ? window.worldArchetypes.open() : createNewPage()" title="Create a World Page">+</button>
                 </div>
                 <div class="viewport-controls" aria-label="Canvas viewport">
                     <button class="vp-btn" id="vp-mobile" title="Mobile (375px)">▯</button>

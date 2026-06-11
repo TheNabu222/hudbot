@@ -7,6 +7,8 @@
         window.soundEnabled = true;
         window.clipboardEl = null;
         window.draggedLayer = null;
+        const PAGES_STORAGE_KEY = 'coaiexist-studio-pages-v1';
+        let pagesSaveTimer = null;
 
         // Helper: RGB to Hex
         function rgbToHex(color) {
@@ -30,8 +32,61 @@
         };
 
         // --- MULTI-PAGE SYSTEM ---
-        window.pages = [{ id: 'p_' + Date.now(), name: 'index.html', content: '', history: [], historyIndex: -1 }];
+        const loadPersistedPages = () => {
+            try {
+                const saved = JSON.parse(localStorage.getItem(PAGES_STORAGE_KEY) || 'null');
+                if (!saved || !Array.isArray(saved.pages) || saved.pages.length === 0) return null;
+                return {
+                    pages: saved.pages.map(page => ({
+                        id: page.id || 'p_' + Date.now() + Math.random(),
+                        name: page.name || 'untitled.html',
+                        content: page.content || '',
+                        worldId: page.worldId || 'root',
+                        archetypeId: page.archetypeId || null,
+                        history: [],
+                        historyIndex: -1
+                    })),
+                    activePageIndex: Math.min(saved.activePageIndex || 0, saved.pages.length - 1)
+                };
+            } catch (error) {
+                console.warn('Could not recover Studio pages:', error);
+                return null;
+            }
+        };
+
+        const recoveredPages = loadPersistedPages();
+        window.pages = recoveredPages?.pages || [{
+            id: 'p_' + Date.now(),
+            name: 'index.html',
+            content: '',
+            worldId: 'root',
+            archetypeId: null,
+            history: [],
+            historyIndex: -1
+        }];
         window.activePageIndex = 0;
+        if (recoveredPages) window.activePageIndex = recoveredPages.activePageIndex;
+
+        window.persistStudioPages = () => {
+            clearTimeout(pagesSaveTimer);
+            pagesSaveTimer = setTimeout(() => {
+                try {
+                    const pages = window.pages.map(page => ({
+                        id: page.id,
+                        name: page.name,
+                        content: page.content,
+                        worldId: page.worldId || 'root',
+                        archetypeId: page.archetypeId || null
+                    }));
+                    localStorage.setItem(PAGES_STORAGE_KEY, JSON.stringify({
+                        pages,
+                        activePageIndex: window.activePageIndex
+                    }));
+                } catch (error) {
+                    console.warn('Could not save Studio pages:', error);
+                }
+            }, 180);
+        };
 
         function getCurrentPage() {
             return window.pages[window.activePageIndex];
@@ -43,11 +98,45 @@
                 id: newId, 
                 name: `page-${window.pages.length}.html`, 
                 content: '', 
+                worldId: 'root',
+                archetypeId: null,
                 history: [], 
                 historyIndex: -1 
             };
             window.pages.push(newPage);
             window.switchPage(window.pages.length - 1);
+            window.persistStudioPages();
+        };
+
+        window.createPageFromArchetype = (archetypeId, options = {}) => {
+            const archetype = window.WORLD_ARCHETYPES?.find(item => item.id === archetypeId);
+            if (!archetype) throw new Error(`Unknown archetype: ${archetypeId}`);
+
+            const title = (options.title || archetype.defaultTitle).trim();
+            const filenameBase = (options.filename || title || archetype.id)
+                .trim()
+                .toLowerCase()
+                .replace(/\.html$/i, '')
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-|-$/g, '') || archetype.id;
+            const filename = `${filenameBase}.html`;
+            const worldId = options.worldId || 'root';
+            const content = archetype.render({ title, worldId });
+            const newPage = {
+                id: 'p_' + Date.now(),
+                name: filename,
+                content,
+                worldId,
+                archetypeId,
+                history: [],
+                historyIndex: -1
+            };
+
+            window.pages.push(newPage);
+            window.switchPage(window.pages.length - 1);
+            window.persistStudioPages();
+            window.updateStatus(`${archetype.emoji} ${archetype.name} created in ${window.WORLD_COLLECTIONS?.find(item => item.id === worldId)?.name || 'Root'}`);
+            return newPage;
         };
 
         window.switchPage = (index) => {
@@ -64,6 +153,7 @@
             window.initCanvas(page.content || null);
             
             renderPageTabs();
+            window.persistStudioPages();
             window.playSound('pop');
         };
 
@@ -79,6 +169,8 @@
                 id: 'p_' + Date.now(),
                 name: original.name.replace('.html', '-copy.html'),
                 content: currentContent, // "Duplicate Stylesheets" implied by copying full HTML
+                worldId: original.worldId || 'root',
+                archetypeId: original.archetypeId || null,
                 history: [], // Start fresh history for clone
                 historyIndex: -1
             };
@@ -99,6 +191,7 @@
                 window.activePageIndex = Math.max(0, window.activePageIndex - 1);
             }
             window.switchPage(window.activePageIndex);
+            window.persistStudioPages();
         };
 
         window.renamePage = (index) => {
@@ -106,6 +199,7 @@
             if (newName) {
                 window.pages[index].name = newName;
                 renderPageTabs();
+                window.persistStudioPages();
             }
         };
 
@@ -115,10 +209,12 @@
             bar.innerHTML = '';
             
             window.pages.forEach((page, idx) => {
+                const collection = window.WORLD_COLLECTIONS?.find(item => item.id === (page.worldId || 'root'));
                 const tab = document.createElement('div');
                 tab.className = `page-tab ${idx === window.activePageIndex ? 'active' : ''}`;
+                tab.title = `${collection?.name || 'Root'}${page.archetypeId ? ` · ${page.archetypeId}` : ''}`;
                 tab.innerHTML = `
-                    <span onclick="switchPage(${idx})">${page.name}</span>
+                    <span onclick="switchPage(${idx})"><i class="page-world-dot" style="background:${collection?.color || '#777'}"></i>${page.name}</span>
                     <span style="font-size:10px; opacity:0.5; cursor:pointer;" onclick="deletePage(${idx})">✕</span>
                 `;
                 tab.ondblclick = () => renamePage(idx);
@@ -131,6 +227,7 @@
             
             bar.appendChild(addBtn);
         }
+        window.renderPageTabs = renderPageTabs;
 
         // --- ASSET MANAGER LOGIC ---
         window.switchAssetTab = (tabId) => {
@@ -660,6 +757,7 @@
             page.content = currentHtml; // Update current content ref
             updateUndoButtons();
             window.renderLayers();
+            window.persistStudioPages();
         };
 
         function updateUndoButtons() {
@@ -1994,7 +2092,7 @@
              // 2. Init Canvas with default
              try {
                 // Initialize the first page (already in array) instead of creating a new one
-                window.switchPage(0); 
+                window.switchPage(window.activePageIndex);
                 renderPageTabs();
              } catch(e) { console.error('Init Canvas Failed:', e); }
 
@@ -2181,7 +2279,8 @@
                  'load-source-page-btn',
                  'templates-btn',
                  'fun-comp-toggle',
-                 'world-graph-toggle'
+                 'world-graph-toggle',
+                 'world-archetypes-btn'
              ]);
 
              const organizeSecondaryCommands = () => {
