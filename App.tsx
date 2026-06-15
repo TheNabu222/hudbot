@@ -132,6 +132,7 @@ import { AnimatedCursor } from "./components/AnimatedCursor";
 import { CursorBehaviorPicker } from "./components/CursorBehaviorPicker";
 import { HelpCenterModal } from "./components/HelpCenterModal";
 import { RuleConditionEditor } from "./components/RuleConditionEditor";
+import { StudioFeatureHeader } from "./components/StudioFeatureHeader";
 import { get, set } from "idb-keyval";
 
 export interface SaveSlotMeta {
@@ -13636,9 +13637,9 @@ const App: React.FC = () => {
         )}
 
         {editorMode === "dialogue" && (
-          <div className="flex-1 flex gap-6 p-6 bg-neutral-950 overflow-hidden relative">
+          <div className="studio-page studio-feature-layout flex-1 flex gap-6 p-6 bg-neutral-950 overflow-hidden relative">
             <div
-              className="flex flex-col gap-4 border-r border-neutral-800 pr-6 relative flex-shrink-0"
+              className="studio-rail flex flex-col gap-4 border-r border-neutral-800 pr-6 relative flex-shrink-0"
               style={{ width: leftSidebarWidth }}
             >
               <div
@@ -14611,10 +14612,11 @@ const App: React.FC = () => {
         )}
 
         {editorMode === "scenes" && (
-          <div className="flex-1 flex flex-col p-6 bg-neutral-950 overflow-hidden">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-white">Rooms & Areas Manager</h2>
-              <button
+          <div className="studio-page flex-1 flex flex-col bg-neutral-950 overflow-hidden">
+            <StudioFeatureHeader
+              title="Rooms & Areas"
+              description="Create locations, set their size and atmosphere, then open one in Scene Studio."
+              actions={<button
                 onClick={() => {
                   const newScene: Scene = {
                     id: uuidv4(),
@@ -14630,17 +14632,17 @@ const App: React.FC = () => {
                     currentSceneId: newScene.id,
                   });
                 }}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
+                className="studio-primary-button flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
               >
                 <Plus size={16} /> Create Scene
-              </button>
-            </div>
+              </button>}
+            />
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto custom-scrollbar pb-20">
+            <div className="studio-page-content studio-card-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto custom-scrollbar p-6 pb-20">
               {project.scenes.map((scene) => (
                 <div
                   key={scene.id}
-                  className={`bg-neutral-900 border rounded-lg p-5 flex flex-col gap-4 transition-colors ${project.currentSceneId === scene.id ? "border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]" : "border-neutral-800 hover:border-neutral-700"}`}
+                  className={`studio-card bg-neutral-900 border rounded-lg p-5 flex flex-col gap-4 transition-colors ${project.currentSceneId === scene.id ? "is-selected border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]" : "border-neutral-800 hover:border-neutral-700"}`}
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex items-center gap-2">
@@ -14846,10 +14848,11 @@ const App: React.FC = () => {
         )}
 
         {editorMode === "ui_maker" && (
-          <div className="flex-1 flex flex-col p-6 bg-neutral-950 overflow-hidden">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-white">Interfaces & Overlays</h2>
-              <button
+          <div className="studio-page flex-1 flex flex-col bg-neutral-950 overflow-hidden">
+            <StudioFeatureHeader
+              title="Menus & HUD"
+              description="Build inventory screens, overlays, journals, meters, and player-facing controls."
+              actions={<button
                 onClick={() => {
                   const newMenu: Scene = {
                     id: uuidv4(),
@@ -14866,17 +14869,17 @@ const App: React.FC = () => {
                     currentUiMenuId: newMenu.id,
                   });
                 }}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
+                className="studio-primary-button flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
               >
                 <Plus size={16} /> Create UI Menu
-              </button>
-            </div>
+              </button>}
+            />
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto custom-scrollbar pb-20">
+            <div className="studio-page-content studio-card-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto custom-scrollbar p-6 pb-20">
               {(project.uiMenus || []).map((scene) => (
                 <div
                   key={scene.id}
-                  className={`bg-neutral-900 border rounded-lg p-5 flex flex-col gap-4 transition-colors ${project.currentUiMenuId === scene.id ? "border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]" : "border-neutral-800 hover:border-neutral-700"}`}
+                  className={`studio-card bg-neutral-900 border rounded-lg p-5 flex flex-col gap-4 transition-colors ${project.currentUiMenuId === scene.id ? "is-selected border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]" : "border-neutral-800 hover:border-neutral-700"}`}
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex items-center gap-2">
@@ -15103,48 +15106,49 @@ const App: React.FC = () => {
         )}
 
         {editorMode === "rpg_systems" && (
-          <div className="flex-1 flex flex-col p-6 bg-neutral-950 overflow-hidden relative">
-            <div className="flex justify-between items-center mb-6">
-              <div className="flex items-center gap-4">
-                <h2 className="text-xl font-bold text-white">Game Rules</h2>
-                <div className="flex bg-neutral-900 rounded-lg p-1 border border-neutral-800">
+          <div className="studio-page flex-1 flex flex-col bg-neutral-950 overflow-hidden relative">
+            <StudioFeatureHeader
+              title="World Rules"
+              description="Shape quests, skills, factions, lore, companions, and the invisible logic holding the world together."
+              tabs={
+                <div className="studio-tab-list">
                   <button
                     onClick={() => setRpgTab("quests")}
-                    className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${rpgTab === "quests" ? "bg-indigo-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+                    className={`studio-tab ${rpgTab === "quests" ? "is-active" : ""}`}
                   >
                     Quests
                   </button>
                   <button
                     onClick={() => setRpgTab("stats")}
-                    className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${rpgTab === "stats" ? "bg-indigo-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+                    className={`studio-tab ${rpgTab === "stats" ? "is-active" : ""}`}
                   >
                     Skills & Needs
                   </button>
                   <button
                     onClick={() => setRpgTab("factions")}
-                    className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${rpgTab === "factions" ? "bg-indigo-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+                    className={`studio-tab ${rpgTab === "factions" ? "is-active" : ""}`}
                   >
                     Factions
                   </button>
                   <button
                     onClick={() => setRpgTab("lore")}
-                    className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${rpgTab === "lore" ? "bg-indigo-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+                    className={`studio-tab ${rpgTab === "lore" ? "is-active" : ""}`}
                   >
                     Almanac
                   </button>
                   <button
                     onClick={() => setRpgTab("companions")}
-                    className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${rpgTab === "companions" ? "bg-indigo-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+                    className={`studio-tab ${rpgTab === "companions" ? "is-active" : ""}`}
                   >
                     Companions
                   </button>
                 </div>
-              </div>
-            </div>
+              }
+            />
 
-            <div className="flex-1 flex gap-6 overflow-hidden">
+            <div className="studio-page-content flex-1 flex gap-6 overflow-hidden p-6">
               <div
-                className="flex flex-col gap-4 border-r border-neutral-800 pr-6 overflow-y-auto custom-scrollbar relative flex-shrink-0"
+                className="studio-rail flex flex-col gap-4 border-r border-neutral-800 pr-6 overflow-y-auto custom-scrollbar relative flex-shrink-0"
                 style={{ width: leftSidebarWidth }}
               >
                 <div
@@ -16213,27 +16217,27 @@ const App: React.FC = () => {
         )}
 
         {editorMode === "items" && (
-          <div className="flex-1 flex flex-col p-6 bg-neutral-950 overflow-hidden">
-            <div className="flex justify-between items-center mb-6">
-              <div className="flex items-center gap-4">
-                <h2 className="text-xl font-bold text-white">Item Database</h2>
-                <div className="flex bg-neutral-900 rounded-lg p-1 border border-neutral-800">
+          <div className="studio-page flex-1 flex flex-col bg-neutral-950 overflow-hidden">
+            <StudioFeatureHeader
+              title="Items & Crafting"
+              description="Define useful objects, treasures, gifts, ingredients, and the recipes that combine them."
+              tabs={
+                <div className="studio-tab-list">
                   <button
                     onClick={() => setItemsTab("items")}
-                    className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${itemsTab === "items" ? "bg-indigo-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+                    className={`studio-tab ${itemsTab === "items" ? "is-active" : ""}`}
                   >
                     Items
                   </button>
                   <button
                     onClick={() => setItemsTab("crafting")}
-                    className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${itemsTab === "crafting" ? "bg-indigo-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+                    className={`studio-tab ${itemsTab === "crafting" ? "is-active" : ""}`}
                   >
                     Crafting Recipes
                   </button>
                 </div>
-              </div>
-
-              {itemsTab === "items" ? (
+              }
+              actions={itemsTab === "items" ? (
                 <div className="flex gap-2">
                   <button
                     onClick={() => {
@@ -16248,7 +16252,7 @@ const App: React.FC = () => {
                         inventoryItems: [...project.inventoryItems, newItem],
                       });
                     }}
-                    className="flex flex-1 items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
+                    className="studio-primary-button flex flex-1 items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
                   >
                     <Plus size={16} /> Create Item
                   </button>
@@ -16302,19 +16306,19 @@ const App: React.FC = () => {
                       ],
                     });
                   }}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30 font-bold"
+                  className="studio-primary-button flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30 font-bold"
                 >
                   <Plus size={16} /> Create Recipe
                 </button>
               )}
-            </div>
+            />
 
             {itemsTab === "items" ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 overflow-y-auto custom-scrollbar pb-20">
+              <div className="studio-page-content studio-card-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 overflow-y-auto custom-scrollbar p-6 pb-20">
                 {project.inventoryItems.map((item) => (
                   <div
                     key={item.id}
-                    className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 flex flex-col gap-3"
+                    className="studio-card bg-neutral-900 border border-neutral-800 rounded-lg p-4 flex flex-col gap-3"
                   >
                     <div className="flex justify-between items-start">
                       <div className="w-16 h-16 bg-neutral-800 rounded border border-neutral-700 flex items-center justify-center overflow-hidden shrink-0">

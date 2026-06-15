@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react";
 import { Plus, Trash2, Edit2, Play, Music, Video, Image as ImageIcon, Search, Star, CheckSquare } from "lucide-react";
 import { Project, Asset } from "../types";
 import { v4 as uuidv4 } from "uuid";
+import { StudioFeatureHeader } from "./StudioFeatureHeader";
 
 interface AssetLibraryManagerProps {
   project: Project;
@@ -82,35 +83,31 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
   });
 
   return (
-    <div className="flex-1 flex flex-col bg-neutral-900 border-l border-neutral-800 h-full overflow-hidden">
-      <div className="p-4 border-b border-neutral-800 bg-neutral-950 flex gap-4 items-center justify-between">
-        <h2 className="text-xl font-bold flex flex-col gap-1 text-white">
-          <span>File Library</span>
-          <span className="text-[10px] text-neutral-400 font-normal">
-            Upload, tag, and edit files here. Return to <strong>Compose</strong> and use <strong>Add Something</strong> to place them in your game.
-          </span>
-        </h2>
-        <div className="flex gap-2">
+    <div className="studio-page asset-library-page flex-1 flex flex-col bg-neutral-900 border-l border-neutral-800 h-full overflow-hidden">
+      <StudioFeatureHeader
+        title="File Library"
+        description="Upload, tag, favorite, and prepare reusable images, GIFs, sounds, and video."
+        actions={
           <button
             onClick={() => uploadInputRef.current?.click()}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold flex items-center gap-2"
+            className="studio-primary-button px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold flex items-center gap-2"
           >
             <Plus size={16} /> Add File
           </button>
-          <input
-            type="file"
-            multiple
-            accept="image/*,audio/*,video/*"
-            ref={uploadInputRef}
-            onChange={handleFileUpload}
-            className="hidden"
-          />
-        </div>
-      </div>
+        }
+      />
+      <input
+        type="file"
+        multiple
+        accept="image/*,audio/*,video/*"
+        ref={uploadInputRef}
+        onChange={handleFileUpload}
+        className="hidden"
+      />
 
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar for Categories */}
-        <div className="w-64 bg-neutral-950 border-r border-neutral-800 flex flex-col">
+        <div className="studio-rail w-64 bg-neutral-950 border-r border-neutral-800 flex flex-col">
           <div className="p-4 border-b border-neutral-800">
             <div className="relative">
               <Search className="absolute left-2 top-2 text-neutral-500" size={16} />
@@ -177,7 +174,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
         </div>
 
         {/* Main Asset Grid */}
-        <div className="flex-1 overflow-y-auto p-8 bg-neutral-900/50 relative">
+        <div className="studio-page-content flex-1 overflow-y-auto p-8 bg-neutral-900/50 relative">
           {selectedAssetIds.size > 0 && (
             <div className="sticky top-0 z-30 mb-6 bg-indigo-900/80 backdrop-blur-md border border-indigo-500/50 rounded-lg p-3 flex items-center justify-between shadow-xl">
                <div className="flex items-center gap-4">
@@ -270,7 +267,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
             {filteredAssets.map((asset) => (
               <div
                 key={asset.id}
-                className={`group relative bg-neutral-900 border rounded-xl overflow-hidden flex flex-col shadow-lg transition-transform hover:-translate-y-1 hover:shadow-xl ${
+                className={`studio-card group relative bg-neutral-900 border rounded-xl overflow-hidden flex flex-col shadow-lg transition-transform hover:-translate-y-1 hover:shadow-xl ${
                   selectedAssetIds.has(asset.id) ? "border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)]" : "border-neutral-800/80 hover:border-indigo-500/50"
                 }`}
               >
@@ -429,7 +426,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
             ))}
           </div>
           {filteredAssets.length === 0 && (
-             <div className="flex flex-col items-center justify-center h-full text-neutral-500">
+             <div className="studio-empty-state flex flex-col items-center justify-center h-full text-neutral-500">
                <div className="w-24 h-24 border-2 border-dashed border-neutral-700 rounded-full flex items-center justify-center mb-6 bg-neutral-950/50">
                  <ImageIcon size={32} className="opacity-40" />
                </div>

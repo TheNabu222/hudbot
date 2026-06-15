@@ -109,8 +109,8 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden bg-[#080711] text-xs text-neutral-200">
-      <aside className="flex w-56 shrink-0 flex-col border-r border-cyan-400/15 bg-black/40">
+    <div className="studio-page map-maker-page flex min-h-0 flex-1 overflow-hidden bg-[#080711] text-xs text-neutral-200">
+      <aside className="studio-rail flex w-56 shrink-0 flex-col border-r border-cyan-400/15 bg-black/40">
         <div className="border-b border-cyan-400/15 p-3">
           <div className="mb-2 flex items-center justify-between">
             <div>
@@ -207,7 +207,7 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
 
       {activeMap ? (
         <section className="flex min-w-0 flex-1 flex-col">
-          <header className="flex min-h-16 items-center gap-4 border-b border-cyan-400/15 bg-[#0d0b1a]/95 px-4 py-2">
+          <header className="studio-feature-header studio-feature-header--compact flex min-h-16 items-center gap-4 border-b border-cyan-400/15 bg-[#0d0b1a]/95 px-4 py-2">
             <div className="min-w-0 flex-1">
               <label className="mb-1 block text-[9px] font-bold uppercase tracking-[0.16em] text-neutral-500">
                 Map name
@@ -257,7 +257,7 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
           </header>
 
           <div className="flex min-h-0 flex-1">
-            <main className="relative min-w-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_top,#17152a_0%,#0a0912_60%)] p-5">
+            <main className="studio-page-content relative min-w-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_top,#17152a_0%,#0a0912_60%)] p-5">
               <div className="mx-auto flex min-h-full max-w-[1180px] items-center justify-center">
                 <div className="w-full">
                   <div className="mb-2 flex items-end justify-between px-1">
@@ -274,7 +274,7 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
                     </span>
                   </div>
 
-                  <div className="overflow-hidden rounded-[7px_18px_7px_18px] border border-[#00ffcc]/25 bg-black/30 p-2 shadow-[0_18px_70px_rgba(0,0,0,0.42)]">
+                  <div className="studio-panel overflow-hidden rounded-[7px_18px_7px_18px] border border-[#00ffcc]/25 bg-black/30 p-2 shadow-[0_18px_70px_rgba(0,0,0,0.42)]">
                     <div
                       className={`relative aspect-[3/2] min-h-[420px] w-full cursor-crosshair overflow-hidden rounded border border-white/10 ${
                         activeMap.backgroundSrc
@@ -307,7 +307,7 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
                       {!activeMap.backgroundSrc &&
                         activeMap.nodes.length === 0 && (
                           <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-8">
-                            <div className="max-w-sm rounded-[6px_18px_6px_18px] border border-pink-500/30 bg-[#080711]/90 p-5 text-center shadow-2xl backdrop-blur">
+                            <div className="studio-empty-state max-w-sm rounded-[6px_18px_6px_18px] border border-pink-500/30 bg-[#080711]/90 p-5 text-center shadow-2xl backdrop-blur">
                               <Sparkles
                                 size={24}
                                 className="mx-auto mb-2 text-pink-400"
@@ -378,7 +378,7 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
               </div>
             </main>
 
-            <aside className="w-72 shrink-0 overflow-y-auto border-l border-cyan-400/15 bg-black/45">
+            <aside className="studio-inspector w-72 shrink-0 overflow-y-auto border-l border-cyan-400/15 bg-black/45">
               {editingNode ? (
                 <div className="space-y-4 p-4">
                   <div className="flex items-start justify-between gap-3">
@@ -545,8 +545,8 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
           </div>
         </section>
       ) : (
-        <main className="flex flex-1 items-center justify-center bg-[radial-gradient(circle_at_center,#19152b_0%,#080711_65%)] p-8">
-          <div className="max-w-md rounded-[8px_24px_8px_24px] border border-pink-500/25 bg-black/45 p-8 text-center shadow-2xl">
+        <main className="studio-page-content flex flex-1 items-center justify-center bg-[radial-gradient(circle_at_center,#19152b_0%,#080711_65%)] p-8">
+          <div className="studio-empty-state max-w-md rounded-[8px_24px_8px_24px] border border-pink-500/25 bg-black/45 p-8 text-center shadow-2xl">
             <Route size={38} className="mx-auto mb-3 text-pink-400" />
             <h2 className="font-comic text-xl font-bold text-white">
               Make the world navigable

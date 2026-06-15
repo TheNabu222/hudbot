@@ -71,6 +71,12 @@ const helpSections: HelpSection[] = [
         detail:
           "Use Backup / Restore for project files and local checkpoint slots. Publish exports the current game as a playable standalone HTML file.",
       },
+      {
+        title: "The same layout follows you",
+        detail:
+          "Feature pages now share one pattern: the heading says what the tool is for, tabs switch related jobs, the left rail holds collections, the center is the work area, and selected things open their editing controls.",
+        tip: "Sunny and Midnight theme the whole studio. They do not change the colors inside your exported game.",
+      },
     ],
   },
   {
