@@ -7,39 +7,38 @@ import {
   MousePointerClick,
   Plus,
   Route,
-  Search,
   Sparkles,
   Trash2,
   Unlock,
-  X,
 } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { FastTravelMap, MapNode, Project } from "../types";
+import { AssetInspectorSlot } from "./AssetInspectorSlot";
 
 interface MapMakerProps {
   project: Project;
   updateProject: (updates: Partial<Project>) => void;
+  openAssetPicker: (
+    filterType: "image" | "audio" | "video",
+    onSelect: (assetId: string) => void,
+  ) => void;
 }
 
-export function MapMaker({ project, updateProject }: MapMakerProps) {
+export function MapMaker({
+  project,
+  updateProject,
+  openAssetPicker,
+}: MapMakerProps) {
   const [activeMapId, setActiveMapId] = useState<string | null>(
     project.maps?.[0]?.id || null,
   );
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
-  const [assetPickerTarget, setAssetPickerTarget] = useState<
-    "background" | "icon" | null
-  >(null);
-  const [assetSearch, setAssetSearch] = useState("");
-
   const maps = project.maps || [];
   const activeMap = maps.find((map) => map.id === activeMapId);
   const editingNode = activeMap?.nodes.find(
     (node) => node.id === editingNodeId,
   );
   const imageAssets = project.assets.filter((asset) => asset.type === "image");
-  const visibleImageAssets = imageAssets.filter((asset) =>
-    asset.name.toLowerCase().includes(assetSearch.toLowerCase()),
-  );
   const backgroundAsset = imageAssets.find(
     (asset) => asset.src === activeMap?.backgroundSrc,
   );
@@ -230,24 +229,24 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
               />
             </div>
 
-            <div className="min-w-64 max-w-md flex-1">
-              <label className="mb-1 flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-neutral-500">
-                <ImageIcon size={10} />
-                Map artwork
-              </label>
-              <button
-                type="button"
-                onClick={() => {
-                  setAssetSearch("");
-                  setAssetPickerTarget("background");
-                }}
-                className="flex w-full items-center justify-between gap-2 rounded border border-neutral-700 bg-black/40 px-2.5 py-1.5 text-left text-[11px] text-neutral-200 outline-none hover:border-pink-500/70"
-              >
-                <span className="truncate">
-                  {backgroundAsset?.name || "No artwork — use planning grid"}
-                </span>
-                <ImageIcon size={12} className="shrink-0 text-pink-400" />
-              </button>
+            <div className="min-w-72 max-w-md flex-1">
+              <AssetInspectorSlot
+                label="Map artwork"
+                asset={backgroundAsset}
+                emptyLabel="Planning grid"
+                chooseLabel="Choose artwork"
+                previewShape="wide"
+                compact
+                onChoose={() =>
+                  openAssetPicker("image", (assetId) => {
+                    const asset = imageAssets.find(
+                      (candidate) => candidate.id === assetId,
+                    );
+                    if (asset) updateActiveMap({ backgroundSrc: asset.src });
+                  })
+                }
+                onClear={() => updateActiveMap({ backgroundSrc: null })}
+              />
             </div>
 
             <div className="hidden items-center gap-3 border-l border-neutral-800 pl-4 text-[10px] text-neutral-500 lg:flex">
@@ -449,24 +448,27 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
                     </span>
                   </label>
 
-                  <label className="block">
-                    <span className="mb-1 block text-[10px] font-bold text-neutral-400">
-                      Location icon
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAssetSearch("");
-                        setAssetPickerTarget("icon");
-                      }}
-                      className="flex w-full items-center justify-between gap-2 rounded border border-neutral-700 bg-neutral-950 px-2.5 py-2 text-left outline-none hover:border-pink-500/70"
-                    >
-                      <span className="truncate">
-                        {iconAsset?.name || "Default map pin"}
-                      </span>
-                      <MapPin size={13} className="shrink-0 text-pink-400" />
-                    </button>
-                  </label>
+                  <AssetInspectorSlot
+                    label="Location icon"
+                    description="The picture shown on this map pin."
+                    asset={iconAsset}
+                    emptyLabel="Default map pin"
+                    chooseLabel="Choose icon"
+                    compact
+                    onChoose={() =>
+                      openAssetPicker("image", (assetId) => {
+                        const asset = imageAssets.find(
+                          (candidate) => candidate.id === assetId,
+                        );
+                        if (asset) {
+                          updateNode(editingNode.id, { iconSrc: asset.src });
+                        }
+                      })
+                    }
+                    onClear={() =>
+                      updateNode(editingNode.id, { iconSrc: null })
+                    }
+                  />
 
                   <div className="rounded border border-neutral-800 bg-neutral-950/70 p-3">
                     <label className="flex cursor-pointer items-center gap-2">
@@ -575,112 +577,6 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
         </main>
       )}
 
-      {assetPickerTarget && (
-        <div
-          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/75 p-6 backdrop-blur-sm"
-          onMouseDown={() => setAssetPickerTarget(null)}
-        >
-          <div
-            className="map-asset-picker-dialog flex max-h-[78vh] w-full max-w-4xl flex-col overflow-hidden rounded-[8px_24px_8px_24px] border border-[#00ffcc]/45 bg-[#090812] shadow-[0_24px_100px_rgba(0,0,0,0.7)]"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center gap-3 border-b border-[#00ffcc]/15 p-4">
-              <div className="min-w-0 flex-1">
-                <p className="font-comic text-base font-bold text-white">
-                  {assetPickerTarget === "background"
-                    ? "Choose Map Artwork"
-                    : "Choose Location Icon"}
-                </p>
-                <p className="text-[9px] uppercase tracking-[0.18em] text-pink-300/70">
-                  search the image vault
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setAssetPickerTarget(null)}
-                className="rounded border border-neutral-800 p-2 text-neutral-500 hover:text-white"
-                aria-label="Close asset picker"
-              >
-                <X size={15} />
-              </button>
-            </div>
-
-            <div className="border-b border-neutral-800 p-3">
-              <label className="flex items-center gap-2 rounded border border-neutral-700 bg-black/50 px-3 py-2 focus-within:border-[#00ffcc]/60">
-                <Search size={14} className="text-[#00ffcc]" />
-                <input
-                  autoFocus
-                  type="search"
-                  value={assetSearch}
-                  onChange={(event) => setAssetSearch(event.target.value)}
-                  placeholder="Search image assets…"
-                  className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-neutral-600"
-                />
-              </label>
-            </div>
-
-            <div className="grid flex-1 grid-cols-2 gap-3 overflow-y-auto p-3 sm:grid-cols-3 md:grid-cols-4">
-              <button
-                type="button"
-                onClick={() => {
-                  if (assetPickerTarget === "background") {
-                    updateActiveMap({ backgroundSrc: null });
-                  } else if (editingNode) {
-                    updateNode(editingNode.id, { iconSrc: null });
-                  }
-                  setAssetPickerTarget(null);
-                }}
-                className="flex aspect-square flex-col items-center justify-center rounded border border-dashed border-neutral-700 bg-neutral-950 p-2 text-center text-[10px] font-bold text-neutral-500 hover:border-pink-500/50 hover:text-white"
-              >
-                {assetPickerTarget === "background" ? (
-                  <ImageIcon size={22} className="mb-2" />
-                ) : (
-                  <MapPin size={22} className="mb-2" />
-                )}
-                {assetPickerTarget === "background"
-                  ? "Planning grid"
-                  : "Default pin"}
-              </button>
-
-              {visibleImageAssets.map((asset) => (
-                <button
-                  type="button"
-                  key={asset.id}
-                  onClick={() => {
-                    if (assetPickerTarget === "background") {
-                      updateActiveMap({ backgroundSrc: asset.src });
-                    } else if (editingNode) {
-                      updateNode(editingNode.id, { iconSrc: asset.src });
-                    }
-                    setAssetPickerTarget(null);
-                  }}
-                  className="group overflow-hidden rounded border border-neutral-700 bg-neutral-950 text-left hover:border-[#00ffcc]/80"
-                  title={asset.name}
-                >
-                  <div
-                    className={`${assetPickerTarget === "background" ? "aspect-video" : "aspect-square"} asset-thumbnail p-1`}
-                  >
-                    <img
-                      src={asset.src}
-                      alt=""
-                      className="h-full w-full object-contain transition group-hover:scale-105"
-                    />
-                  </div>
-                  <p className="truncate border-t border-neutral-800 px-2 py-1.5 text-[9px] text-neutral-400 group-hover:text-white">
-                    {asset.name}
-                  </p>
-                </button>
-              ))}
-
-              {visibleImageAssets.length === 0 && (
-                <div className="col-span-full py-10 text-center text-neutral-600">
-                  No matching images.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

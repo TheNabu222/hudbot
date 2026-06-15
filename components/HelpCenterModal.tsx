@@ -93,6 +93,16 @@ const helpSections: HelpSection[] = [
           "The asset popup supports All, Recent, Favorites, In Canvas, search, and folder browsing. Repository browsing is limited to entropic-ai/assets/_cavebot-assets, and its folders load only when opened to keep the collection responsive.",
       },
       {
+        title: "One asset slot everywhere",
+        detail:
+          "Map artwork, location icons, item icons, cursors, HUD overlays, sounds, and videos now use the same inspector: preview, current name and type, Change, and Remove. Change always opens the same searchable asset popup.",
+      },
+      {
+        title: "One coordinate space",
+        detail:
+          "Scenes, UI menus, HUD previews, and Play mode share the room's coordinate plane. Build the room once, then place interface pieces over it without maintaining a second canvas size. Resize Room only changes the actual scene.",
+      },
+      {
         title: "Edit metadata",
         detail:
           "Use the information button on an asset to rename it, describe it, add comma-separated tags, favorite it, or set audio/video trim and volume metadata.",

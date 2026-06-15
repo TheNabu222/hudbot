@@ -133,6 +133,7 @@ import { CursorBehaviorPicker } from "./components/CursorBehaviorPicker";
 import { HelpCenterModal } from "./components/HelpCenterModal";
 import { RuleConditionEditor } from "./components/RuleConditionEditor";
 import { StudioFeatureHeader } from "./components/StudioFeatureHeader";
+import { AssetInspectorSlot } from "./components/AssetInspectorSlot";
 import { get, set } from "idb-keyval";
 
 export interface SaveSlotMeta {
@@ -3244,10 +3245,16 @@ const App: React.FC = () => {
     deviceFrameAsset &&
     (isPlaying || editorMode === "stage" || editorMode === "ui_stage")
   );
+  const coordinateScene =
+    editorMode === "ui_stage" && !isPlaying
+      ? project.scenes.find((scene) => scene.id === project.currentSceneId) ||
+        project.scenes[0] ||
+        currentScene
+      : currentScene;
   const logicalStageWidth =
-    currentScene.width || project.globalSettings.stageWidth || 800;
+    coordinateScene.width || project.globalSettings.stageWidth || 800;
   const logicalStageHeight =
-    currentScene.height || project.globalSettings.stageHeight || 600;
+    coordinateScene.height || project.globalSettings.stageHeight || 600;
 
   return (
     <div className={`studio-app ${studioTheme === "sunny" ? "sunny-theme" : ""} flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans overflow-hidden`}>
@@ -4946,19 +4953,21 @@ const App: React.FC = () => {
                       <span>{hideEditorHud ? "HUD: Hidden" : "HUD: Visible"}</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setIsCanvasResizeMode((active) => !active)}
-                      className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-bold transition-all ${
-                        isCanvasResizeMode
-                          ? "border-amber-400 bg-amber-500/20 text-amber-200"
-                          : "border-neutral-700 bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white"
-                      }`}
-                      title="Explicitly enter room-boundary resizing so it cannot be triggered accidentally"
-                    >
-                      <Maximize2 size={14} />
-                      {isCanvasResizeMode ? "Done Resizing Room" : "Resize Room"}
-                    </button>
+                    {editorMode === "stage" && (
+                      <button
+                        type="button"
+                        onClick={() => setIsCanvasResizeMode((active) => !active)}
+                        className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-bold transition-all ${
+                          isCanvasResizeMode
+                            ? "border-amber-400 bg-amber-500/20 text-amber-200"
+                            : "border-neutral-700 bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white"
+                        }`}
+                        title="Explicitly enter room-boundary resizing so it cannot be triggered accidentally"
+                      >
+                        <Maximize2 size={14} />
+                        {isCanvasResizeMode ? "Done Resizing Room" : "Resize Room"}
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -4994,17 +5003,14 @@ const App: React.FC = () => {
                       <div
                         className="absolute pointer-events-none select-none opacity-80 z-0 ring-1 ring-neutral-700/50"
                         style={{
-                          left: "50%",
-                          top: "50%",
-                          transform: "translate(-50%, -50%)",
-                          width:
-                            bgScene.width ||
-                            project.globalSettings.stageWidth ||
-                            800,
-                          height:
-                            bgScene.height ||
-                            project.globalSettings.stageHeight ||
-                            600,
+                          left: showDeviceFrame ? deviceFrame!.screen.x : 0,
+                          top: showDeviceFrame ? deviceFrame!.screen.y : 0,
+                          width: logicalStageWidth,
+                          height: logicalStageHeight,
+                          transform: showDeviceFrame
+                            ? `scale(${deviceFrame!.screen.width / logicalStageWidth}, ${deviceFrame!.screen.height / logicalStageHeight})`
+                            : undefined,
+                          transformOrigin: "top left",
                           backgroundColor: bgScene.backgroundColor,
                           overflow: "hidden",
                         }}
@@ -5988,17 +5994,9 @@ const App: React.FC = () => {
                         key={`ghost-fg-ui-${uiMenu.id}`}
                         className="absolute pointer-events-none select-none z-[500]"
                         style={{
-                          left: "50%",
-                          top: "50%",
-                          transform: "translate(-50%, -50%)",
-                          width:
-                            uiMenu.width ||
-                            project.globalSettings.stageWidth ||
-                            800,
-                          height:
-                            uiMenu.height ||
-                            project.globalSettings.stageHeight ||
-                            600,
+                          inset: 0,
+                          width: logicalStageWidth,
+                          height: logicalStageHeight,
                           overflow: "visible",
                         }}
                       >
@@ -6052,17 +6050,9 @@ const App: React.FC = () => {
                         style={{
                           zIndex: 1000 + menuIndex,
                           backgroundColor: uiMenu.backgroundColor,
-                          width:
-                            uiMenu.width ||
-                            project.globalSettings.stageWidth ||
-                            800,
-                          height:
-                            uiMenu.height ||
-                            project.globalSettings.stageHeight ||
-                            600,
-                          left: "50%",
-                          top: "50%",
-                          transform: "translate(-50%, -50%)",
+                          inset: 0,
+                          width: logicalStageWidth,
+                          height: logicalStageHeight,
                           overflow: "visible",
                         }}
                       >
@@ -8903,7 +8893,7 @@ const App: React.FC = () => {
                 )}
 
                 {/* Drag-to-resize handles for canvas (stage) boundary */}
-                {!isPlaying && isCanvasResizeMode && (
+                {!isPlaying && editorMode === "stage" && isCanvasResizeMode && (
                   <>
                     <div className="pointer-events-none absolute left-1/2 top-3 z-[7000] -translate-x-1/2 rounded-full border border-amber-400/60 bg-neutral-950/95 px-3 py-1.5 font-comic text-xs font-bold text-amber-200 shadow-xl">
                       ROOM BOUNDARY · {logicalStageWidth} × {logicalStageHeight}
@@ -9535,95 +9525,86 @@ const App: React.FC = () => {
                             />
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-neutral-800">
-                          <div className="col-span-2">
-                             <LabelWithHelp 
-                               label={(editorMode === "ui_stage") ? "This Canvas Override Size" : "This Room Override Size"}
-                               helpText="Override the size of this specific canvas only. Leave as 0 to use Global size."
-                             />
+                        {editorMode === "ui_stage" ? (
+                          <div className="mt-4 rounded border border-cyan-500/25 bg-cyan-500/5 p-3">
+                            <div className="font-comic text-xs font-bold text-cyan-300">
+                              UI follows the current room
+                            </div>
+                            <p className="mt-1 text-[10px] leading-relaxed text-neutral-500">
+                              Working area: {logicalStageWidth} × {logicalStageHeight}. Switch scenes to preview this UI over another room.
+                            </p>
                           </div>
-                          <div>
-                            <input
-                              type="number"
-                              placeholder="Width"
-                              value={currentScene?.width || ""}
-                              onChange={(e) => {
-                                const val = Number(e.target.value) || 0;
-                                updateScene({ width: val });
-                              }}
-                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1 focus:border-indigo-500"
-                            />
+                        ) : (
+                          <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-neutral-800">
+                            <div className="col-span-2">
+                              <LabelWithHelp
+                                label="This Room Override Size"
+                                helpText="Override the size of this specific room only. Leave as 0 to use the default game size."
+                              />
+                            </div>
+                            <div>
+                              <input
+                                type="number"
+                                placeholder="Width"
+                                value={currentScene?.width || ""}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value) || 0;
+                                  updateScene({ width: val });
+                                }}
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1 focus:border-indigo-500"
+                              />
+                            </div>
+                            <div>
+                              <input
+                                type="number"
+                                placeholder="Height"
+                                value={currentScene?.height || ""}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value) || 0;
+                                  updateScene({ height: val });
+                                }}
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1 focus:border-indigo-500"
+                              />
+                            </div>
                           </div>
-                          <div>
-                            <input
-                              type="number"
-                              placeholder="Height"
-                              value={currentScene?.height || ""}
-                              onChange={(e) => {
-                                const val = Number(e.target.value) || 0;
-                                updateScene({ height: val });
-                              }}
-                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1 focus:border-indigo-500"
-                            />
-                          </div>
-                        </div>
+                        )}
                         <div className="mt-4 pt-4 border-t border-neutral-800">
-                          <LabelWithHelp
-                            label="Custom Global Cursor"
-                            helpText="Replace the default mouse pointer for your entire game."
-                          />
-                          <div className="flex items-center gap-2 mt-1">
-                            {project.globalSettings.customCursorAssetId ? (
-                              <div className="relative w-10 h-10 bg-neutral-800 border border-neutral-700 rounded">
-                                <img
-                                  src={
-                                    project.assets.find(
-                                      (a) =>
-                                        a.id ===
-                                        project.globalSettings
-                                          .customCursorAssetId,
-                                    )?.src || undefined
-                                  }
-                                  className="w-full h-full object-contain p-1"
-                                />
-                                <button
-                                  className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"
-                                  onClick={() =>
-                                    setProject((p) => ({
-                                      ...p,
-                                      globalSettings: {
-                                        ...p.globalSettings,
-                                        customCursorAssetId: undefined,
-                                      },
-                                    }))
-                                  }
-                                >
-                                  <X size={10} />
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() =>
-                                  setAssetPickerCb({
-                                    onSelect: (id) => {
-                                      pushHistory({
-                                        ...project,
-                                        globalSettings: {
-                                          ...project.globalSettings,
-                                          customCursorAssetId: id,
-                                        },
-                                      });
-                                      setAssetPickerCb(null);
-                                    },
-                                    filterType: "image",
-                                  })
-                                }
-                                className="px-3 py-1 bg-neutral-800 border border-neutral-700 text-neutral-300 text-sm rounded hover:bg-neutral-700"
-                              >
-                                Select Image
-                              </button>
+                          <AssetInspectorSlot
+                            label="Game-wide cursor"
+                            description="Replaces the ordinary pointer throughout the playable game. GIF cursors stay animated."
+                            asset={project.assets.find(
+                              (asset) =>
+                                asset.id ===
+                                project.globalSettings.customCursorAssetId,
                             )}
-                          </div>
+                            emptyLabel="Use the normal pointer"
+                            chooseLabel="Choose cursor"
+                            compact
+                            onChoose={() =>
+                              setAssetPickerCb({
+                                filterType: "image",
+                                onSelect: (id) => {
+                                  pushHistory({
+                                    ...project,
+                                    globalSettings: {
+                                      ...project.globalSettings,
+                                      customCursorAssetId: id,
+                                    },
+                                  });
+                                  setAssetPickerCb(null);
+                                },
+                              })
+                            }
+                            onClear={() =>
+                              pushHistory({
+                                ...project,
+                                globalSettings: {
+                                  ...project.globalSettings,
+                                  customCursorAssetId: undefined,
+                                },
+                              })
+                            }
+                          />
                         </div>
                       </Accordion>
 
@@ -10194,51 +10175,48 @@ const App: React.FC = () => {
                               interface plate. This is separate from the outer
                               device frame.
                             </p>
-                            <div className="flex items-center gap-2 mt-1">
-                              {project.globalSettings.hudOverlay?.assetId ? (
-                                <div className="relative w-10 h-10 bg-neutral-800 border border-neutral-700 rounded">
-                                  <img
-                                    src={project.assets.find((a) => a.id === project.globalSettings.hudOverlay?.assetId)?.src}
-                                    className="w-full h-full object-contain p-1"
-                                  />
-                                  <button
-                                    className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"
-                                    onClick={() =>
-                                      setProject((p) => ({
-                                        ...p,
-                                        globalSettings: {
-                                          ...p.globalSettings,
-                                          hudOverlay: { ...p.globalSettings.hudOverlay, assetId: undefined }
-                                        },
-                                      }))
-                                    }
-                                  >
-                                    <X size={10} />
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() =>
-                                    setAssetPickerCb({
-                                      onSelect: (id) => {
-                                        pushHistory({
-                                          ...project,
-                                          globalSettings: {
-                                            ...project.globalSettings,
-                                            hudOverlay: { ...project.globalSettings.hudOverlay, assetId: id }
-                                          },
-                                        });
-                                        setAssetPickerCb(null);
-                                      },
-                                      filterType: "image",
-                                    })
-                                  }
-                                  className="px-3 py-1 bg-neutral-800 border border-neutral-700 text-neutral-300 text-sm rounded hover:bg-neutral-700"
-                                >
-                                  Select Overlay Image
-                                </button>
+                            <AssetInspectorSlot
+                              label="Overlay artwork"
+                              asset={project.assets.find(
+                                (asset) =>
+                                  asset.id ===
+                                  project.globalSettings.hudOverlay?.assetId,
                               )}
-                            </div>
+                              emptyLabel="No screen overlay"
+                              chooseLabel="Choose overlay"
+                              previewShape="wide"
+                              compact
+                              onChoose={() =>
+                                setAssetPickerCb({
+                                  filterType: "image",
+                                  onSelect: (id) => {
+                                    pushHistory({
+                                      ...project,
+                                      globalSettings: {
+                                        ...project.globalSettings,
+                                        hudOverlay: {
+                                          ...project.globalSettings.hudOverlay,
+                                          assetId: id,
+                                        },
+                                      },
+                                    });
+                                    setAssetPickerCb(null);
+                                  },
+                                })
+                              }
+                              onClear={() =>
+                                pushHistory({
+                                  ...project,
+                                  globalSettings: {
+                                    ...project.globalSettings,
+                                    hudOverlay: {
+                                      ...project.globalSettings.hudOverlay,
+                                      assetId: undefined,
+                                    },
+                                  },
+                                })
+                              }
+                            />
                             {project.globalSettings.hudOverlay?.assetId && (
                               <div className="mt-2 space-y-2">
                                 <label className="flex items-center justify-between gap-2 text-sm text-neutral-300">
@@ -12333,65 +12311,34 @@ const App: React.FC = () => {
                             }
                           />
 
-                          <div className="mt-2 rounded border border-neutral-800 bg-neutral-950/70 p-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <div>
-                                <p className="font-comic text-[11px] font-bold text-white">
-                                  Animated / custom cursor
-                                </p>
-                                <p className="text-[9px] text-neutral-500">
-                                  Overrides the cursor only while hovering here.
-                                  GIFs stay animated.
-                                </p>
-                              </div>
-                              {selectedObject.cursorAssetId ? (
-                                <div className="flex items-center gap-1.5">
-                                  <div className="h-9 w-9 overflow-hidden rounded border border-pink-500/30 bg-black p-1">
-                                    <img
-                                      src={
-                                        project.assets.find(
-                                          (asset) =>
-                                            asset.id ===
-                                            selectedObject.cursorAssetId,
-                                        )?.src
-                                      }
-                                      alt=""
-                                      className="h-full w-full object-contain"
-                                    />
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      updateObject(selectedObject.id, {
-                                        cursorAssetId: undefined,
-                                      })
-                                    }
-                                    className="rounded border border-red-500/30 p-1.5 text-red-400 hover:bg-red-500/10"
-                                    aria-label="Remove custom cursor"
-                                  >
-                                    <X size={12} />
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setAssetPickerCb({
-                                      filterType: "image",
-                                      onSelect: (id) => {
-                                        updateObject(selectedObject.id, {
-                                          cursorAssetId: id,
-                                        });
-                                        setAssetPickerCb(null);
-                                      },
-                                    })
-                                  }
-                                  className="shrink-0 rounded border border-pink-500/35 bg-pink-500/10 px-2 py-1.5 text-[10px] font-bold text-pink-200 hover:bg-pink-500/20"
-                                >
-                                  Choose image
-                                </button>
+                          <div className="mt-2">
+                            <AssetInspectorSlot
+                              label="Hover cursor"
+                              description="Overrides the cursor only while hovering this object. GIFs stay animated."
+                              asset={project.assets.find(
+                                (asset) =>
+                                  asset.id === selectedObject.cursorAssetId,
                               )}
-                            </div>
+                              emptyLabel="Use the object's normal cursor"
+                              chooseLabel="Choose cursor"
+                              compact
+                              onChoose={() =>
+                                setAssetPickerCb({
+                                  filterType: "image",
+                                  onSelect: (id) => {
+                                    updateObject(selectedObject.id, {
+                                      cursorAssetId: id,
+                                    });
+                                    setAssetPickerCb(null);
+                                  },
+                                })
+                              }
+                              onClear={() =>
+                                updateObject(selectedObject.id, {
+                                  cursorAssetId: undefined,
+                                })
+                              }
+                            />
                           </div>
                         </div>
 
@@ -12852,52 +12799,65 @@ const App: React.FC = () => {
                         </div>
 
                         {selectedObject.interaction === "sound" && (
-                          <div>
-                            <label className="text-sm text-neutral-500">
-                              Audio Asset
-                            </label>
-                            <select
-                              value={selectedObject.interactionData || ""}
-                              onChange={(e) =>
-                                updateObject(selectedObject.id, {
-                                  interactionData: e.target.value,
-                                })
-                              }
-                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
-                            >
-                              <option value="">Select an audio clip...</option>
-                              {project.assets
-                                .filter((a) => a.type === "audio")
-                                .map((a) => (
-                                  <option key={a.id} value={a.id}>
-                                    {a.name}
-                                  </option>
-                                ))}
-                            </select>
-                          </div>
+                          <AssetInspectorSlot
+                            label="Sound played"
+                            description="The audio clip used by this response."
+                            asset={project.assets.find(
+                              (asset) =>
+                                asset.id === selectedObject.interactionData,
+                            )}
+                            emptyLabel="No sound chosen"
+                            chooseLabel="Choose sound"
+                            compact
+                            onChoose={() =>
+                              setAssetPickerCb({
+                                filterType: "audio",
+                                onSelect: (id) => {
+                                  updateObject(selectedObject.id, {
+                                    interactionData: id,
+                                  });
+                                  setAssetPickerCb(null);
+                                },
+                              })
+                            }
+                            onClear={() =>
+                              updateObject(selectedObject.id, {
+                                interactionData: "",
+                              })
+                            }
+                          />
                         )}
 
                         {selectedObject.interaction === "play_cutscene" && (
                           <div className="space-y-3">
-                            <div>
-                              <label className="text-sm text-neutral-500">
-                                Video Asset
-                              </label>
-                              <button
-                                onClick={() => setAssetPickerCb({
-                                  onSelect: (id) => updateObject(selectedObject.id, { interactionData: id }),
-                                  filterType: "video"
-                                })}
-                                className="w-full bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 hover:border-neutral-500 rounded px-3 py-2 text-sm flex items-center justify-between transition-colors mt-1"
-                              >
-                                <span className="text-neutral-300 truncate pr-2">
-                                  {selectedObject.interactionData
-                                    ? project.assets.find((a) => a.id === selectedObject.interactionData)?.name || "Unknown Video"
-                                    : "Select a video..."}
-                                </span>
-                                <Video size={16} className="text-neutral-500" />
-                              </button>
-                            </div>
+                            <AssetInspectorSlot
+                              label="Cutscene video"
+                              description="The video played before the optional scene change."
+                              asset={project.assets.find(
+                                (asset) =>
+                                  asset.id === selectedObject.interactionData,
+                              )}
+                              emptyLabel="No cutscene chosen"
+                              chooseLabel="Choose video"
+                              previewShape="wide"
+                              compact
+                              onChoose={() =>
+                                setAssetPickerCb({
+                                  filterType: "video",
+                                  onSelect: (id) => {
+                                    updateObject(selectedObject.id, {
+                                      interactionData: id,
+                                    });
+                                    setAssetPickerCb(null);
+                                  },
+                                })
+                              }
+                              onClear={() =>
+                                updateObject(selectedObject.id, {
+                                  interactionData: "",
+                                })
+                              }
+                            />
                             <div>
                               <label className="text-sm text-neutral-500">
                                 Jump to Scene after video (Optional)
@@ -14895,49 +14855,43 @@ const App: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-1">
-                    <LabelWithHelp
-                      label="Background Music (BGM)"
-                      helpText="The music track that plays on loop when the player enters this scene."
-                      className="uppercase font-bold mb-1 block text-sm mt-2"
-                    />
-                    <button
-                        onClick={() => setAssetPickerCb({
-                          onSelect: (id) => {
-                            pushHistory({
-                              ...project,
-                              scenes: (project.scenes || []).map((s) =>
-                                s.id === scene.id ? { ...s, bgmAssetId: id } : s
-                              ),
-                            });
-                          },
-                          filterType: "audio"
-                        })}
-                        className="w-full bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 hover:border-neutral-500 rounded px-3 py-2 text-sm flex items-center justify-between transition-colors"
-                      >
-                        <span className="text-neutral-300 truncate pr-2">
-                          {scene.bgmAssetId
-                            ? project.assets.find((a) => a.id === scene.bgmAssetId)?.name || "Unknown Audio"
-                            : "None"}
-                        </span>
-                        <Music size={16} className="text-neutral-500" />
-                    </button>
-                    {scene.bgmAssetId && (
-                      <button 
-                        onClick={() => {
+                  <AssetInspectorSlot
+                    label="Room music"
+                    description="The looping track that starts when the player enters this room."
+                    asset={
+                      project.assets.find((asset) => asset.id === scene.bgmAssetId) ||
+                      null
+                    }
+                    emptyLabel="No room music"
+                    chooseLabel="Choose audio"
+                    compact
+                    onChoose={() =>
+                      setAssetPickerCb({
+                        filterType: "audio",
+                        onSelect: (id) => {
                           pushHistory({
                             ...project,
-                            scenes: (project.scenes || []).map((s) =>
-                              s.id === scene.id ? { ...s, bgmAssetId: undefined } : s
+                            scenes: (project.scenes || []).map((candidate) =>
+                              candidate.id === scene.id
+                                ? { ...candidate, bgmAssetId: id }
+                                : candidate,
                             ),
                           });
-                        }}
-                        className="text-xs text-red-400 hover:text-red-300 mt-1"
-                      >
-                        Clear BGM
-                      </button>
-                    )}
-                  </div>
+                          setAssetPickerCb(null);
+                        },
+                      })
+                    }
+                    onClear={() =>
+                      pushHistory({
+                        ...project,
+                        scenes: (project.scenes || []).map((candidate) =>
+                          candidate.id === scene.id
+                            ? { ...candidate, bgmAssetId: undefined }
+                            : candidate,
+                        ),
+                      })
+                    }
+                  />
 
                   <div className="pt-4 border-t border-neutral-800 flex justify-between items-center">
                     <span className="text-sm text-neutral-500">
@@ -14971,8 +14925,8 @@ const App: React.FC = () => {
                   const newMenu: Scene = {
                     id: uuidv4(),
                     name: `UI Menu ${(project.uiMenus || []).length + 1}`,
-                    width: project.globalSettings.stageWidth || 800,
-                    height: project.globalSettings.stageHeight || 600,
+                    width: logicalStageWidth,
+                    height: logicalStageHeight,
                     backgroundColor: "transparent",
                     objects: [],
                     blocksClicks: false,
@@ -15067,49 +15021,36 @@ const App: React.FC = () => {
                   </div>
 
                   <div className="flex flex-col gap-4 text-sm text-neutral-400 font-mono">
-                    <div className="flex gap-4">
-                      <div className="flex flex-col gap-1 w-full">
-                        <LabelWithHelp
-                          label="Width"
-                          helpText="Width of the UI space."
-                        />
-                        <input
-                          type="number"
-                          value={scene.width}
-                          onChange={(e) =>
+                    <div className="rounded border border-cyan-500/25 bg-cyan-500/5 p-3">
+                      <div className="font-comic text-xs font-bold text-cyan-300">
+                        Uses the room coordinate space
+                      </div>
+                      <p className="mt-1 text-[10px] leading-relaxed text-neutral-500">
+                        This menu sits on the same {logicalStageWidth} × {logicalStageHeight} plane as your current room. No separate UI canvas math.
+                      </p>
+                      {(scene.width !== logicalStageWidth ||
+                        scene.height !== logicalStageHeight) && (
+                        <button
+                          type="button"
+                          onClick={() =>
                             pushHistory({
                               ...project,
-                              uiMenus: (project.uiMenus || []).map((s) =>
-                                s.id === scene.id
-                                  ? { ...s, width: Number(e.target.value) }
-                                  : s,
+                              uiMenus: (project.uiMenus || []).map((candidate) =>
+                                candidate.id === scene.id
+                                  ? {
+                                      ...candidate,
+                                      width: logicalStageWidth,
+                                      height: logicalStageHeight,
+                                    }
+                                  : candidate,
                               ),
                             })
                           }
-                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1"
-                        />
-                      </div>
-                      <div className="flex flex-col gap-1 w-full">
-                        <LabelWithHelp
-                          label="Height"
-                          helpText="Height of the UI space."
-                        />
-                        <input
-                          type="number"
-                          value={scene.height}
-                          onChange={(e) =>
-                            pushHistory({
-                              ...project,
-                              uiMenus: (project.uiMenus || []).map((s) =>
-                                s.id === scene.id
-                                  ? { ...s, height: Number(e.target.value) }
-                                  : s,
-                              ),
-                            })
-                          }
-                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1"
-                        />
-                      </div>
+                          className="mt-2 rounded border border-cyan-400/35 bg-cyan-400/10 px-2 py-1 text-[9px] font-bold text-cyan-300 hover:bg-cyan-400/20"
+                        >
+                          Sync old menu size
+                        </button>
+                      )}
                     </div>
                     <div className="flex flex-col gap-1 w-full relative">
                       <LabelWithHelp
@@ -16544,46 +16485,42 @@ const App: React.FC = () => {
                       ></textarea>
                     </div>
 
-                    <div>
-                      <LabelWithHelp
-                        label="Icon Asset"
-                        helpText="The image displayed for this item in menus. Click to choose."
-                        className="text-sm uppercase font-bold mb-1 block"
-                      />
-                      <button
-                        onClick={() =>
-                          setAssetPickerCb({
-                            onSelect: (id) => {
-                              pushHistory({
-                                ...project,
-                                inventoryItems: project.inventoryItems.map(
-                                  (i) =>
-                                    i.id === item.id
-                                      ? { ...i, iconAssetId: id }
-                                      : i,
-                                ),
-                              });
-                              setAssetPickerCb(null);
-                            },
-                            filterType: "image",
-                          })
-                        }
-                        className="w-full bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 hover:border-neutral-500 rounded px-3 py-2 text-sm flex items-center justify-between transition-colors"
-                      >
-                        <span className="text-neutral-300 truncate pr-2">
-                          {item.iconAssetId &&
-                          project.assets.find((a) => a.id === item.iconAssetId)
-                            ? project.assets.find(
-                                (a) => a.id === item.iconAssetId,
-                              )!.name
-                            : "No Icon Selected"}
-                        </span>
-                        <ImageIcon
-                          size={16}
-                          className="text-neutral-500 shrink-0"
-                        />
-                      </button>
-                    </div>
+                    <AssetInspectorSlot
+                      label="Item icon"
+                      description="The picture shown for this item in inventory menus."
+                      asset={project.assets.find(
+                        (asset) => asset.id === item.iconAssetId,
+                      )}
+                      emptyLabel="No item icon"
+                      chooseLabel="Choose icon"
+                      compact
+                      onChoose={() =>
+                        setAssetPickerCb({
+                          filterType: "image",
+                          onSelect: (id) => {
+                            pushHistory({
+                              ...project,
+                              inventoryItems: project.inventoryItems.map((i) =>
+                                i.id === item.id
+                                  ? { ...i, iconAssetId: id }
+                                  : i,
+                              ),
+                            });
+                            setAssetPickerCb(null);
+                          },
+                        })
+                      }
+                      onClear={() =>
+                        pushHistory({
+                          ...project,
+                          inventoryItems: project.inventoryItems.map((i) =>
+                            i.id === item.id
+                              ? { ...i, iconAssetId: null }
+                              : i,
+                          ),
+                        })
+                      }
+                    />
 
                     <div className="pt-2 border-t border-neutral-800">
                       <label className="flex items-center gap-2 text-sm text-neutral-300 font-medium">
@@ -17258,6 +17195,15 @@ const App: React.FC = () => {
           <MapMaker
             project={project}
             updateProject={(updates) => pushHistory({ ...project, ...updates })}
+            openAssetPicker={(filterType, onSelect) =>
+              setAssetPickerCb({
+                filterType,
+                onSelect: (assetId) => {
+                  onSelect(assetId);
+                  setAssetPickerCb(null);
+                },
+              })
+            }
           />
         )}
       </div>

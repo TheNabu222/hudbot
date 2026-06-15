@@ -737,26 +737,17 @@
   border-color: #8cb9ee;
 }
 
-.sunny-theme .map-asset-picker-dialog {
-  background: #f8fbff;
-  border-color: #174ea6;
-  color: #10234a;
-}
-
-.sunny-theme .map-asset-picker-dialog [class*="bg-neutral-950"],
-.sunny-theme .map-asset-picker-dialog [class*="bg-black"] {
-  background-color: #eef6ff;
-}
-
-.sunny-theme .map-asset-picker-dialog [class*="text-white"],
-.sunny-theme .map-asset-picker-dialog [class*="text-neutral-400"],
-.sunny-theme .map-asset-picker-dialog [class*="text-neutral-500"],
-.sunny-theme .map-asset-picker-dialog [class*="text-neutral-600"] {
-  color: #10234a;
-}
-
-.sunny-theme .map-asset-picker-dialog [class*="border-neutral-"] {
+.sunny-theme .asset-inspector-slot {
+  background: rgb(238 246 255 / 92%);
   border-color: #8cb9ee;
+  color: #10234a;
+}
+
+.sunny-theme .asset-inspector-slot [class*="text-white"],
+.sunny-theme .asset-inspector-slot [class*="text-neutral-200"],
+.sunny-theme .asset-inspector-slot [class*="text-neutral-500"],
+.sunny-theme .asset-inspector-slot [class*="text-neutral-600"] {
+  color: #10234a;
 }
 
 .studio-feature-layout {
