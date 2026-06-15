@@ -141,7 +141,8 @@ const helpSections: HelpSection[] = [
       {
         title: "Transform and arrange",
         detail:
-          "Move, resize, rotate, flip, stretch, change opacity, alter layer order, lock, hide, duplicate, and delete objects. Image corner handles preserve proportions automatically; hold Alt only when you intentionally want to stretch freely.",
+          "Move, resize, rotate, flip, stretch, change opacity, alter layer order, lock, hide, duplicate, and delete objects. Resizing is freeform by default: pull a pink side handle to change only width or height, or pull a green corner to change both and freely stretch or squash the image.",
+        tip: "Hold Shift while dragging a corner only when you want to preserve the object's original shape. No modifier key is needed to stretch.",
       },
       {
         title: "Resize the room without math",
@@ -163,14 +164,14 @@ const helpSections: HelpSection[] = [
       {
         title: "Clickable shell buttons",
         detail:
-          "After marking a Game Shell screen, choose Edit Outside Buttons. Drag boxes over the shell's knobs, icons, and decorative buttons, name each control, and give it one or many ordered responses with optional conditions and one-time behavior.",
-        tip: "Shell controls work in Play just like clickable scene objects: they can open inventory or custom UI, play sounds and cutscenes, change rooms, set story memories, start quests, and more.",
+          "After marking a Game Shell screen, choose Edit Outside Buttons. Draw boxes over the shell's knobs, icons, and decorative buttons. Select any box again to drag it elsewhere or freely stretch and shrink it from every edge and corner. Exact Left, Top, Width, and Height fields are available when you want precision.",
+        tip: "There are no fixed size presets. Each shell control can be any rectangular shape and can have one or many ordered responses with optional conditions and one-time behavior.",
       },
       {
         title: "Cavebot-made widgets",
         detail:
-          "Open Options → Heads Up Display (HUD) to resize needs, skills, and built-in action buttons independently from 10% to 400%, using either a slider or an exact percentage. In UI Canvas, drag each visible widget directly into place. Custom screen artwork also has independent width and height controls.",
-        tip: "Use HUD: Hidden when you need an unobstructed canvas. This only hides editor previews; it does not delete the player HUD.",
+          "Open Options → Heads Up Display (HUD) to resize needs, skills, and built-in action buttons. Every group now uses the same Width + Height control as screen artwork, so each can be stretched wide, squashed short, made tall and narrow, or reset to 100%. In UI Canvas, drag each visible widget directly into place.",
+        tip: "HUD widgets, custom screen artwork, and canvas objects all use freeform resizing language. Use HUD: Hidden when you need an unobstructed canvas; it hides editor previews without deleting the player HUD.",
       },
       {
         title: "Reusable stamps",

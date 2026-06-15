@@ -33,8 +33,29 @@ interface Point {
   y: number;
 }
 
+type TransformHandle =
+  | "move"
+  | "north"
+  | "south"
+  | "east"
+  | "west"
+  | "north-east"
+  | "north-west"
+  | "south-east"
+  | "south-west";
+
+interface TransformState {
+  id: string;
+  handle: TransformHandle;
+  pointerId: number;
+  startPoint: Point;
+  startControl: DeviceFrameControl;
+}
+
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, value));
+
+const MIN_CONTROL_SIZE = 8;
 
 export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
   calibration,
@@ -61,6 +82,7 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
   );
   const [drawStart, setDrawStart] = useState<Point | null>(null);
   const [draft, setDraft] = useState<DeviceFrameControl | null>(null);
+  const [transform, setTransform] = useState<TransformState | null>(null);
 
   useEffect(() => {
     setControls(calibration.controls || []);
@@ -90,7 +112,11 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
   };
 
   const beginDrawing = (event: React.PointerEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).dataset.shellControl === "true") return;
+    if (
+      (event.target as HTMLElement).closest('[data-shell-control="true"]')
+    ) {
+      return;
+    }
     const point = pointFromEvent(event);
     if (!point) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -108,6 +134,68 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
   };
 
   const continueDrawing = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (transform) {
+      const point = pointFromEvent(event);
+      if (!point) return;
+      const deltaX = point.x - transform.startPoint.x;
+      const deltaY = point.y - transform.startPoint.y;
+      const start = transform.startControl;
+      let left = start.x;
+      let top = start.y;
+      let right = start.x + start.width;
+      let bottom = start.y + start.height;
+
+      if (transform.handle === "move") {
+        left = clamp(start.x + deltaX, 0, calibration.outerWidth - start.width);
+        top = clamp(start.y + deltaY, 0, calibration.outerHeight - start.height);
+        right = left + start.width;
+        bottom = top + start.height;
+      } else {
+        if (transform.handle.includes("west")) {
+          left = clamp(
+            start.x + deltaX,
+            0,
+            right - MIN_CONTROL_SIZE,
+          );
+        }
+        if (transform.handle.includes("east")) {
+          right = clamp(
+            start.x + start.width + deltaX,
+            left + MIN_CONTROL_SIZE,
+            calibration.outerWidth,
+          );
+        }
+        if (transform.handle.includes("north")) {
+          top = clamp(
+            start.y + deltaY,
+            0,
+            bottom - MIN_CONTROL_SIZE,
+          );
+        }
+        if (transform.handle.includes("south")) {
+          bottom = clamp(
+            start.y + start.height + deltaY,
+            top + MIN_CONTROL_SIZE,
+            calibration.outerHeight,
+          );
+        }
+      }
+
+      setControls((current) =>
+        current.map((control) =>
+          control.id === transform.id
+            ? {
+                ...control,
+                x: left,
+                y: top,
+                width: right - left,
+                height: bottom - top,
+              }
+            : control,
+        ),
+      );
+      return;
+    }
     if (!drawStart || !draft) return;
     const point = pointFromEvent(event);
     if (!point) return;
@@ -121,6 +209,13 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
   };
 
   const finishDrawing = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (transform) {
+      setTransform(null);
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {}
+      return;
+    }
     if (!draft) return;
     const point = pointFromEvent(event);
     const finalDraft =
@@ -153,36 +248,157 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
     );
   };
 
+  const beginTransform = (
+    event: React.PointerEvent<HTMLElement>,
+    control: DeviceFrameControl,
+    handle: TransformHandle,
+  ) => {
+    const point = pointFromEvent(event);
+    if (!point) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedId(control.id);
+    const canvas = imageRef.current?.parentElement;
+    canvas?.setPointerCapture(event.pointerId);
+    setTransform({
+      id: control.id,
+      handle,
+      pointerId: event.pointerId,
+      startPoint: point,
+      startControl: { ...control },
+    });
+  };
+
+  const updateSelectedNumber = (
+    key: "x" | "y" | "width" | "height",
+    rawValue: string,
+  ) => {
+    if (!selected) return;
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) return;
+    if (key === "x") {
+      updateSelected({
+        x: clamp(parsed, 0, calibration.outerWidth - selected.width),
+      });
+    } else if (key === "y") {
+      updateSelected({
+        y: clamp(parsed, 0, calibration.outerHeight - selected.height),
+      });
+    } else if (key === "width") {
+      updateSelected({
+        width: clamp(
+          parsed,
+          MIN_CONTROL_SIZE,
+          calibration.outerWidth - selected.x,
+        ),
+      });
+    } else {
+      updateSelected({
+        height: clamp(
+          parsed,
+          MIN_CONTROL_SIZE,
+          calibration.outerHeight - selected.y,
+        ),
+      });
+    }
+  };
+
+  const resizeHandles: Array<{
+    handle: Exclude<TransformHandle, "move">;
+    className: string;
+    cursor: string;
+  }> = [
+    {
+      handle: "north-west",
+      className: "-left-1.5 -top-1.5",
+      cursor: "cursor-nwse-resize",
+    },
+    {
+      handle: "north",
+      className: "left-1/2 -top-1.5 -translate-x-1/2",
+      cursor: "cursor-ns-resize",
+    },
+    {
+      handle: "north-east",
+      className: "-right-1.5 -top-1.5",
+      cursor: "cursor-nesw-resize",
+    },
+    {
+      handle: "east",
+      className: "-right-1.5 top-1/2 -translate-y-1/2",
+      cursor: "cursor-ew-resize",
+    },
+    {
+      handle: "south-east",
+      className: "-bottom-1.5 -right-1.5",
+      cursor: "cursor-nwse-resize",
+    },
+    {
+      handle: "south",
+      className: "-bottom-1.5 left-1/2 -translate-x-1/2",
+      cursor: "cursor-ns-resize",
+    },
+    {
+      handle: "south-west",
+      className: "-bottom-1.5 -left-1.5",
+      cursor: "cursor-nesw-resize",
+    },
+    {
+      handle: "west",
+      className: "-left-1.5 top-1/2 -translate-y-1/2",
+      cursor: "cursor-ew-resize",
+    },
+  ];
+
   const renderControl = (
     control: DeviceFrameControl,
     isDraft = false,
-  ) => (
-    <button
-      key={control.id}
-      type="button"
-      data-shell-control="true"
-      onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => {
-        event.stopPropagation();
-        setSelectedId(control.id);
-      }}
-      className={`absolute border-2 ${
-        control.id === selectedId
-          ? "border-pink-400 bg-pink-500/25"
-          : "border-[#00ffcc] bg-[#00ffcc]/15"
-      } ${isDraft ? "pointer-events-none border-dashed" : ""}`}
-      style={{
-        left: `${(control.x / calibration.outerWidth) * 100}%`,
-        top: `${(control.y / calibration.outerHeight) * 100}%`,
-        width: `${(control.width / calibration.outerWidth) * 100}%`,
-        height: `${(control.height / calibration.outerHeight) * 100}%`,
-      }}
-    >
-      <span className="absolute -top-5 left-0 whitespace-nowrap rounded bg-neutral-950/90 px-1.5 py-0.5 font-comic text-[10px] font-bold text-white">
-        {control.name}
-      </span>
-    </button>
-  );
+  ) => {
+    const isSelected = control.id === selectedId && !isDraft;
+    return (
+      <div
+        key={control.id}
+        data-shell-control="true"
+        onPointerDown={(event) => {
+          if (!isDraft) beginTransform(event, control, "move");
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          setSelectedId(control.id);
+        }}
+        className={`absolute border-2 ${
+          isSelected
+            ? "border-pink-400 bg-pink-500/25"
+            : "border-[#00ffcc] bg-[#00ffcc]/15"
+        } ${
+          isDraft
+            ? "pointer-events-none border-dashed"
+            : "cursor-move touch-none"
+        }`}
+        style={{
+          left: `${(control.x / calibration.outerWidth) * 100}%`,
+          top: `${(control.y / calibration.outerHeight) * 100}%`,
+          width: `${(control.width / calibration.outerWidth) * 100}%`,
+          height: `${(control.height / calibration.outerHeight) * 100}%`,
+        }}
+      >
+        <span className="absolute -top-5 left-0 whitespace-nowrap rounded bg-neutral-950/90 px-1.5 py-0.5 font-comic text-[10px] font-bold text-white">
+          {control.name}
+        </span>
+        {isSelected &&
+          resizeHandles.map(({ handle, className, cursor }) => (
+            <button
+              key={handle}
+              type="button"
+              data-shell-control="true"
+              aria-label={`Resize ${control.name} from ${handle.replace("-", " ")}`}
+              onPointerDown={(event) => beginTransform(event, control, handle)}
+              className={`absolute z-10 h-3 w-3 rounded-sm border border-neutral-950 bg-pink-300 shadow-[0_0_0_1px_white] ${className} ${cursor}`}
+            />
+          ))}
+      </div>
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-[12500] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm">
@@ -218,6 +434,7 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
               onPointerCancel={() => {
                 setDrawStart(null);
                 setDraft(null);
+                setTransform(null);
               }}
             >
               <img
@@ -277,6 +494,42 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
                     className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-white"
                   />
                 </label>
+                <div className="rounded border border-neutral-700 bg-neutral-950/70 p-3">
+                  <div className="font-comic text-xs font-bold text-[#00ffcc]">
+                    Move and stretch
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-neutral-400">
+                    Drag the pink box to move it. Pull any edge or corner to
+                    stretch or shrink it freely.
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {(
+                      [
+                        ["x", "Left"],
+                        ["y", "Top"],
+                        ["width", "Width"],
+                        ["height", "Height"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <label
+                        key={key}
+                        className="text-[10px] font-bold text-neutral-400"
+                      >
+                        {label}
+                        <input
+                          type="number"
+                          min={key === "width" || key === "height" ? 8 : 0}
+                          step="1"
+                          value={Math.round(selected[key])}
+                          onChange={(event) =>
+                            updateSelectedNumber(key, event.target.value)
+                          }
+                          className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-white"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
                 <ClickResponseEditor
                   responses={selected.clickResponses}
                   assets={assets}

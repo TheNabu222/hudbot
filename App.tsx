@@ -135,6 +135,7 @@ import { RuleConditionEditor } from "./components/RuleConditionEditor";
 import { StudioFeatureHeader } from "./components/StudioFeatureHeader";
 import { AssetInspectorSlot } from "./components/AssetInspectorSlot";
 import { ShellControlEditor } from "./components/ShellControlEditor";
+import { InterfaceSizeControl } from "./components/InterfaceSizeControl";
 import { get, set } from "idb-keyval";
 
 export interface SaveSlotMeta {
@@ -1962,7 +1963,7 @@ const App: React.FC = () => {
 
       if (
         resizeStart.preserveAspect &&
-        !e.altKey &&
+        e.shiftKey &&
         resizeStart.anchor.length === 2
       ) {
         const widthChange = Math.abs(newW - resizeStart.w);
@@ -3350,6 +3351,18 @@ const App: React.FC = () => {
     project.globalSettings.hudSkillsScale ?? legacyHudScale;
   const hudButtonsScale =
     project.globalSettings.hudButtonsScale ?? legacyHudScale;
+  const hudNeedsScaleX =
+    project.globalSettings.hudNeedsScaleX ?? hudNeedsScale;
+  const hudNeedsScaleY =
+    project.globalSettings.hudNeedsScaleY ?? hudNeedsScale;
+  const hudSkillsScaleX =
+    project.globalSettings.hudSkillsScaleX ?? hudSkillsScale;
+  const hudSkillsScaleY =
+    project.globalSettings.hudSkillsScaleY ?? hudSkillsScale;
+  const hudButtonsScaleX =
+    project.globalSettings.hudButtonsScaleX ?? hudButtonsScale;
+  const hudButtonsScaleY =
+    project.globalSettings.hudButtonsScaleY ?? hudButtonsScale;
   const hudOverlay = project.globalSettings.hudOverlay;
   const hudOverlayAsset = hudOverlay?.assetId
     ? project.assets.find((asset) => asset.id === hudOverlay.assetId)
@@ -6106,10 +6119,42 @@ const App: React.FC = () => {
                                     <RotateCw size={12} strokeWidth={3} />
                                   </div>
                                   <div className="absolute -top-4 left-1/2 -translate-x-1/2 w-px h-4 bg-emerald-500 pointer-events-none" />
+                                  {/* north */}
+                                  <div
+                                    className="absolute -top-2 left-1/2 h-4 w-8 -translate-x-1/2 cursor-ns-resize rounded-sm border-2 border-neutral-950 bg-pink-300 shadow-md transition-transform hover:scale-110"
+                                    title="Drag to squash or stretch height only."
+                                    onPointerDown={(e) =>
+                                      handleResizePointerDown(e, obj, "n")
+                                    }
+                                  />
+                                  {/* east */}
+                                  <div
+                                    className="absolute -right-2 top-1/2 h-8 w-4 -translate-y-1/2 cursor-ew-resize rounded-sm border-2 border-neutral-950 bg-pink-300 shadow-md transition-transform hover:scale-110"
+                                    title="Drag to stretch or squash width only."
+                                    onPointerDown={(e) =>
+                                      handleResizePointerDown(e, obj, "e")
+                                    }
+                                  />
+                                  {/* south */}
+                                  <div
+                                    className="absolute -bottom-2 left-1/2 h-4 w-8 -translate-x-1/2 cursor-ns-resize rounded-sm border-2 border-neutral-950 bg-pink-300 shadow-md transition-transform hover:scale-110"
+                                    title="Drag to squash or stretch height only."
+                                    onPointerDown={(e) =>
+                                      handleResizePointerDown(e, obj, "s")
+                                    }
+                                  />
+                                  {/* west */}
+                                  <div
+                                    className="absolute -left-2 top-1/2 h-8 w-4 -translate-y-1/2 cursor-ew-resize rounded-sm border-2 border-neutral-950 bg-pink-300 shadow-md transition-transform hover:scale-110"
+                                    title="Drag to stretch or squash width only."
+                                    onPointerDown={(e) =>
+                                      handleResizePointerDown(e, obj, "w")
+                                    }
+                                  />
                                   {/* nw */}
                                   <div
                                     className="absolute -top-2 -left-2 w-4 h-4 bg-emerald-500 rounded-full cursor-nw-resize shadow-md transition-transform hover:scale-110"
-                                    title="Resize object proportionally. Hold Alt for free stretch."
+                                    title="Resize freely. Hold Shift to keep the object's shape."
                                     onPointerDown={(e) =>
                                       handleResizePointerDown(e, obj, "nw")
                                     }
@@ -6117,7 +6162,7 @@ const App: React.FC = () => {
                                   {/* ne */}
                                   <div
                                     className="absolute -top-2 -right-2 w-4 h-4 bg-emerald-500 rounded-full cursor-ne-resize shadow-md transition-transform hover:scale-110"
-                                    title="Resize object proportionally. Hold Alt for free stretch."
+                                    title="Resize freely. Hold Shift to keep the object's shape."
                                     onPointerDown={(e) =>
                                       handleResizePointerDown(e, obj, "ne")
                                     }
@@ -6125,7 +6170,7 @@ const App: React.FC = () => {
                                   {/* sw */}
                                   <div
                                     className="absolute -bottom-2 -left-2 w-4 h-4 bg-emerald-500 rounded-full cursor-sw-resize shadow-md transition-transform hover:scale-110"
-                                    title="Resize object proportionally. Hold Alt for free stretch."
+                                    title="Resize freely. Hold Shift to keep the object's shape."
                                     onPointerDown={(e) =>
                                       handleResizePointerDown(e, obj, "sw")
                                     }
@@ -6133,7 +6178,7 @@ const App: React.FC = () => {
                                   {/* se */}
                                   <div
                                     className="absolute -bottom-3 -right-3 flex h-6 w-6 items-center justify-center rounded-md border-2 border-neutral-950 bg-emerald-400 text-[11px] font-black text-neutral-950 shadow-lg transition-transform hover:scale-110 cursor-se-resize"
-                                    title="Resize object proportionally. Hold Alt for free stretch."
+                                    title="Resize freely. Hold Shift to keep the object's shape."
                                     onPointerDown={(e) =>
                                       handleResizePointerDown(e, obj, "se")
                                     }
@@ -6143,9 +6188,10 @@ const App: React.FC = () => {
                                   {resizingId === obj.id && (
                                     <div className="pointer-events-none absolute -bottom-10 right-0 z-[8000] whitespace-nowrap rounded border border-emerald-400/60 bg-neutral-950/95 px-2 py-1 font-mono text-[10px] font-bold text-emerald-300 shadow-xl">
                                       {Math.round(obj.width)} × {Math.round(obj.height)}
-                                      {resizeStart.preserveAspect && !obj.isUiElement
-                                        ? " · proportional"
-                                        : ""}
+                                      {resizeStart.preserveAspect &&
+                                      resizeStart.anchor.length === 2
+                                        ? " · freeform (Shift keeps shape)"
+                                        : " · one direction"}
                                     </div>
                                   )}
                                 </>
@@ -7288,7 +7334,7 @@ const App: React.FC = () => {
                           borderRadius: uiRadius,
                           fontFamily: uiFont,
                           width: "150px",
-                          transform: `scale(${hudNeedsScale})`,
+                          transform: `scale(${hudNeedsScaleX}, ${hudNeedsScaleY})`,
                           transformOrigin: project.globalSettings
                             .hudNeedsPosition
                             ? "top left"
@@ -7408,7 +7454,7 @@ const App: React.FC = () => {
                           borderRadius: uiRadius,
                           fontFamily: uiFont,
                           width: "150px",
-                          transform: `scale(${hudSkillsScale})`,
+                          transform: `scale(${hudSkillsScaleX}, ${hudSkillsScaleY})`,
                           transformOrigin: project.globalSettings
                             .hudSkillsPosition
                             ? "top left"
@@ -7481,7 +7527,7 @@ const App: React.FC = () => {
                                 bottom: "auto",
                               }
                             : {}),
-                          transform: `scale(${hudButtonsScale})`,
+                          transform: `scale(${hudButtonsScaleX}, ${hudButtonsScaleY})`,
                           transformOrigin: project.globalSettings
                             .hudButtonsPosition
                             ? "top left"
@@ -10252,78 +10298,61 @@ const App: React.FC = () => {
                               {(
                                 [
                                   {
-                                    key: "hudNeedsScale",
                                     label: "Needs panel",
-                                    value: hudNeedsScale,
+                                    description:
+                                      "Hunger, rest, connection, and other player needs.",
+                                    xKey: "hudNeedsScaleX",
+                                    yKey: "hudNeedsScaleY",
+                                    widthPercent: hudNeedsScaleX * 100,
+                                    heightPercent: hudNeedsScaleY * 100,
                                   },
                                   {
-                                    key: "hudSkillsScale",
                                     label: "Skills panel",
-                                    value: hudSkillsScale,
+                                    description:
+                                      "Naturalist, occultist, scribal, and other player skills.",
+                                    xKey: "hudSkillsScaleX",
+                                    yKey: "hudSkillsScaleY",
+                                    widthPercent: hudSkillsScaleX * 100,
+                                    heightPercent: hudSkillsScaleY * 100,
                                   },
                                   {
-                                    key: "hudButtonsScale",
                                     label: "Built-in buttons",
-                                    value: hudButtonsScale,
+                                    description:
+                                      "Inventory, map, relationships, settings, and other Cavebot buttons.",
+                                    xKey: "hudButtonsScaleX",
+                                    yKey: "hudButtonsScaleY",
+                                    widthPercent: hudButtonsScaleX * 100,
+                                    heightPercent: hudButtonsScaleY * 100,
                                   },
                                 ] as const
                               ).map((control) => (
-                                <div
-                                  key={control.key}
-                                  className="rounded border border-white/10 bg-black/15 p-2"
-                                >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="text-[10px] font-bold text-neutral-300">
-                                      {control.label}
-                                    </span>
-                                    <label className="flex items-center gap-1 font-mono text-[10px] font-bold text-[#00ffcc]">
-                                      <input
-                                        type="number"
-                                        min="10"
-                                        max="400"
-                                        step="1"
-                                        value={Math.round(control.value * 100)}
-                                        onChange={(event) => {
-                                          const percentage = Math.max(
-                                            10,
-                                            Math.min(
-                                              400,
-                                              Number(event.target.value) || 100,
-                                            ),
-                                          );
-                                          setProject((current) => ({
-                                            ...current,
-                                            globalSettings: {
-                                              ...current.globalSettings,
-                                              [control.key]: percentage / 100,
-                                            },
-                                          }));
-                                        }}
-                                        className="w-14 rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-right text-[#00ffcc]"
-                                      />
-                                      %
-                                    </label>
-                                  </div>
-                                  <input
-                                    type="range"
-                                    min="0.1"
-                                    max="4"
-                                    step="0.01"
-                                    value={control.value}
-                                    onChange={(event) =>
-                                      setProject((current) => ({
-                                        ...current,
-                                        globalSettings: {
-                                          ...current.globalSettings,
-                                          [control.key]: Number(
-                                            event.target.value,
-                                          ),
-                                        },
-                                      }))
-                                    }
-                                    className="mt-2 w-full accent-pink-500"
-                                  />
-                                </div>
+                                <InterfaceSizeControl
+                                  key={control.xKey}
+                                  label={control.label}
+                                  description={control.description}
+                                  widthPercent={control.widthPercent}
+                                  heightPercent={control.heightPercent}
+                                  onChange={(size) =>
+                                    setProject((current) => ({
+                                      ...current,
+                                      globalSettings: {
+                                        ...current.globalSettings,
+                                        [control.xKey]: size.widthPercent / 100,
+                                        [control.yKey]: size.heightPercent / 100,
+                                      },
+                                    }))
+                                  }
+                                  onReset={() =>
+                                    setProject((current) => ({
+                                      ...current,
+                                      globalSettings: {
+                                        ...current.globalSettings,
+                                        [control.xKey]: 1,
+                                        [control.yKey]: 1,
+                                      },
+                                    }))
+                                  }
+                                />
                               ))}
                             </div>
                             {(project.globalSettings.hudNeedsPosition ||
@@ -10630,50 +10659,55 @@ const App: React.FC = () => {
                                 </label>
                                 {project.globalSettings.hudOverlay.position !== "stretch" && (
                                   <>
-                                    <div className="grid grid-cols-2 gap-2 rounded border border-white/10 bg-black/15 p-2">
-                                      <label className="text-[10px] font-bold text-neutral-400">
-                                        Width %
-                                        <input
-                                          type="number"
-                                          min="1"
-                                          max="500"
-                                          step="1"
-                                          className="mt-1 w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm"
-                                          value={project.globalSettings.hudOverlay.widthPercent ?? (project.globalSettings.hudOverlay.scale ?? 1) * 100}
-                                          onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, widthPercent: Math.max(1, Number(e.target.value) || 100) } } }))}
-                                        />
-                                        <input
-                                          type="range"
-                                          min="1"
-                                          max="300"
-                                          step="1"
-                                          className="mt-2 w-full accent-pink-500"
-                                          value={Math.min(300, project.globalSettings.hudOverlay.widthPercent ?? (project.globalSettings.hudOverlay.scale ?? 1) * 100)}
-                                          onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, widthPercent: Number(e.target.value) } } }))}
-                                        />
-                                      </label>
-                                      <label className="text-[10px] font-bold text-neutral-400">
-                                        Height %
-                                        <input
-                                          type="number"
-                                          min="1"
-                                          max="500"
-                                          step="1"
-                                          className="mt-1 w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm"
-                                          value={project.globalSettings.hudOverlay.heightPercent ?? (project.globalSettings.hudOverlay.scale ?? 1) * 100}
-                                          onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, heightPercent: Math.max(1, Number(e.target.value) || 100) } } }))}
-                                        />
-                                        <input
-                                          type="range"
-                                          min="1"
-                                          max="300"
-                                          step="1"
-                                          className="mt-2 w-full accent-pink-500"
-                                          value={Math.min(300, project.globalSettings.hudOverlay.heightPercent ?? (project.globalSettings.hudOverlay.scale ?? 1) * 100)}
-                                          onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, heightPercent: Number(e.target.value) } } }))}
-                                        />
-                                      </label>
-                                    </div>
+                                    <InterfaceSizeControl
+                                      label="Overlay artwork size"
+                                      description="Resize this decorative layer without changing the room or outer device shell."
+                                      min={1}
+                                      max={500}
+                                      widthPercent={
+                                        project.globalSettings.hudOverlay
+                                          .widthPercent ??
+                                        (project.globalSettings.hudOverlay
+                                          .scale ?? 1) *
+                                          100
+                                      }
+                                      heightPercent={
+                                        project.globalSettings.hudOverlay
+                                          .heightPercent ??
+                                        (project.globalSettings.hudOverlay
+                                          .scale ?? 1) *
+                                          100
+                                      }
+                                      onChange={(size) =>
+                                        setProject((current) => ({
+                                          ...current,
+                                          globalSettings: {
+                                            ...current.globalSettings,
+                                            hudOverlay: {
+                                              ...current.globalSettings
+                                                .hudOverlay,
+                                              widthPercent: size.widthPercent,
+                                              heightPercent:
+                                                size.heightPercent,
+                                            },
+                                          },
+                                        }))
+                                      }
+                                      onReset={() =>
+                                        setProject((current) => ({
+                                          ...current,
+                                          globalSettings: {
+                                            ...current.globalSettings,
+                                            hudOverlay: {
+                                              ...current.globalSettings
+                                                .hudOverlay,
+                                              widthPercent: 100,
+                                              heightPercent: 100,
+                                            },
+                                          },
+                                        }))
+                                      }
+                                    />
                                     <label className="flex items-center justify-between gap-2 text-sm text-neutral-300">
                                       Image fit
                                       <select

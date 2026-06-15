@@ -578,6 +578,12 @@ export interface Project {
     hudNeedsScale?: number;
     hudSkillsScale?: number;
     hudButtonsScale?: number;
+    hudNeedsScaleX?: number;
+    hudNeedsScaleY?: number;
+    hudSkillsScaleX?: number;
+    hudSkillsScaleY?: number;
+    hudButtonsScaleX?: number;
+    hudButtonsScaleY?: number;
     hudNeedsPosition?: { x: number; y: number };
     hudSkillsPosition?: { x: number; y: number };
     hudButtonsPosition?: { x: number; y: number };
