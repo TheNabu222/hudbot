@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Check, Crosshair, RotateCcw, X } from "lucide-react";
+import { DeviceFrameControl } from "../types";
 
 export interface DeviceFrameCalibration {
   assetId: string;
@@ -11,6 +12,7 @@ export interface DeviceFrameCalibration {
     width: number;
     height: number;
   };
+  controls?: DeviceFrameControl[];
 }
 
 interface DeviceFrameOverlayProps {
@@ -268,6 +270,7 @@ export const DeviceFrameCalibrator: React.FC<
                     width: Math.round(screenRect.width),
                     height: Math.round(screenRect.height),
                   },
+                  controls: initialCalibration?.controls || [],
                 });
               }}
               className="flex items-center gap-1.5 rounded border border-emerald-300 bg-emerald-400 px-4 py-2 font-comic text-xs font-bold text-neutral-950 shadow-[0_0_14px_rgba(0,255,204,0.25)] hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-35"

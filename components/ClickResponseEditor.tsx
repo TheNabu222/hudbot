@@ -41,6 +41,9 @@ interface ClickResponseEditorProps {
   needIds: string[];
   relationshipIds: string[];
   onChange: (responses: ClickResponse[]) => void;
+  heading?: string;
+  description?: string;
+  startNumber?: number;
 }
 
 const responseChoices: Array<{
@@ -123,6 +126,9 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
   needIds,
   relationshipIds,
   onChange,
+  heading = "Then also…",
+  description = "Add as many click responses as this object needs.",
+  startNumber = 2,
 }) => {
   const [isAdding, setIsAdding] = useState(false);
 
@@ -188,10 +194,10 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="font-comic text-sm font-bold text-white">
-            Then also…
+            {heading}
           </div>
           <p className="text-[10px] text-neutral-500">
-            Add as many click responses as this object needs.
+            {description}
           </p>
         </div>
         <button
@@ -239,7 +245,7 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
         >
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="font-comic text-xs font-bold text-emerald-300">
-              {index + 2}. {labelForInteraction(response.interaction)}
+              {index + startNumber}. {labelForInteraction(response.interaction)}
             </span>
             <div className="flex items-center gap-0.5">
               <button

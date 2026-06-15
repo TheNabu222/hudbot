@@ -155,15 +155,21 @@ const helpSections: HelpSection[] = [
           "Objects support filters, blend modes, parallax, animation presets, custom CSS classes, fit behavior, and responsive pin/stretch settings.",
       },
       {
-        title: "Device and CRT frames",
+        title: "Game shell and screen artwork",
         detail:
-          "Calibrate an outer CRT or device frame by identifying its inner playable window. The frame wraps the canvas automatically in Compose and Play, so do not also place the same frame artwork as a scene object.",
-        tip: "Outer Device Frame wraps the game. In-Screen HUD Artwork is a separate optional overlay drawn over gameplay.",
+          "The Game Shell is the CRT, television, handheld, or computer body around the marked playable window. Custom artwork over the screen is a separate decorative layer inside that window. Choose Place clickable screen controls to jump directly into a transparent UI Canvas over the room.",
+        tip: "Do not also place the shell as a scene object. Its outside buttons and ornaments belong to the shell layer; scenery and characters belong inside the marked screen.",
       },
       {
-        title: "Built-in HUD controls",
+        title: "Clickable shell buttons",
         detail:
-          "Open Options → Heads Up Display (HUD) to resize needs, skills, and built-in action buttons together from 50% to 150%. In Compose, clicking a needs or skills panel opens its real settings section.",
+          "After marking a Game Shell screen, choose Edit Outside Buttons. Drag boxes over the shell's knobs, icons, and decorative buttons, name each control, and give it one or many ordered responses with optional conditions and one-time behavior.",
+        tip: "Shell controls work in Play just like clickable scene objects: they can open inventory or custom UI, play sounds and cutscenes, change rooms, set story memories, start quests, and more.",
+      },
+      {
+        title: "Cavebot-made widgets",
+        detail:
+          "Open Options → Heads Up Display (HUD) to resize needs, skills, and built-in action buttons independently from 10% to 400%, using either a slider or an exact percentage. In UI Canvas, drag each visible widget directly into place. Custom screen artwork also has independent width and height controls.",
         tip: "Use HUD: Hidden when you need an unobstructed canvas. This only hides editor previews; it does not delete the player HUD.",
       },
       {

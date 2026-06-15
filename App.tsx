@@ -134,6 +134,7 @@ import { HelpCenterModal } from "./components/HelpCenterModal";
 import { RuleConditionEditor } from "./components/RuleConditionEditor";
 import { StudioFeatureHeader } from "./components/StudioFeatureHeader";
 import { AssetInspectorSlot } from "./components/AssetInspectorSlot";
+import { ShellControlEditor } from "./components/ShellControlEditor";
 import { get, set } from "idb-keyval";
 
 export interface SaveSlotMeta {
@@ -495,6 +496,7 @@ const App: React.FC = () => {
   const [calibratingFrameAssetId, setCalibratingFrameAssetId] = useState<
     string | null
   >(null);
+  const [isEditingShellControls, setIsEditingShellControls] = useState(false);
 
   const didDragRef = useRef(false);
 
@@ -1102,6 +1104,83 @@ const App: React.FC = () => {
   const [mouseRatio, setMouseRatio] = useState({ x: 0, y: 0 });
 
   const stageRef = useRef<HTMLDivElement>(null);
+  const [draggingHudWidget, setDraggingHudWidget] = useState<{
+    key: "hudNeedsPosition" | "hudSkillsPosition" | "hudButtonsPosition";
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
+
+  const handleHudWidgetPointerDown = (
+    event: React.PointerEvent<HTMLElement>,
+    key: "hudNeedsPosition" | "hudSkillsPosition" | "hudButtonsPosition",
+  ) => {
+    if (isPlaying || !stageRef.current) return;
+    event.stopPropagation();
+    didDragRef.current = false;
+    const stageRect = stageRef.current.getBoundingClientRect();
+    const widgetRect = event.currentTarget.getBoundingClientRect();
+    const scaleX = logicalStageWidth / stageRect.width;
+    const scaleY = logicalStageHeight / stageRect.height;
+    const widgetX = (widgetRect.left - stageRect.left) * scaleX;
+    const widgetY = (widgetRect.top - stageRect.top) * scaleY;
+    setDraggingHudWidget({
+      key,
+      pointerId: event.pointerId,
+      offsetX: (event.clientX - stageRect.left) * scaleX - widgetX,
+      offsetY: (event.clientY - stageRect.top) * scaleY - widgetY,
+    });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleHudWidgetPointerMove = (
+    event: React.PointerEvent<HTMLElement>,
+  ) => {
+    if (
+      !draggingHudWidget ||
+      draggingHudWidget.pointerId !== event.pointerId ||
+      !stageRef.current
+    ) {
+      return;
+    }
+    event.stopPropagation();
+    didDragRef.current = true;
+    const stageRect = stageRef.current.getBoundingClientRect();
+    const scaleX = logicalStageWidth / stageRect.width;
+    const scaleY = logicalStageHeight / stageRect.height;
+    const x =
+      (event.clientX - stageRect.left) * scaleX -
+      draggingHudWidget.offsetX;
+    const y =
+      (event.clientY - stageRect.top) * scaleY -
+      draggingHudWidget.offsetY;
+    setProject((current) => ({
+      ...current,
+      globalSettings: {
+        ...current.globalSettings,
+        [draggingHudWidget.key]: {
+          x: Math.round(x),
+          y: Math.round(y),
+        },
+      },
+    }));
+  };
+
+  const handleHudWidgetPointerUp = (
+    event: React.PointerEvent<HTMLElement>,
+  ) => {
+    if (
+      !draggingHudWidget ||
+      draggingHudWidget.pointerId !== event.pointerId
+    ) {
+      return;
+    }
+    event.stopPropagation();
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch (error) {}
+    setDraggingHudWidget(null);
+  };
 
   const getWorkingScene = () => {
     if (editorMode === "ui_stage" && !isPlaying) {
@@ -3215,6 +3294,34 @@ const App: React.FC = () => {
     }
   };
 
+  const handleShellControlClick = (
+    control: NonNullable<
+      NonNullable<Project["globalSettings"]["deviceFrame"]>["controls"]
+    >[number],
+  ) => {
+    handleObjectClick({
+      id: `shell-control::${control.id}`,
+      name: control.name,
+      src: "",
+      x: control.x,
+      y: control.y,
+      width: control.width,
+      height: control.height,
+      rotation: 0,
+      zIndex: 5000,
+      opacity: 1,
+      locked: true,
+      cursor: control.cursor || "pointer",
+      cursorAssetId: control.cursorAssetId,
+      animation: "none",
+      interaction: "none",
+      clickResponses: control.clickResponses,
+      blendMode: "normal",
+      parallaxSpeed: 1,
+      hasPhysics: false,
+    });
+  };
+
   const usedAssetSrcs = new Set(
     project.scenes.flatMap((s) => s.objects.map((o) => o.src)),
   );
@@ -3236,6 +3343,72 @@ const App: React.FC = () => {
   const uiSecondary = project.globalSettings.uiColorSecondary || "#94a3b8";
   const uiFont = project.globalSettings.uiFontFamily || "sans-serif";
   const uiRadius = `${project.globalSettings.uiBorderRadius ?? 8}px`;
+  const legacyHudScale = project.globalSettings.hudScale ?? 1;
+  const hudNeedsScale =
+    project.globalSettings.hudNeedsScale ?? legacyHudScale;
+  const hudSkillsScale =
+    project.globalSettings.hudSkillsScale ?? legacyHudScale;
+  const hudButtonsScale =
+    project.globalSettings.hudButtonsScale ?? legacyHudScale;
+  const hudOverlay = project.globalSettings.hudOverlay;
+  const hudOverlayAsset = hudOverlay?.assetId
+    ? project.assets.find((asset) => asset.id === hudOverlay.assetId)
+    : undefined;
+  const getHudOverlayStyle = (): React.CSSProperties => {
+    const position = hudOverlay?.position || "stretch";
+    const legacySize = (hudOverlay?.scale ?? 1) * 100;
+    const widthPercent = hudOverlay?.widthPercent ?? legacySize;
+    const heightPercent = hudOverlay?.heightPercent ?? legacySize;
+    const offsetX = hudOverlay?.offsetX || 0;
+    const offsetY = hudOverlay?.offsetY || 0;
+    const anchors: Record<string, React.CSSProperties> = {
+      center: {
+        left: "50%",
+        top: "50%",
+        transform: `translate(-50%, -50%) translate(${offsetX}px, ${offsetY}px)`,
+      },
+      "top-left": {
+        left: 0,
+        top: 0,
+        transform: `translate(${offsetX}px, ${offsetY}px)`,
+      },
+      "top-right": {
+        right: 0,
+        top: 0,
+        transform: `translate(${offsetX}px, ${offsetY}px)`,
+      },
+      "bottom-left": {
+        left: 0,
+        bottom: 0,
+        transform: `translate(${offsetX}px, ${offsetY}px)`,
+      },
+      "bottom-right": {
+        right: 0,
+        bottom: 0,
+        transform: `translate(${offsetX}px, ${offsetY}px)`,
+      },
+    };
+
+    return {
+      ...(position === "stretch"
+        ? { inset: 0, width: "100%", height: "100%" }
+        : {
+            width: `${widthPercent}%`,
+            height: `${heightPercent}%`,
+            ...anchors[position],
+          }),
+      backgroundImage: hudOverlayAsset
+        ? `url('${hudOverlayAsset.src}')`
+        : undefined,
+      backgroundSize:
+        hudOverlay?.fit === "contain" ? "contain" : "100% 100%",
+      backgroundPosition: "center",
+      backgroundRepeat: "no-repeat",
+      mixBlendMode: (hudOverlay?.blendMode || "normal") as any,
+      opacity: hudOverlay?.opacity ?? 1,
+      pointerEvents: hudOverlay?.pointerEvents === "auto" ? "auto" : "none",
+    };
+  };
   const deviceFrame = project.globalSettings.deviceFrame;
   const deviceFrameAsset = deviceFrame
     ? project.assets.find((asset) => asset.id === deviceFrame.assetId)
@@ -6759,19 +6932,10 @@ const App: React.FC = () => {
                   })()}
 
                 {/* HUD Overlay Preview */}
-                {(isPlaying || editorMode === "ui_stage") && project.globalSettings.hudOverlay?.assetId && (
+                {(isPlaying || editorMode === "ui_stage") && hudOverlayAsset && (
                   <div 
-                    className="absolute inset-0 pointer-events-none z-[8500]"
-                    style={{
-                      backgroundImage: `url('${project.assets.find(a => a.id === project.globalSettings.hudOverlay?.assetId)?.src}')`,
-                      backgroundSize: project.globalSettings.hudOverlay.position === "stretch" ? "100% 100%" : (project.globalSettings.hudOverlay.position ? "contain" : "100% 100%"),
-                      backgroundPosition: (project.globalSettings.hudOverlay.position && project.globalSettings.hudOverlay.position !== "stretch") ? project.globalSettings.hudOverlay.position.replace("-", " ") : "center",
-                      backgroundRepeat: "no-repeat",
-                      transform: `scale(${project.globalSettings.hudOverlay.scale ?? 1}) translate(${project.globalSettings.hudOverlay.offsetX || 0}px, ${project.globalSettings.hudOverlay.offsetY || 0}px)`,
-                      mixBlendMode: (project.globalSettings.hudOverlay.blendMode || "normal") as any,
-                      opacity: project.globalSettings.hudOverlay.opacity ?? 1,
-                      pointerEvents: project.globalSettings.hudOverlay.pointerEvents === "auto" ? "auto" : "none"
-                    }}
+                    className="absolute z-[8500]"
+                    style={getHudOverlayStyle()}
                   />
                 )}
 
@@ -7089,6 +7253,7 @@ const App: React.FC = () => {
                     {project.globalSettings.enableNeeds && (!hideEditorHud || isPlaying) && (
                       <div
                         onClick={() => {
+                          if (didDragRef.current) return;
                           if (!isPlaying) {
                             setSelectedObjectId(null);
                             setSelectedMultiIds([]);
@@ -7096,19 +7261,38 @@ const App: React.FC = () => {
                             window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Simulation & Overrides" } }));
                           }
                         }}
+                        onPointerDown={(event) =>
+                          handleHudWidgetPointerDown(
+                            event,
+                            "hudNeedsPosition",
+                          )
+                        }
+                        onPointerMove={handleHudWidgetPointerMove}
+                        onPointerUp={handleHudWidgetPointerUp}
                         className={`absolute top-4 right-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2 transition-all ${
                           !isPlaying 
-                            ? "cursor-pointer hover:ring-2 hover:ring-emerald-400 group/needs select-none" 
+                            ? "cursor-move hover:ring-2 hover:ring-emerald-400 group/needs select-none"
                             : ""
                         }`}
                         style={{
+                          ...(project.globalSettings.hudNeedsPosition
+                            ? {
+                                left:
+                                  project.globalSettings.hudNeedsPosition.x,
+                                top: project.globalSettings.hudNeedsPosition.y,
+                                right: "auto",
+                              }
+                            : {}),
                           backgroundColor: `${uiBg}cc`,
                           border: `1px solid ${uiPrimary}80`,
                           borderRadius: uiRadius,
                           fontFamily: uiFont,
                           width: "150px",
-                          transform: `scale(${project.globalSettings.hudScale ?? 1})`,
-                          transformOrigin: "top right",
+                          transform: `scale(${hudNeedsScale})`,
+                          transformOrigin: project.globalSettings
+                            .hudNeedsPosition
+                            ? "top left"
+                            : "top right",
                         }}
                       >
                         <div
@@ -7182,6 +7366,7 @@ const App: React.FC = () => {
                     {project.globalSettings.enableTTRPGStats && (!hideEditorHud || isPlaying) && (
                       <div
                         onClick={() => {
+                          if (didDragRef.current) return;
                           if (!isPlaying) {
                             setSelectedObjectId(null);
                             setSelectedMultiIds([]);
@@ -7189,22 +7374,45 @@ const App: React.FC = () => {
                             window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Simulation & Overrides" } }));
                           }
                         }}
+                        onPointerDown={(event) =>
+                          handleHudWidgetPointerDown(
+                            event,
+                            "hudSkillsPosition",
+                          )
+                        }
+                        onPointerMove={handleHudWidgetPointerMove}
+                        onPointerUp={handleHudWidgetPointerUp}
                         className={`absolute top-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2 transition-all ${
                           !isPlaying 
-                            ? "cursor-pointer hover:ring-2 hover:ring-emerald-400 group/skills select-none" 
+                            ? "cursor-move hover:ring-2 hover:ring-emerald-400 group/skills select-none"
                             : ""
                         }`}
                         style={{
-                          right: project.globalSettings.enableNeeds && (!hideEditorHud || isPlaying)
-                            ? "180px"
-                            : "16px",
+                          ...(project.globalSettings.hudSkillsPosition
+                            ? {
+                                left:
+                                  project.globalSettings.hudSkillsPosition.x,
+                                top:
+                                  project.globalSettings.hudSkillsPosition.y,
+                                right: "auto",
+                              }
+                            : {
+                                right:
+                                  project.globalSettings.enableNeeds &&
+                                  (!hideEditorHud || isPlaying)
+                                    ? "180px"
+                                    : "16px",
+                              }),
                           backgroundColor: `${uiBg}cc`,
                           border: `1px solid ${uiPrimary}80`,
                           borderRadius: uiRadius,
                           fontFamily: uiFont,
                           width: "150px",
-                          transform: `scale(${project.globalSettings.hudScale ?? 1})`,
-                          transformOrigin: "top right",
+                          transform: `scale(${hudSkillsScale})`,
+                          transformOrigin: project.globalSettings
+                            .hudSkillsPosition
+                            ? "top left"
+                            : "top right",
                         }}
                       >
                         <div
@@ -7253,10 +7461,31 @@ const App: React.FC = () => {
                     {/* HUD Button Bar */}
                     {(!hideEditorHud || isPlaying) && (
                       <div
-                        className="absolute bottom-4 right-4 flex items-end gap-2 z-[2000]"
+                        onPointerDown={(event) =>
+                          handleHudWidgetPointerDown(
+                            event,
+                            "hudButtonsPosition",
+                          )
+                        }
+                        onPointerMove={handleHudWidgetPointerMove}
+                        onPointerUp={handleHudWidgetPointerUp}
+                        className={`absolute bottom-4 right-4 flex items-end gap-2 z-[2000] ${!isPlaying ? "cursor-move" : ""}`}
                         style={{
-                          transform: `scale(${project.globalSettings.hudScale ?? 1})`,
-                          transformOrigin: "bottom right",
+                          ...(project.globalSettings.hudButtonsPosition
+                            ? {
+                                left:
+                                  project.globalSettings.hudButtonsPosition.x,
+                                top:
+                                  project.globalSettings.hudButtonsPosition.y,
+                                right: "auto",
+                                bottom: "auto",
+                              }
+                            : {}),
+                          transform: `scale(${hudButtonsScale})`,
+                          transformOrigin: project.globalSettings
+                            .hudButtonsPosition
+                            ? "top left"
+                            : "bottom right",
                         }}
                       >
                         {project.globalSettings.enableSettingsHud &&
@@ -8891,6 +9120,59 @@ const App: React.FC = () => {
                     className="pointer-events-none z-[4000]"
                   />
                 )}
+                {showDeviceFrame &&
+                  (deviceFrame!.controls || []).map((control) => (
+                    <button
+                      key={control.id}
+                      type="button"
+                      aria-label={control.name}
+                      title={
+                        isPlaying
+                          ? control.name
+                          : `${control.name} · edit shell controls`
+                      }
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (isPlaying) {
+                          handleShellControlClick(control);
+                        } else {
+                          setIsEditingShellControls(true);
+                        }
+                      }}
+                      onPointerEnter={() => {
+                        if (isPlaying && control.cursorAssetId) {
+                          setHoverCursorAssetId(control.cursorAssetId);
+                        }
+                      }}
+                      onPointerLeave={() => {
+                        if (control.cursorAssetId) {
+                          setHoverCursorAssetId(null);
+                        }
+                      }}
+                      className={`absolute z-[4500] ${
+                        !isPlaying && project.globalSettings.showGhostOutlines
+                          ? "border-2 border-dashed border-pink-400 bg-pink-500/15"
+                          : "border-0 bg-transparent"
+                      }`}
+                      style={{
+                        left: `${(control.x / deviceFrame!.outerWidth) * 100}%`,
+                        top: `${(control.y / deviceFrame!.outerHeight) * 100}%`,
+                        width: `${(control.width / deviceFrame!.outerWidth) * 100}%`,
+                        height: `${(control.height / deviceFrame!.outerHeight) * 100}%`,
+                        cursor:
+                          isPlaying && control.cursorAssetId
+                            ? "none"
+                            : control.cursor || "pointer",
+                      }}
+                    >
+                      {!isPlaying &&
+                        project.globalSettings.showGhostOutlines && (
+                          <span className="absolute -top-5 left-0 whitespace-nowrap rounded bg-neutral-950/90 px-1.5 py-0.5 font-comic text-[9px] font-bold text-pink-300">
+                            SHELL · {control.name}
+                          </span>
+                        )}
+                    </button>
+                  ))}
 
                 {/* Drag-to-resize handles for canvas (stage) boundary */}
                 {!isPlaying && editorMode === "stage" && isCanvasResizeMode && (
@@ -9645,21 +9927,12 @@ const App: React.FC = () => {
                                 </div>
 
                                 {/* HUD Overlay Preview */}
-                                {project.globalSettings.hudOverlay?.assetId && (
+                                {hudOverlayAsset && (
                                   <div 
-                                    className="absolute inset-0 pointer-events-none"
-                                    style={{
-                                      backgroundImage: `url('${project.assets.find(a => a.id === project.globalSettings.hudOverlay?.assetId)?.src}')`,
-                                      backgroundSize: project.globalSettings.hudOverlay.position === "stretch" ? "100% 100%" : (project.globalSettings.hudOverlay.position ? "contain" : "100% 100%"),
-                                      backgroundPosition: (project.globalSettings.hudOverlay.position && project.globalSettings.hudOverlay.position !== "stretch") ? project.globalSettings.hudOverlay.position.replace("-", " ") : "center",
-                                      backgroundRepeat: "no-repeat",
-                                      transform: `scale(${project.globalSettings.hudOverlay.scale ?? 1}) translate(${project.globalSettings.hudOverlay.offsetX || 0}px, ${project.globalSettings.hudOverlay.offsetY || 0}px)`,
-                                      mixBlendMode: (project.globalSettings.hudOverlay.blendMode || "normal") as any,
-                                      opacity: project.globalSettings.hudOverlay.opacity ?? 1,
-                                    }}
+                                    className="absolute pointer-events-none border-2 border-dashed border-orange-500"
+                                    style={getHudOverlayStyle()}
                                   >
-                                    <div className="absolute inset-0 border-2 border-orange-500 border-dashed m-[10%]" />
-                                    <div className="absolute top-[10%] left-1/2 -translate-x-1/2">
+                                    <div className="absolute top-1 left-1/2 -translate-x-1/2">
                                       <span className="bg-orange-500/80 text-white px-1 font-bold text-[8px] rounded">HUD OVERLAY BOUNDARIES</span>
                                     </div>
                                   </div>
@@ -9963,60 +10236,128 @@ const App: React.FC = () => {
                       <Accordion title="Heads Up Display (HUD)">
                         <div className="space-y-4 bg-neutral-950/50 p-2 rounded">
                           <div className="rounded border border-pink-500/20 bg-pink-500/5 p-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div>
-                                <span className="font-comic text-sm font-bold text-pink-300">
-                                  Built-in HUD Size
-                                </span>
-                                <p className="mt-0.5 text-[10px] leading-relaxed text-neutral-500">
-                                  Resize the needs, skills, and built-in button
-                                  clusters together without changing the game
-                                  canvas.
-                                </p>
-                              </div>
-                              <span className="font-mono text-xs font-bold text-[#00ffcc]">
-                                {Math.round(
-                                  (project.globalSettings.hudScale ?? 1) * 100,
-                                )}
-                                %
-                              </span>
+                            <span className="font-comic text-sm font-bold text-pink-300">
+                              Cavebot-made widgets
+                            </span>
+                            <p className="mt-0.5 text-[10px] leading-relaxed text-neutral-500">
+                              These are optional ready-made game pieces. Resize
+                              each group independently; they do not resize your
+                              room, frame, or custom artwork.
+                            </p>
+                            <p className="mt-1 rounded border border-[#00ffcc]/20 bg-[#00ffcc]/5 px-2 py-1.5 text-[10px] font-bold text-[#00ffcc]">
+                              In UI Canvas, drag any visible widget wherever you
+                              want it. No X/Y math required.
+                            </p>
+                            <div className="mt-3 space-y-3">
+                              {(
+                                [
+                                  {
+                                    key: "hudNeedsScale",
+                                    label: "Needs panel",
+                                    value: hudNeedsScale,
+                                  },
+                                  {
+                                    key: "hudSkillsScale",
+                                    label: "Skills panel",
+                                    value: hudSkillsScale,
+                                  },
+                                  {
+                                    key: "hudButtonsScale",
+                                    label: "Built-in buttons",
+                                    value: hudButtonsScale,
+                                  },
+                                ] as const
+                              ).map((control) => (
+                                <div
+                                  key={control.key}
+                                  className="rounded border border-white/10 bg-black/15 p-2"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[10px] font-bold text-neutral-300">
+                                      {control.label}
+                                    </span>
+                                    <label className="flex items-center gap-1 font-mono text-[10px] font-bold text-[#00ffcc]">
+                                      <input
+                                        type="number"
+                                        min="10"
+                                        max="400"
+                                        step="1"
+                                        value={Math.round(control.value * 100)}
+                                        onChange={(event) => {
+                                          const percentage = Math.max(
+                                            10,
+                                            Math.min(
+                                              400,
+                                              Number(event.target.value) || 100,
+                                            ),
+                                          );
+                                          setProject((current) => ({
+                                            ...current,
+                                            globalSettings: {
+                                              ...current.globalSettings,
+                                              [control.key]: percentage / 100,
+                                            },
+                                          }));
+                                        }}
+                                        className="w-14 rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-right text-[#00ffcc]"
+                                      />
+                                      %
+                                    </label>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min="0.1"
+                                    max="4"
+                                    step="0.01"
+                                    value={control.value}
+                                    onChange={(event) =>
+                                      setProject((current) => ({
+                                        ...current,
+                                        globalSettings: {
+                                          ...current.globalSettings,
+                                          [control.key]: Number(
+                                            event.target.value,
+                                          ),
+                                        },
+                                      }))
+                                    }
+                                    className="mt-2 w-full accent-pink-500"
+                                  />
+                                </div>
+                              ))}
                             </div>
-                            <div className="mt-3 flex items-center gap-2">
-                              <span className="text-[9px] font-bold text-neutral-500">
-                                SMALL
-                              </span>
-                              <input
-                                type="range"
-                                min="0.5"
-                                max="1.5"
-                                step="0.05"
-                                value={project.globalSettings.hudScale ?? 1}
-                                onChange={(event) =>
+                            {(project.globalSettings.hudNeedsPosition ||
+                              project.globalSettings.hudSkillsPosition ||
+                              project.globalSettings.hudButtonsPosition) && (
+                              <button
+                                type="button"
+                                onClick={() =>
                                   setProject((current) => ({
                                     ...current,
                                     globalSettings: {
                                       ...current.globalSettings,
-                                      hudScale: Number(event.target.value),
+                                      hudNeedsPosition: undefined,
+                                      hudSkillsPosition: undefined,
+                                      hudButtonsPosition: undefined,
                                     },
                                   }))
                                 }
-                                className="min-w-0 flex-1 accent-pink-500"
-                              />
-                              <span className="text-[9px] font-bold text-neutral-500">
-                                BIG
-                              </span>
-                            </div>
+                                className="mt-3 rounded border border-neutral-700 px-2 py-1 text-[9px] font-bold text-neutral-400 hover:bg-neutral-800 hover:text-white"
+                              >
+                                Put widgets back in their corners
+                              </button>
+                            )}
                           </div>
                           <div className="flex flex-col gap-2 border-b border-emerald-500/20 pb-3">
                             <div>
                               <span className="font-comic text-sm font-bold text-emerald-300">
-                                Outer Device Frame
+                                  Game shell + outside controls
                               </span>
                               <p className="mt-0.5 text-[10px] leading-relaxed text-neutral-500">
-                                Wraps around the playable canvas like a CRT,
-                                television, or computer shell. It is not a HUD
-                                image and should not also be placed as a scene
-                                object.
+                                Your CRT, television, computer, handheld, or
+                                other body around the playable screen. Artwork
+                                and buttons outside the marked screen belong to
+                                this shell—not inside the room.
                               </p>
                             </div>
 
@@ -10032,7 +10373,12 @@ const App: React.FC = () => {
                                     {deviceFrameAsset.name}
                                   </div>
                                   <div className="mt-1 text-[10px] text-emerald-300">
-                                    Screen marked and ready
+                                    Screen marked ·{" "}
+                                    {deviceFrame.controls?.length || 0} outside
+                                    control
+                                    {(deviceFrame.controls?.length || 0) === 1
+                                      ? ""
+                                      : "s"}
                                   </div>
                                   <div className="mt-2 flex flex-wrap gap-1.5">
                                     <button
@@ -10045,6 +10391,15 @@ const App: React.FC = () => {
                                       className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-300 hover:bg-emerald-500/20"
                                     >
                                       Mark Screen Again
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setIsEditingShellControls(true)
+                                      }
+                                      className="rounded border border-pink-500/40 bg-pink-500/10 px-2 py-1 text-[10px] font-bold text-pink-300 hover:bg-pink-500/20"
+                                    >
+                                      Edit Outside Buttons
                                     </button>
                                     <button
                                       type="button"
@@ -10167,14 +10522,53 @@ const App: React.FC = () => {
                           {/* HUD Overlay */}
                           <div className="flex flex-col gap-1 border-b border-neutral-800 pb-2">
                               <span className="text-xs font-bold text-neutral-500 uppercase">
-                              In-Screen HUD Artwork
+                              Custom artwork over the screen
                             </span>
                             <p className="text-[10px] leading-relaxed text-neutral-500">
-                              Optional artwork drawn over the game screen, such
-                              as decorative buttons, glass glare, or a themed
-                              interface plate. This is separate from the outer
-                              device frame.
+                              Optional non-room artwork laid over the playable
+                              screen: glass glare, a border, a decorative plate,
+                              or illustrated controls. If it needs clickable
+                              pieces, build those in UI Canvas over this image.
                             </p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const existingMenu =
+                                  (project.uiMenus || []).find(
+                                    (menu) =>
+                                      menu.id === project.currentUiMenuId,
+                                  ) || (project.uiMenus || [])[0];
+                                if (existingMenu) {
+                                  setProject((current) => ({
+                                    ...current,
+                                    currentUiMenuId: existingMenu.id,
+                                  }));
+                                } else {
+                                  const newMenu: Scene = {
+                                    id: uuidv4(),
+                                    name: "Game Screen Controls",
+                                    width: logicalStageWidth,
+                                    height: logicalStageHeight,
+                                    backgroundColor: "transparent",
+                                    objects: [],
+                                    blocksClicks: false,
+                                    isOpenByDefault: true,
+                                  };
+                                  pushHistory({
+                                    ...project,
+                                    uiMenus: [
+                                      ...(project.uiMenus || []),
+                                      newMenu,
+                                    ],
+                                    currentUiMenuId: newMenu.id,
+                                  });
+                                }
+                                setEditorMode("ui_stage");
+                              }}
+                              className="my-1 w-full rounded border border-pink-400/40 bg-pink-500/10 px-3 py-2 font-comic text-xs font-bold text-pink-300 hover:bg-pink-500/20"
+                            >
+                              Place clickable screen controls →
+                            </button>
                             <AssetInspectorSlot
                               label="Overlay artwork"
                               asset={project.assets.find(
@@ -10224,10 +10618,10 @@ const App: React.FC = () => {
                                   <input type="range" min="0" max="1" step="0.1" value={project.globalSettings.hudOverlay.opacity ?? 1} onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, opacity: parseFloat(e.target.value) } } }))} />
                                 </label>
                                 <label className="flex items-center justify-between gap-2 text-sm text-neutral-300">
-                                  Position
+                                  Placement
                                   <select className="bg-neutral-800 border-neutral-700 rounded text-sm px-1 py-0.5" value={project.globalSettings.hudOverlay.position || "stretch"} onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, position: e.target.value as any } } }))}>
-                                    <option value="stretch">Stretch to Screen</option>
-                                    <option value="center">Center</option>
+                                    <option value="stretch">Fill the whole screen</option>
+                                    <option value="center">Float in the center</option>
                                     <option value="top-left">Top Left</option>
                                     <option value="top-right">Top Right</option>
                                     <option value="bottom-left">Bottom Left</option>
@@ -10236,12 +10630,63 @@ const App: React.FC = () => {
                                 </label>
                                 {project.globalSettings.hudOverlay.position !== "stretch" && (
                                   <>
+                                    <div className="grid grid-cols-2 gap-2 rounded border border-white/10 bg-black/15 p-2">
+                                      <label className="text-[10px] font-bold text-neutral-400">
+                                        Width %
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          max="500"
+                                          step="1"
+                                          className="mt-1 w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm"
+                                          value={project.globalSettings.hudOverlay.widthPercent ?? (project.globalSettings.hudOverlay.scale ?? 1) * 100}
+                                          onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, widthPercent: Math.max(1, Number(e.target.value) || 100) } } }))}
+                                        />
+                                        <input
+                                          type="range"
+                                          min="1"
+                                          max="300"
+                                          step="1"
+                                          className="mt-2 w-full accent-pink-500"
+                                          value={Math.min(300, project.globalSettings.hudOverlay.widthPercent ?? (project.globalSettings.hudOverlay.scale ?? 1) * 100)}
+                                          onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, widthPercent: Number(e.target.value) } } }))}
+                                        />
+                                      </label>
+                                      <label className="text-[10px] font-bold text-neutral-400">
+                                        Height %
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          max="500"
+                                          step="1"
+                                          className="mt-1 w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm"
+                                          value={project.globalSettings.hudOverlay.heightPercent ?? (project.globalSettings.hudOverlay.scale ?? 1) * 100}
+                                          onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, heightPercent: Math.max(1, Number(e.target.value) || 100) } } }))}
+                                        />
+                                        <input
+                                          type="range"
+                                          min="1"
+                                          max="300"
+                                          step="1"
+                                          className="mt-2 w-full accent-pink-500"
+                                          value={Math.min(300, project.globalSettings.hudOverlay.heightPercent ?? (project.globalSettings.hudOverlay.scale ?? 1) * 100)}
+                                          onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, heightPercent: Number(e.target.value) } } }))}
+                                        />
+                                      </label>
+                                    </div>
                                     <label className="flex items-center justify-between gap-2 text-sm text-neutral-300">
-                                      Scale Override
-                                      <input type="number" step="0.1" className="bg-neutral-800 border-neutral-700 rounded px-2 w-20 text-sm" value={project.globalSettings.hudOverlay.scale ?? 1} onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, scale: parseFloat(e.target.value) || 1 } } }))} />
+                                      Image fit
+                                      <select
+                                        className="rounded border border-neutral-700 bg-neutral-800 px-1 py-0.5 text-sm"
+                                        value={project.globalSettings.hudOverlay.fit || "stretch"}
+                                        onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, fit: e.target.value as "stretch" | "contain" } } }))}
+                                      >
+                                        <option value="stretch">Fill chosen box</option>
+                                        <option value="contain">Keep image shape</option>
+                                      </select>
                                     </label>
                                     <label className="flex items-center justify-between gap-2 text-sm text-neutral-300">
-                                      Offset X / Y
+                                      Nudge left/right · up/down
                                       <div className="flex gap-1">
                                         <input type="number" className="bg-neutral-800 border-neutral-700 rounded px-2 w-16 text-sm" placeholder="X" value={project.globalSettings.hudOverlay.offsetX || 0} onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, offsetX: parseInt(e.target.value) || 0 } } }))} />
                                         <input type="number" className="bg-neutral-800 border-neutral-700 rounded px-2 w-16 text-sm" placeholder="Y" value={project.globalSettings.hudOverlay.offsetY || 0} onChange={e => setProject(p => ({ ...p, globalSettings: { ...p.globalSettings, hudOverlay: { ...p.globalSettings.hudOverlay, offsetY: parseInt(e.target.value) || 0 } } }))} />
@@ -17791,6 +18236,55 @@ const App: React.FC = () => {
             />
           );
         })()}
+
+      {isEditingShellControls &&
+        deviceFrame &&
+        deviceFrameAsset && (
+          <ShellControlEditor
+            calibration={deviceFrame as DeviceFrameCalibration}
+            imageSrc={deviceFrameAsset.src}
+            assets={project.assets}
+            scenes={project.scenes}
+            dialogueTrees={project.dialogueTrees || []}
+            inventoryItems={project.inventoryItems || []}
+            quests={project.quests || []}
+            gameFlags={project.gameFlags || []}
+            uiMenus={project.uiMenus || []}
+            skillIds={
+              project.globalSettings.customSkills?.length
+                ? project.globalSettings.customSkills
+                : ["naturalist", "occultist", "scribal"]
+            }
+            needIds={
+              project.globalSettings.customNeeds?.length
+                ? project.globalSettings.customNeeds
+                : [
+                    "rest",
+                    "hunger",
+                    "connection",
+                    "spiritual",
+                    "novelty",
+                  ]
+            }
+            relationshipIds={(project.factions || []).map(
+              (faction) => faction.id,
+            )}
+            onCancel={() => setIsEditingShellControls(false)}
+            onSave={(controls) => {
+              pushHistory({
+                ...project,
+                globalSettings: {
+                  ...project.globalSettings,
+                  deviceFrame: {
+                    ...deviceFrame,
+                    controls,
+                  },
+                },
+              });
+              setIsEditingShellControls(false);
+            }}
+          />
+        )}
 
       {assetPickerCb && (
         <AssetPickerModal

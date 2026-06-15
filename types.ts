@@ -136,6 +136,18 @@ export interface ClickResponse {
   triggerOnce?: boolean;
 }
 
+export interface DeviceFrameControl {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  cursor?: CursorType;
+  cursorAssetId?: string;
+  clickResponses: ClickResponse[];
+}
+
 export interface DialogueChoice {
   id: string;
   text: string;
@@ -547,6 +559,7 @@ export interface Project {
         width: number;
         height: number;
       };
+      controls?: DeviceFrameControl[];
     };
     hudOverlay?: {
       assetId?: string;
@@ -554,11 +567,20 @@ export interface Project {
       blendMode?: string;
       pointerEvents?: "none" | "auto";
       scale?: number;
+      widthPercent?: number;
+      heightPercent?: number;
+      fit?: "stretch" | "contain";
       position?: "stretch" | "center" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
       offsetX?: number;
       offsetY?: number;
     };
     hudScale?: number;
+    hudNeedsScale?: number;
+    hudSkillsScale?: number;
+    hudButtonsScale?: number;
+    hudNeedsPosition?: { x: number; y: number };
+    hudSkillsPosition?: { x: number; y: number };
+    hudButtonsPosition?: { x: number; y: number };
     uiTheme?:
       | "default"
       | "barbie"
