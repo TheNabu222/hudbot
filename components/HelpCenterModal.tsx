@@ -90,7 +90,7 @@ const helpSections: HelpSection[] = [
       {
         title: "Browse without loading everything",
         detail:
-          "The asset popup supports All, Recent, Favorites, In Canvas, search, and folder browsing. Repository folders are loaded only when opened to keep large collections responsive.",
+          "The asset popup supports All, Recent, Favorites, In Canvas, search, and folder browsing. Repository browsing is limited to entropic-ai/assets/_cavebot-assets, and its folders load only when opened to keep the collection responsive.",
       },
       {
         title: "Edit metadata",
@@ -147,7 +147,14 @@ const helpSections: HelpSection[] = [
       {
         title: "Device and CRT frames",
         detail:
-          "Calibrate irregular screen frames by identifying their inner playable window. The scene scales into that window while frame art and external hitboxes remain aligned.",
+          "Calibrate an outer CRT or device frame by identifying its inner playable window. The frame wraps the canvas automatically in Compose and Play, so do not also place the same frame artwork as a scene object.",
+        tip: "Outer Device Frame wraps the game. In-Screen HUD Artwork is a separate optional overlay drawn over gameplay.",
+      },
+      {
+        title: "Built-in HUD controls",
+        detail:
+          "Open Options → Heads Up Display (HUD) to resize needs, skills, and built-in action buttons together from 50% to 150%. In Compose, clicking a needs or skills panel opens its real settings section.",
+        tip: "Use HUD: Hidden when you need an unobstructed canvas. This only hides editor previews; it does not delete the player HUD.",
       },
       {
         title: "Reusable stamps",
@@ -258,7 +265,7 @@ const helpSections: HelpSection[] = [
       {
         title: "Create maps",
         detail:
-          "Make separate maps, choose a background, and place location nodes spatially on the map board.",
+          "Make separate maps, choose a background, and place location nodes spatially on the map board. Artwork thumbnails preserve their original proportions, and a chosen background appears immediately on the active map.",
       },
       {
         title: "Link locations",

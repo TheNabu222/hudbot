@@ -2425,9 +2425,14 @@ const App: React.FC = () => {
 
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 50;
+  const CAVEBOT_ASSET_ROOT = "assets/_cavebot-assets";
 
   const fetchFromGitHub = async (folderPath = "", force = false) => {
-    if (!force && loadedRepositoryFolders.includes(folderPath)) return;
+    const relativeFolder = folderPath
+      .split("/")
+      .filter((part) => part && part !== "." && part !== "..")
+      .join("/");
+    if (!force && loadedRepositoryFolders.includes(relativeFolder)) return;
     setIsFetchingGithub(true);
     try {
       const headers: HeadersInit = {};
@@ -2435,7 +2440,10 @@ const App: React.FC = () => {
         headers["Authorization"] =
           `token ${import.meta.env.VITE_GITHUB_TOKEN}`;
       }
-      const encodedFolder = folderPath
+      const repositoryPath = relativeFolder
+        ? `${CAVEBOT_ASSET_ROOT}/${relativeFolder}`
+        : CAVEBOT_ASSET_ROOT;
+      const encodedFolder = repositoryPath
         .split("/")
         .filter(Boolean)
         .map((part) => encodeURIComponent(part))
@@ -2452,7 +2460,12 @@ const App: React.FC = () => {
 
       const discoveredFolders = directoryItems
         .filter((item: any) => item.type === "dir")
-        .map((item: any) => item.path as string);
+        .map((item: any) =>
+          (item.path as string)
+            .slice(CAVEBOT_ASSET_ROOT.length)
+            .replace(/^\/+/, ""),
+        )
+        .filter(Boolean);
       setRepositoryFolders((current) =>
         Array.from(new Set([...current, ...discoveredFolders])).sort(),
       );
@@ -2468,7 +2481,10 @@ const App: React.FC = () => {
 
       const newAssets: Asset[] = validFiles.map((file: any) => {
         const name = file.name || file.path.split("/").pop();
-        const parts = file.path.split("/");
+        const relativePath = file.path
+          .slice(CAVEBOT_ASSET_ROOT.length)
+          .replace(/^\/+/, "");
+        const parts = relativePath.split("/");
         parts.pop();
         const category = parts.length > 0 ? parts.join("/") : "root";
         const encodedPath = file.path
@@ -2539,7 +2555,7 @@ const App: React.FC = () => {
         };
       });
       setLoadedRepositoryFolders((current) =>
-        Array.from(new Set([...current, folderPath])),
+        Array.from(new Set([...current, relativeFolder])),
       );
     } catch (error: any) {
       console.error("GitHub fetch failed", error);
@@ -3224,9 +3240,9 @@ const App: React.FC = () => {
     ? project.assets.find((asset) => asset.id === deviceFrame.assetId)
     : undefined;
   const showDeviceFrame = !!(
-    isPlaying &&
     deviceFrame &&
-    deviceFrameAsset
+    deviceFrameAsset &&
+    (isPlaying || editorMode === "stage" || editorMode === "ui_stage")
   );
   const logicalStageWidth =
     currentScene.width || project.globalSettings.stageWidth || 800;
@@ -4793,11 +4809,8 @@ const App: React.FC = () => {
               {(editorMode === "stage" || editorMode === "ui_stage") &&
                 !isPlaying && (
                   <div
-                    className="absolute z-[5000] flex bg-neutral-900 border border-neutral-700 p-1 rounded-lg shadow-2xl items-center gap-1"
+                    className={`${quickEditPos ? "absolute" : "relative self-center mb-3"} z-[5000] flex bg-neutral-900 border border-neutral-700 p-1 rounded-lg shadow-2xl items-center gap-1`}
                     style={{
-                      top: quickEditPos ? undefined : "1rem",
-                      left: quickEditPos ? undefined : "50%",
-                      transform: quickEditPos ? "none" : "translate(-50%, 0)",
                       ...(quickEditPos && {
                         left: quickEditPos.x,
                         top: quickEditPos.y,
@@ -4843,6 +4856,16 @@ const App: React.FC = () => {
                         <circle cx="8" cy="16" r="1.5" />
                       </svg>
                     </div>
+                    {quickEditPos && (
+                      <button
+                        type="button"
+                        onClick={() => setQuickEditPos(null)}
+                        className="rounded border border-neutral-700 bg-neutral-950/60 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-neutral-400 hover:border-[#00ffcc]/60 hover:text-[#00ffcc]"
+                        title="Dock this manager above the canvas again"
+                      >
+                        Dock
+                      </button>
+                    )}
                     <div
                       className={`flex items-center gap-2 rounded-md px-2 transition-all ${editorMode === "stage" ? "bg-indigo-600 text-white shadow-inner" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
                     >
@@ -4940,7 +4963,7 @@ const App: React.FC = () => {
                 )}
 
               <div
-                className={`relative ml-0 mr-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 overflow-visible ${isPlaying ? "border-transparent" : "border-neutral-800 border"}`}
+                className={`relative mx-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 overflow-visible ${isPlaying ? "border-transparent" : "border-neutral-800 border"}`}
                 style={{
                   width: showDeviceFrame
                     ? deviceFrame!.outerWidth
@@ -4987,6 +5010,13 @@ const App: React.FC = () => {
                         }}
                       >
                         {bgScene.objects
+                          .filter(
+                            (obj) =>
+                              !deviceFrame ||
+                              !deviceFrameAsset ||
+                              (obj._assetId !== deviceFrame.assetId &&
+                                obj.src !== deviceFrameAsset.src),
+                          )
                           .sort((a, b) => a.zIndex - b.zIndex)
                           .map((obj) => (
                             <div
@@ -5158,6 +5188,13 @@ const App: React.FC = () => {
                         .map((obj) => {
                           if (isPlaying && collectedObjects.includes(obj.id))
                             return null;
+                          if (
+                            showDeviceFrame &&
+                            (obj._assetId === deviceFrame?.assetId ||
+                              obj.src === deviceFrameAsset?.src)
+                          ) {
+                            return null;
+                          }
 
                           // Evaluate Story Event Conditions
                           if (isPlaying) {
@@ -5965,10 +6002,18 @@ const App: React.FC = () => {
                           overflow: "visible",
                         }}
                       >
-                        {uiMenu.objects.map((obj) => (
+                        {uiMenu.objects
+                          .filter(
+                            (obj) =>
+                              !!obj.src ||
+                              !!obj.isUiElement ||
+                              !!obj.isText ||
+                              !!obj.isHitbox,
+                          )
+                          .map((obj) => (
                           <div
                             key={`ghost-fg-obj-${obj.id}`}
-                            className="absolute border border-dashed border-emerald-500/30 opacity-60 mix-blend-screen pointer-events-none"
+                            className="absolute border border-dashed border-emerald-500/45 opacity-70 pointer-events-none"
                             style={{
                               left: obj.x,
                               top: obj.y,
@@ -5977,8 +6022,15 @@ const App: React.FC = () => {
                               transform: `rotate(${obj.rotation}deg)`,
                             }}
                           >
-                            <span className="absolute -top-4 left-0 text-[8px] text-emerald-400 bg-black/50 px-1 rounded truncate max-w-full">
-                              {obj.name}
+                            {!!obj.src && !obj.isHitbox && !obj.isText && (
+                              <img
+                                src={obj.src}
+                                alt=""
+                                className="h-full w-full object-contain opacity-60"
+                              />
+                            )}
+                            <span className="absolute -top-5 left-0 text-[8px] text-emerald-200 bg-neutral-950/90 px-1 rounded truncate max-w-full">
+                              UI preview · {obj.name}
                             </span>
                           </div>
                         ))}
@@ -7051,7 +7103,7 @@ const App: React.FC = () => {
                             setSelectedObjectId(null);
                             setSelectedMultiIds([]);
                             setRightSidebarTab("properties");
-                            window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Gameplay Settings" } }));
+                            window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Simulation & Overrides" } }));
                           }
                         }}
                         className={`absolute top-4 right-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2 transition-all ${
@@ -7065,6 +7117,8 @@ const App: React.FC = () => {
                           borderRadius: uiRadius,
                           fontFamily: uiFont,
                           width: "150px",
+                          transform: `scale(${project.globalSettings.hudScale ?? 1})`,
+                          transformOrigin: "top right",
                         }}
                       >
                         <div
@@ -7142,7 +7196,7 @@ const App: React.FC = () => {
                             setSelectedObjectId(null);
                             setSelectedMultiIds([]);
                             setRightSidebarTab("properties");
-                            window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Gameplay Settings" } }));
+                            window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Simulation & Overrides" } }));
                           }
                         }}
                         className={`absolute top-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2 transition-all ${
@@ -7159,6 +7213,8 @@ const App: React.FC = () => {
                           borderRadius: uiRadius,
                           fontFamily: uiFont,
                           width: "150px",
+                          transform: `scale(${project.globalSettings.hudScale ?? 1})`,
+                          transformOrigin: "top right",
                         }}
                       >
                         <div
@@ -7206,7 +7262,13 @@ const App: React.FC = () => {
 
                     {/* HUD Button Bar */}
                     {(!hideEditorHud || isPlaying) && (
-                      <div className="absolute bottom-4 right-4 flex items-end gap-2 z-[2000]">
+                      <div
+                        className="absolute bottom-4 right-4 flex items-end gap-2 z-[2000]"
+                        style={{
+                          transform: `scale(${project.globalSettings.hudScale ?? 1})`,
+                          transformOrigin: "bottom right",
+                        }}
+                      >
                         {project.globalSettings.enableSettingsHud &&
                           !project.globalSettings.hideDefaultSettingsBtn && (
                             <button
@@ -7217,7 +7279,7 @@ const App: React.FC = () => {
                                   setSelectedObjectId(null);
                                   setSelectedMultiIds([]);
                                   setRightSidebarTab("properties");
-                                  window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "HUD & Built-in Action Buttons" } }));
+                                  window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Heads Up Display (HUD)" } }));
                                 }
                               }}
                               className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
@@ -7244,7 +7306,7 @@ const App: React.FC = () => {
                                   setSelectedObjectId(null);
                                   setSelectedMultiIds([]);
                                   setRightSidebarTab("properties");
-                                  window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "HUD & Built-in Action Buttons" } }));
+                                  window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Heads Up Display (HUD)" } }));
                                 }
                               }}
                               className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
@@ -7271,7 +7333,7 @@ const App: React.FC = () => {
                                   setSelectedObjectId(null);
                                   setSelectedMultiIds([]);
                                   setRightSidebarTab("properties");
-                                  window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "HUD & Built-in Action Buttons" } }));
+                                  window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Heads Up Display (HUD)" } }));
                                 }
                               }}
                               className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
@@ -9919,15 +9981,61 @@ const App: React.FC = () => {
 
                       <Accordion title="Heads Up Display (HUD)">
                         <div className="space-y-4 bg-neutral-950/50 p-2 rounded">
+                          <div className="rounded border border-pink-500/20 bg-pink-500/5 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <span className="font-comic text-sm font-bold text-pink-300">
+                                  Built-in HUD Size
+                                </span>
+                                <p className="mt-0.5 text-[10px] leading-relaxed text-neutral-500">
+                                  Resize the needs, skills, and built-in button
+                                  clusters together without changing the game
+                                  canvas.
+                                </p>
+                              </div>
+                              <span className="font-mono text-xs font-bold text-[#00ffcc]">
+                                {Math.round(
+                                  (project.globalSettings.hudScale ?? 1) * 100,
+                                )}
+                                %
+                              </span>
+                            </div>
+                            <div className="mt-3 flex items-center gap-2">
+                              <span className="text-[9px] font-bold text-neutral-500">
+                                SMALL
+                              </span>
+                              <input
+                                type="range"
+                                min="0.5"
+                                max="1.5"
+                                step="0.05"
+                                value={project.globalSettings.hudScale ?? 1}
+                                onChange={(event) =>
+                                  setProject((current) => ({
+                                    ...current,
+                                    globalSettings: {
+                                      ...current.globalSettings,
+                                      hudScale: Number(event.target.value),
+                                    },
+                                  }))
+                                }
+                                className="min-w-0 flex-1 accent-pink-500"
+                              />
+                              <span className="text-[9px] font-bold text-neutral-500">
+                                BIG
+                              </span>
+                            </div>
+                          </div>
                           <div className="flex flex-col gap-2 border-b border-emerald-500/20 pb-3">
                             <div>
                               <span className="font-comic text-sm font-bold text-emerald-300">
-                                Device Frame
+                                Outer Device Frame
                               </span>
                               <p className="mt-0.5 text-[10px] leading-relaxed text-neutral-500">
-                                Wrap the game in a CRT, television, computer, or
-                                other frame. You only need to mark the blank
-                                screen once.
+                                Wraps around the playable canvas like a CRT,
+                                television, or computer shell. It is not a HUD
+                                image and should not also be placed as a scene
+                                object.
                               </p>
                             </div>
 
@@ -10077,9 +10185,15 @@ const App: React.FC = () => {
 
                           {/* HUD Overlay */}
                           <div className="flex flex-col gap-1 border-b border-neutral-800 pb-2">
-                            <span className="text-xs font-bold text-neutral-500 uppercase">
-                              Static Screen Overlay
+                              <span className="text-xs font-bold text-neutral-500 uppercase">
+                              In-Screen HUD Artwork
                             </span>
+                            <p className="text-[10px] leading-relaxed text-neutral-500">
+                              Optional artwork drawn over the game screen, such
+                              as decorative buttons, glass glare, or a themed
+                              interface plate. This is separate from the outer
+                              device frame.
+                            </p>
                             <div className="flex items-center gap-2 mt-1">
                               {project.globalSettings.hudOverlay?.assetId ? (
                                 <div className="relative w-10 h-10 bg-neutral-800 border border-neutral-700 rounded">

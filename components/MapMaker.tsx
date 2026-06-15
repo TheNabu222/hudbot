@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ChevronLeft,
   Image as ImageIcon,
@@ -46,6 +46,14 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
   const iconAsset = imageAssets.find(
     (asset) => asset.src === editingNode?.iconSrc,
   );
+
+  useEffect(() => {
+    if (!activeMapId && maps[0]) {
+      setActiveMapId(maps[0].id);
+    } else if (activeMapId && !maps.some((map) => map.id === activeMapId)) {
+      setActiveMapId(maps[0]?.id || null);
+    }
+  }, [activeMapId, maps]);
 
   const addMap = () => {
     const newMap: FastTravelMap = {
@@ -573,7 +581,7 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
           onMouseDown={() => setAssetPickerTarget(null)}
         >
           <div
-            className="flex max-h-[78vh] w-full max-w-3xl flex-col overflow-hidden rounded-[8px_24px_8px_24px] border border-[#00ffcc]/35 bg-[#090812] shadow-[0_24px_100px_rgba(0,0,0,0.7)]"
+            className="map-asset-picker-dialog flex max-h-[78vh] w-full max-w-4xl flex-col overflow-hidden rounded-[8px_24px_8px_24px] border border-[#00ffcc]/45 bg-[#090812] shadow-[0_24px_100px_rgba(0,0,0,0.7)]"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="flex items-center gap-3 border-b border-[#00ffcc]/15 p-4">
@@ -611,7 +619,7 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
               </label>
             </div>
 
-            <div className="grid flex-1 grid-cols-3 gap-2 overflow-y-auto p-3 sm:grid-cols-4 md:grid-cols-5">
+            <div className="grid flex-1 grid-cols-2 gap-3 overflow-y-auto p-3 sm:grid-cols-3 md:grid-cols-4">
               <button
                 type="button"
                 onClick={() => {
@@ -646,10 +654,12 @@ export function MapMaker({ project, updateProject }: MapMakerProps) {
                     }
                     setAssetPickerTarget(null);
                   }}
-                  className="group overflow-hidden rounded border border-neutral-800 bg-neutral-950 text-left hover:border-[#00ffcc]/60"
+                  className="group overflow-hidden rounded border border-neutral-700 bg-neutral-950 text-left hover:border-[#00ffcc]/80"
                   title={asset.name}
                 >
-                  <div className="aspect-square bg-black/40 p-1">
+                  <div
+                    className={`${assetPickerTarget === "background" ? "aspect-video" : "aspect-square"} asset-thumbnail p-1`}
+                  >
                     <img
                       src={asset.src}
                       alt=""

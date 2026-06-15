@@ -558,6 +558,7 @@ export interface Project {
       offsetX?: number;
       offsetY?: number;
     };
+    hudScale?: number;
     uiTheme?:
       | "default"
       | "barbie"

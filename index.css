@@ -702,6 +702,63 @@
   background-color: rgb(255 255 255 / 80%) !important;
 }
 
+.asset-thumbnail {
+  background-color: #111425;
+  background-image:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.07) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.07) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.07) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.07) 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+}
+
+.sunny-theme .asset-picker-dialog {
+  background: #f8fbff;
+  border-color: #174ea6;
+  color: #10234a;
+}
+
+.sunny-theme .asset-picker-dialog [class*="bg-neutral-950"],
+.sunny-theme .asset-picker-dialog [class*="bg-neutral-900"],
+.sunny-theme .asset-picker-dialog [class*="bg-neutral-800"] {
+  background-color: #eef6ff;
+}
+
+.sunny-theme .asset-picker-dialog [class*="text-white"],
+.sunny-theme .asset-picker-dialog [class*="text-neutral-200"],
+.sunny-theme .asset-picker-dialog [class*="text-neutral-300"],
+.sunny-theme .asset-picker-dialog [class*="text-neutral-400"],
+.sunny-theme .asset-picker-dialog [class*="text-neutral-500"] {
+  color: #10234a;
+}
+
+.sunny-theme .asset-picker-dialog [class*="border-neutral-"] {
+  border-color: #8cb9ee;
+}
+
+.sunny-theme .map-asset-picker-dialog {
+  background: #f8fbff;
+  border-color: #174ea6;
+  color: #10234a;
+}
+
+.sunny-theme .map-asset-picker-dialog [class*="bg-neutral-950"],
+.sunny-theme .map-asset-picker-dialog [class*="bg-black"] {
+  background-color: #eef6ff;
+}
+
+.sunny-theme .map-asset-picker-dialog [class*="text-white"],
+.sunny-theme .map-asset-picker-dialog [class*="text-neutral-400"],
+.sunny-theme .map-asset-picker-dialog [class*="text-neutral-500"],
+.sunny-theme .map-asset-picker-dialog [class*="text-neutral-600"] {
+  color: #10234a;
+}
+
+.sunny-theme .map-asset-picker-dialog [class*="border-neutral-"] {
+  border-color: #8cb9ee;
+}
+
 .studio-feature-layout {
   min-width: 0;
   min-height: 0;

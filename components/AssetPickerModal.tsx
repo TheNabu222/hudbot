@@ -97,8 +97,8 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
   const folders = Array.from(subfolders).filter(Boolean).sort();
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-neutral-900 border border-neutral-700 rounded-lg max-w-4xl w-full h-[80vh] flex flex-col shadow-2xl overflow-hidden">
+    <div className="asset-picker-backdrop fixed inset-0 bg-black/80 z-[20000] flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="asset-picker-dialog bg-neutral-900 border border-neutral-600 rounded-lg max-w-4xl w-full h-[80vh] flex flex-col shadow-2xl overflow-hidden">
         
         {/* Header */}
         <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-950">
@@ -108,7 +108,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
               Select Asset
             </h2>
             <p className="text-[10px] text-neutral-500 mt-0.5">
-              Repository folders load only when opened.
+              Cavebot asset folders load only when opened.
             </p>
           </div>
           {onLoadRepositoryRoot && (
@@ -121,7 +121,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
               disabled={isLoadingRepository}
               className="ml-auto mr-2 rounded border border-[#00ffcc]/35 bg-[#00ffcc]/10 px-3 py-1.5 font-comic text-[10px] font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20 disabled:opacity-50"
             >
-              {isLoadingRepository ? 'Loading folder…' : repositoryFolders.length ? 'Refresh Repo Root' : 'Browse Repo'}
+              {isLoadingRepository ? 'Loading folder…' : repositoryFolders.length ? 'Refresh Cavebot Assets' : 'Browse Cavebot Assets'}
             </button>
           )}
           <button aria-label="Close asset picker" onClick={onClose} className="p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-white transition-colors">
@@ -201,7 +201,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                   >
                     <div 
                       onClick={() => onSelect(asset.id)}
-                      className="h-32 bg-neutral-900 flex items-center justify-center p-2 relative rounded-t-lg cursor-pointer overflow-hidden"
+                      className="asset-thumbnail h-32 flex items-center justify-center p-2 relative rounded-t-lg cursor-pointer overflow-hidden"
                     >
                       {asset.type === 'audio' ? (
                         <Music size={32} className="text-emerald-500 group-hover:scale-110 transition-transform" />
