@@ -456,6 +456,9 @@ const App: React.FC = () => {
     onSelect: (id: string) => void;
     filterType?: "image" | "audio" | "video" | "script" | "hitbox" | "text" | "ui_element";
     onlyOnCanvas?: boolean;
+    title?: string;
+    helperText?: string;
+    selectLabel?: string;
   } | null>(null);
 
   const [history, setHistory] = useState<{
@@ -5151,6 +5154,10 @@ const App: React.FC = () => {
                     type="button"
                     onClick={() =>
                       setAssetPickerCb({
+                        title: "Add Something to Canvas",
+                        helperText:
+                          "Choose a file and Cavebot will place it in the current room.",
+                        selectLabel: "Place in current room",
                         onSelect: (id) => {
                           const asset = project.assets.find(
                             (candidate) => candidate.id === id,
@@ -17978,6 +17985,10 @@ const App: React.FC = () => {
           <AssetLibraryManager
             project={project}
             updateProject={(updates) => pushHistory({ ...project, ...updates })}
+            onPlaceAsset={(asset) => {
+              handleInsertAssetToStage(asset);
+              setEditorMode("stage");
+            }}
           />
         )}
 
@@ -18646,6 +18657,9 @@ const App: React.FC = () => {
             ),
           )}
           recentAssetIds={recentAssetIds}
+          title={assetPickerCb.title}
+          helperText={assetPickerCb.helperText}
+          selectLabel={assetPickerCb.selectLabel}
           onSelect={(id) => {
             setRecentAssetIds((prev) =>
               [id, ...prev.filter((i) => i !== id)].slice(0, 20),

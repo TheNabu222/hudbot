@@ -7,11 +7,13 @@ import { StudioFeatureHeader } from "./StudioFeatureHeader";
 interface AssetLibraryManagerProps {
   project: Project;
   updateProject: (updates: Partial<Project>) => void;
+  onPlaceAsset?: (asset: Asset) => void;
 }
 
 export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
   project,
   updateProject,
+  onPlaceAsset,
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
@@ -86,7 +88,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
     <div className="studio-page asset-library-page flex-1 flex flex-col bg-neutral-900 border-l border-neutral-800 h-full overflow-hidden">
       <StudioFeatureHeader
         title="File Library"
-        description="Upload, tag, favorite, and prepare reusable images, GIFs, sounds, and video."
+        description="Upload, tag, favorite, edit, and send reusable files straight into the current room."
         actions={
           <button
             onClick={() => uploadInputRef.current?.click()}
@@ -263,6 +265,17 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
             </div>
           )}
 
+          {onPlaceAsset && filteredAssets.length > 0 && (
+            <div className="mb-5 rounded-[6px_18px_6px_18px] border border-[#00ffcc]/35 bg-[#00ffcc]/10 px-4 py-3 text-sm text-[#063b44] shadow-[0_0_20px_rgba(0,255,204,0.12)] dark:text-[#b9fff4]">
+              <span className="font-comic font-bold text-[#ff4fc8]">
+                How to use a file:
+              </span>{" "}
+              click <strong>Place in current room</strong> on any card. It will
+              appear on the canvas, then Cavebot jumps you back to Scene Studio
+              so you can drag, stretch, squash, and give it behaviors.
+            </div>
+          )}
+
           <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-8 gap-6">
             {filteredAssets.map((asset) => (
               <div
@@ -383,6 +396,17 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                           <span className="text-[10px] text-neutral-400 w-8 text-right">{Math.round(Math.min(1, asset.volume ?? 1) * 100)}%</span>
                         </div>
                      </div>
+                  )}
+
+                  {onPlaceAsset && (
+                    <button
+                      type="button"
+                      onClick={() => onPlaceAsset(asset)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[4px_12px_4px_12px] border border-[#00ffcc]/45 bg-[#00ffcc]/10 px-2 py-1.5 font-comic text-[11px] font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20"
+                    >
+                      <Plus size={13} />
+                      Place in current room
+                    </button>
                   )}
 
                   <div className="flex justify-between items-center pt-2 mt-auto">

@@ -48,8 +48,8 @@ const helpSections: HelpSection[] = [
       {
         title: "1. Collect files",
         detail:
-          "Open Collect to upload and organize images, GIFs, audio, and video. Add names, descriptions, tags, favorites, and folders so assets remain findable.",
-        tip: "You can also drag supported files directly from Finder onto the scene canvas.",
+          "Open Collect to upload and organize images, GIFs, audio, and video. Add names, descriptions, tags, favorites, and folders so assets remain findable. Use Place in current room on any card to send it straight to the canvas.",
+        tip: "You can also drag supported files directly from Finder onto the scene canvas. Collect is for preparing files; Scene Studio is where placed files become draggable game objects.",
       },
       {
         title: "2. Build a room",
@@ -91,6 +91,12 @@ const helpSections: HelpSection[] = [
         title: "Browse without loading everything",
         detail:
           "The asset popup supports All, Recent, Favorites, In Canvas, search, and folder browsing. Repository browsing is limited to entropic-ai/assets/_cavebot-assets, and its folders load only when opened to keep the collection responsive.",
+      },
+      {
+        title: "Get a file onto the canvas",
+        detail:
+          "There are two equal paths: in Collect, press Place in current room on a file card; in Compose → Scene Studio, press Add Something and then Place in current room inside the popup. Both create a real canvas object you can move, resize, stretch, squash, layer, and give behaviors.",
+        tip: "If you are choosing artwork for a map, cursor, HUD overlay, or sound response, the same popup says Use this asset instead because it is filling a slot rather than placing a visible object.",
       },
       {
         title: "One asset slot everywhere",

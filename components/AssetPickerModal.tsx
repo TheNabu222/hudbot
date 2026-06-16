@@ -6,6 +6,9 @@ interface AssetPickerModalProps {
   assets: Asset[];
   onSelect: (assetId: string) => void;
   onClose: () => void;
+  title?: string;
+  helperText?: string;
+  selectLabel?: string;
   filterType?: 'image' | 'audio' | 'video' | 'script' | 'text' | 'ui_element' | 'hitbox';
   recentAssetIds?: string[];
   canvasAssetIds?: string[];
@@ -22,6 +25,9 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
   assets,
   onSelect,
   onClose,
+  title = 'Choose Asset',
+  helperText = 'Click an asset or use its action button.',
+  selectLabel = 'Use this asset',
   filterType,
   recentAssetIds = [],
   canvasAssetIds = [],
@@ -105,10 +111,10 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
           <div>
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               {filterType === 'image' ? <ImageIcon size={20} className="text-emerald-500"/> : filterType === 'audio' ? <Music size={20} className="text-indigo-500" /> : filterType === 'video' ? <Video size={20} className="text-blue-500"/> : <Folder size={20} className="text-neutral-500" />}
-              Select Asset
+              {title}
             </h2>
             <p className="text-[10px] text-neutral-500 mt-0.5">
-              Cavebot asset folders load only when opened.
+              {helperText} Cavebot asset folders load only when opened.
             </p>
           </div>
           {onLoadRepositoryRoot && (
@@ -289,8 +295,20 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                         <button onClick={() => setEditingInfoId(null)} className="w-full py-1 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 text-xs font-semibold rounded mt-1">Done</button>
                       </div>
                     ) : (
-                      <div className="p-2 border-t border-neutral-700/50 cursor-pointer" onClick={() => onSelect(asset.id)}>
+                      <div className="p-2 border-t border-neutral-700/50">
                         <p className="text-xs text-neutral-300 truncate font-medium group-hover:text-emerald-400 transition-colors" title={asset.name}>{asset.name}</p>
+                        <div className="mt-1 flex items-center justify-between gap-1">
+                          <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                            {asset.type}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onSelect(asset.id)}
+                            className="rounded border border-[#00ffcc]/40 bg-[#00ffcc]/10 px-2 py-1 font-comic text-[9px] font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20"
+                          >
+                            {selectLabel}
+                          </button>
+                        </div>
                         {asset.tags && asset.tags.length > 0 && (
                           <div className="flex gap-1 overflow-hidden mt-1 mt-1">
                             {asset.tags.slice(0, 3).map(t => (
