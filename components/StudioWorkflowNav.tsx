@@ -99,14 +99,14 @@ const subtools: Record<
     },
     {
       mode: "ui_maker",
-      label: "Menus & HUD",
-      note: "player-facing UI",
+      label: "Interface Studio",
+      note: "menus, HUD & controls",
       icon: LayoutTemplate,
     },
     {
       mode: "ui_stage",
-      label: "UI Canvas",
-      note: "edit active menu",
+      label: "Screen UI",
+      note: "place interface pieces",
       icon: Square,
     },
   ],

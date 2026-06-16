@@ -100,7 +100,7 @@ const helpSections: HelpSection[] = [
       {
         title: "One coordinate space",
         detail:
-          "Scenes, UI menus, HUD previews, and Play mode share the room's coordinate plane. Build the room once, then place interface pieces over it without maintaining a second canvas size. Resize Room only changes the actual scene.",
+          "Scenes, Interface Screens, HUD previews, and Play mode share the room's coordinate plane. Build the room once, then place interface pieces over it without maintaining a second canvas size. Resize Room only changes the actual scene.",
       },
       {
         title: "Edit metadata",
@@ -131,7 +131,7 @@ const helpSections: HelpSection[] = [
     eyebrow: "Dress the world like a haunted dollhouse",
     icon: Image,
     intro:
-      "Scene Studio is the visual construction area. Rooms hold objects; Menus & HUD holds player-facing interface pieces.",
+      "Scene Studio holds rooms and world objects. Interface Studio holds menus, HUD widgets, overlays, and clickable screen controls. Screen UI places those interface pieces over the active room.",
     items: [
       {
         title: "Place and select objects",
@@ -158,7 +158,7 @@ const helpSections: HelpSection[] = [
       {
         title: "Game shell and screen artwork",
         detail:
-          "The Game Shell is the CRT, television, handheld, or computer body around the marked playable window. Custom artwork over the screen is a separate decorative layer inside that window. Choose Place clickable screen controls to jump directly into a transparent UI Canvas over the room.",
+          "The Game Shell is the CRT, television, handheld, or computer body around the marked playable window. Custom artwork over the screen is a separate decorative layer inside that window. Choose Place clickable screen controls to jump directly into a transparent Screen UI over the room.",
         tip: "Do not also place the shell as a scene object. Its outside buttons and ornaments belong to the shell layer; scenery and characters belong inside the marked screen.",
       },
       {
@@ -170,8 +170,8 @@ const helpSections: HelpSection[] = [
       {
         title: "Cavebot-made widgets",
         detail:
-          "Open Options → Heads Up Display (HUD) to resize needs, skills, and built-in action buttons. Every group now uses the same Width + Height control as screen artwork, so each can be stretched wide, squashed short, made tall and narrow, or reset to 100%. In UI Canvas, drag each visible widget directly into place.",
-        tip: "HUD widgets, custom screen artwork, and canvas objects all use freeform resizing language. Use HUD: Hidden when you need an unobstructed canvas; it hides editor previews without deleting the player HUD.",
+          "Click Needs, Skills, or the built-in button cluster directly on the game screen to select it. The HUD inspector opens automatically with the same Position, Width, Height, reset, drag, and freeform resize language used elsewhere. Pink side handles stretch one direction; the corner changes both.",
+        tip: "Interface Studio manages what player-facing pieces exist. Screen UI places custom interface objects. The HUD inspector edits Cavebot-made widgets. Use HUD: Hidden only to clear the editing view; it does not delete anything.",
       },
       {
         title: "Reusable stamps",

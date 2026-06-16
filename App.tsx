@@ -1105,16 +1105,82 @@ const App: React.FC = () => {
   const [mouseRatio, setMouseRatio] = useState({ x: 0, y: 0 });
 
   const stageRef = useRef<HTMLDivElement>(null);
+  type HudWidgetId = "needs" | "skills" | "buttons";
+  type HudPositionKey =
+    | "hudNeedsPosition"
+    | "hudSkillsPosition"
+    | "hudButtonsPosition";
+  type HudScaleKey =
+    | "hudNeedsScaleX"
+    | "hudNeedsScaleY"
+    | "hudSkillsScaleX"
+    | "hudSkillsScaleY"
+    | "hudButtonsScaleX"
+    | "hudButtonsScaleY";
+  const [selectedHudWidget, setSelectedHudWidget] =
+    useState<HudWidgetId | null>(null);
   const [draggingHudWidget, setDraggingHudWidget] = useState<{
-    key: "hudNeedsPosition" | "hudSkillsPosition" | "hudButtonsPosition";
+    key: HudPositionKey;
     pointerId: number;
     offsetX: number;
     offsetY: number;
   } | null>(null);
+  type HudResizeState = {
+    widget: HudWidgetId;
+    pointerId: number;
+    axis: "x" | "y" | "xy";
+    startX: number;
+    startY: number;
+    startScaleX: number;
+    startScaleY: number;
+    renderedWidth: number;
+    renderedHeight: number;
+  };
+  const [resizingHudWidget, setResizingHudWidget] =
+    useState<HudResizeState | null>(null);
+  const resizingHudWidgetRef = useRef<HudResizeState | null>(null);
+
+  const getHudWidgetConfig = (widget: HudWidgetId) => {
+    if (widget === "needs") {
+      return {
+        label: "Needs panel",
+        positionKey: "hudNeedsPosition" as const,
+        scaleXKey: "hudNeedsScaleX" as const,
+        scaleYKey: "hudNeedsScaleY" as const,
+      };
+    }
+    if (widget === "skills") {
+      return {
+        label: "Skills panel",
+        positionKey: "hudSkillsPosition" as const,
+        scaleXKey: "hudSkillsScaleX" as const,
+        scaleYKey: "hudSkillsScaleY" as const,
+      };
+    }
+    return {
+      label: "Built-in buttons",
+      positionKey: "hudButtonsPosition" as const,
+      scaleXKey: "hudButtonsScaleX" as const,
+      scaleYKey: "hudButtonsScaleY" as const,
+    };
+  };
+
+  const selectHudWidget = (widget: HudWidgetId) => {
+    if (isPlaying) return;
+    setSelectedHudWidget(widget);
+    setSelectedObjectId(null);
+    setSelectedMultiIds([]);
+    setRightSidebarTab("properties");
+    window.dispatchEvent(
+      new CustomEvent("open-accordion", {
+        detail: { title: "Heads Up Display (HUD)" },
+      }),
+    );
+  };
 
   const handleHudWidgetPointerDown = (
     event: React.PointerEvent<HTMLElement>,
-    key: "hudNeedsPosition" | "hudSkillsPosition" | "hudButtonsPosition",
+    key: HudPositionKey,
   ) => {
     if (isPlaying || !stageRef.current) return;
     event.stopPropagation();
@@ -1131,6 +1197,13 @@ const App: React.FC = () => {
       offsetX: (event.clientX - stageRect.left) * scaleX - widgetX,
       offsetY: (event.clientY - stageRect.top) * scaleY - widgetY,
     });
+    setSelectedHudWidget(
+      key === "hudNeedsPosition"
+        ? "needs"
+        : key === "hudSkillsPosition"
+          ? "skills"
+          : "buttons",
+    );
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -1181,6 +1254,116 @@ const App: React.FC = () => {
       event.currentTarget.releasePointerCapture(event.pointerId);
     } catch (error) {}
     setDraggingHudWidget(null);
+  };
+
+  const handleHudResizePointerDown = (
+    event: React.PointerEvent<HTMLElement>,
+    widget: HudWidgetId,
+    axis: "x" | "y" | "xy",
+    scaleX: number,
+    scaleY: number,
+  ) => {
+    if (isPlaying) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const widgetElement = event.currentTarget.parentElement;
+    if (!widgetElement) return;
+    const bounds = widgetElement.getBoundingClientRect();
+    setSelectedHudWidget(widget);
+    const resizeState: HudResizeState = {
+      widget,
+      pointerId: event.pointerId,
+      axis,
+      startX: event.clientX,
+      startY: event.clientY,
+      startScaleX: scaleX,
+      startScaleY: scaleY,
+      renderedWidth: Math.max(1, bounds.width),
+      renderedHeight: Math.max(1, bounds.height),
+    };
+    resizingHudWidgetRef.current = resizeState;
+    setResizingHudWidget(resizeState);
+    const config = getHudWidgetConfig(widget);
+    const handleWindowPointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== resizeState.pointerId) return;
+      const deltaX = moveEvent.clientX - resizeState.startX;
+      const deltaY = moveEvent.clientY - resizeState.startY;
+      const baseWidth = resizeState.renderedWidth / resizeState.startScaleX;
+      const baseHeight = resizeState.renderedHeight / resizeState.startScaleY;
+      const nextScaleX =
+        resizeState.axis === "y"
+          ? resizeState.startScaleX
+          : Math.max(
+              0.1,
+              Math.min(4, resizeState.startScaleX + deltaX / baseWidth),
+            );
+      const nextScaleY =
+        resizeState.axis === "x"
+          ? resizeState.startScaleY
+          : Math.max(
+              0.1,
+              Math.min(4, resizeState.startScaleY + deltaY / baseHeight),
+            );
+      setProject((current) => ({
+        ...current,
+        globalSettings: {
+          ...current.globalSettings,
+          [config.scaleXKey]: nextScaleX,
+          [config.scaleYKey]: nextScaleY,
+        },
+      }));
+    };
+    const handleWindowPointerUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== resizeState.pointerId) return;
+      window.removeEventListener("pointermove", handleWindowPointerMove);
+      window.removeEventListener("pointerup", handleWindowPointerUp);
+      window.removeEventListener("pointercancel", handleWindowPointerUp);
+      resizingHudWidgetRef.current = null;
+      setResizingHudWidget(null);
+    };
+    window.addEventListener("pointermove", handleWindowPointerMove);
+    window.addEventListener("pointerup", handleWindowPointerUp);
+    window.addEventListener("pointercancel", handleWindowPointerUp);
+  };
+
+  const renderHudResizeHandles = (
+    widget: HudWidgetId,
+    scaleX: number,
+    scaleY: number,
+  ) => {
+    if (isPlaying || selectedHudWidget !== widget) return null;
+    const handleClass =
+      "absolute z-[2100] border-2 border-neutral-950 bg-pink-300 shadow-[0_0_0_1px_white]";
+    return (
+      <>
+        <button
+          type="button"
+          aria-label={`Resize ${getHudWidgetConfig(widget).label} width`}
+          className={`${handleClass} -right-2 top-1/2 h-8 w-4 -translate-y-1/2 cursor-ew-resize rounded-sm`}
+          onPointerDown={(event) =>
+            handleHudResizePointerDown(event, widget, "x", scaleX, scaleY)
+          }
+        />
+        <button
+          type="button"
+          aria-label={`Resize ${getHudWidgetConfig(widget).label} height`}
+          className={`${handleClass} -bottom-2 left-1/2 h-4 w-8 -translate-x-1/2 cursor-ns-resize rounded-sm`}
+          onPointerDown={(event) =>
+            handleHudResizePointerDown(event, widget, "y", scaleX, scaleY)
+          }
+        />
+        <button
+          type="button"
+          aria-label={`Resize ${getHudWidgetConfig(widget).label} freely`}
+          className={`${handleClass} -bottom-3 -right-3 flex h-6 w-6 cursor-nwse-resize items-center justify-center rounded-md text-[11px] font-black text-neutral-950`}
+          onPointerDown={(event) =>
+            handleHudResizePointerDown(event, widget, "xy", scaleX, scaleY)
+          }
+        >
+          ↘
+        </button>
+      </>
+    );
   };
 
   const getWorkingScene = () => {
@@ -1815,6 +1998,7 @@ const App: React.FC = () => {
     }
     if (obj.locked) return;
     e.stopPropagation();
+    setSelectedHudWidget(null);
 
     if (e.shiftKey) {
       if (selectedMultiIds.includes(obj.id)) {
@@ -3441,6 +3625,24 @@ const App: React.FC = () => {
     coordinateScene.width || project.globalSettings.stageWidth || 800;
   const logicalStageHeight =
     coordinateScene.height || project.globalSettings.stageHeight || 600;
+  const selectedHudConfig = selectedHudWidget
+    ? getHudWidgetConfig(selectedHudWidget)
+    : null;
+  const selectedHudScaleX =
+    selectedHudWidget === "needs"
+      ? hudNeedsScaleX
+      : selectedHudWidget === "skills"
+        ? hudSkillsScaleX
+        : hudButtonsScaleX;
+  const selectedHudScaleY =
+    selectedHudWidget === "needs"
+      ? hudNeedsScaleY
+      : selectedHudWidget === "skills"
+        ? hudSkillsScaleY
+        : hudButtonsScaleY;
+  const selectedHudPosition = selectedHudConfig
+    ? project.globalSettings[selectedHudConfig.positionKey]
+    : undefined;
 
   return (
     <div className={`studio-app ${studioTheme === "sunny" ? "sunny-theme" : ""} flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans overflow-hidden`}>
@@ -7300,12 +7502,7 @@ const App: React.FC = () => {
                       <div
                         onClick={() => {
                           if (didDragRef.current) return;
-                          if (!isPlaying) {
-                            setSelectedObjectId(null);
-                            setSelectedMultiIds([]);
-                            setRightSidebarTab("properties");
-                            window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Simulation & Overrides" } }));
-                          }
+                          selectHudWidget("needs");
                         }}
                         onPointerDown={(event) =>
                           handleHudWidgetPointerDown(
@@ -7319,7 +7516,7 @@ const App: React.FC = () => {
                           !isPlaying 
                             ? "cursor-move hover:ring-2 hover:ring-emerald-400 group/needs select-none"
                             : ""
-                        }`}
+                        } ${selectedHudWidget === "needs" && !isPlaying ? "ring-2 ring-pink-400" : ""}`}
                         style={{
                           ...(project.globalSettings.hudNeedsPosition
                             ? {
@@ -7405,6 +7602,11 @@ const App: React.FC = () => {
                             <span>✏️ Click to Edit</span>
                           </div>
                         )}
+                        {renderHudResizeHandles(
+                          "needs",
+                          hudNeedsScaleX,
+                          hudNeedsScaleY,
+                        )}
                       </div>
                     )}
  
@@ -7413,12 +7615,7 @@ const App: React.FC = () => {
                       <div
                         onClick={() => {
                           if (didDragRef.current) return;
-                          if (!isPlaying) {
-                            setSelectedObjectId(null);
-                            setSelectedMultiIds([]);
-                            setRightSidebarTab("properties");
-                            window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Simulation & Overrides" } }));
-                          }
+                          selectHudWidget("skills");
                         }}
                         onPointerDown={(event) =>
                           handleHudWidgetPointerDown(
@@ -7432,7 +7629,7 @@ const App: React.FC = () => {
                           !isPlaying 
                             ? "cursor-move hover:ring-2 hover:ring-emerald-400 group/skills select-none"
                             : ""
-                        }`}
+                        } ${selectedHudWidget === "skills" && !isPlaying ? "ring-2 ring-pink-400" : ""}`}
                         style={{
                           ...(project.globalSettings.hudSkillsPosition
                             ? {
@@ -7501,12 +7698,21 @@ const App: React.FC = () => {
                             <span>✏️ Click to Edit</span>
                           </div>
                         )}
+                        {renderHudResizeHandles(
+                          "skills",
+                          hudSkillsScaleX,
+                          hudSkillsScaleY,
+                        )}
                       </div>
                     )}
 
                     {/* HUD Button Bar */}
                     {(!hideEditorHud || isPlaying) && (
                       <div
+                        onClick={() => {
+                          if (didDragRef.current) return;
+                          selectHudWidget("buttons");
+                        }}
                         onPointerDown={(event) =>
                           handleHudWidgetPointerDown(
                             event,
@@ -7515,7 +7721,7 @@ const App: React.FC = () => {
                         }
                         onPointerMove={handleHudWidgetPointerMove}
                         onPointerUp={handleHudWidgetPointerUp}
-                        className={`absolute bottom-4 right-4 flex items-end gap-2 z-[2000] ${!isPlaying ? "cursor-move" : ""}`}
+                        className={`absolute bottom-4 right-4 flex items-end gap-2 z-[2000] ${!isPlaying ? "cursor-move" : ""} ${selectedHudWidget === "buttons" && !isPlaying ? "ring-2 ring-pink-400" : ""}`}
                         style={{
                           ...(project.globalSettings.hudButtonsPosition
                             ? {
@@ -7541,10 +7747,7 @@ const App: React.FC = () => {
                                 if (isPlaying) {
                                   setIsSettingsOpen(!isSettingsOpen);
                                 } else {
-                                  setSelectedObjectId(null);
-                                  setSelectedMultiIds([]);
-                                  setRightSidebarTab("properties");
-                                  window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Heads Up Display (HUD)" } }));
+                                  selectHudWidget("buttons");
                                 }
                               }}
                               className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
@@ -7568,10 +7771,7 @@ const App: React.FC = () => {
                                 if (isPlaying) {
                                   setIsRelationshipsOpen(!isRelationshipsOpen);
                                 } else {
-                                  setSelectedObjectId(null);
-                                  setSelectedMultiIds([]);
-                                  setRightSidebarTab("properties");
-                                  window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Heads Up Display (HUD)" } }));
+                                  selectHudWidget("buttons");
                                 }
                               }}
                               className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
@@ -7595,10 +7795,7 @@ const App: React.FC = () => {
                                 if (isPlaying) {
                                   setIsAlmanacOpen(!isAlmanacOpen);
                                 } else {
-                                  setSelectedObjectId(null);
-                                  setSelectedMultiIds([]);
-                                  setRightSidebarTab("properties");
-                                  window.dispatchEvent(new CustomEvent("open-accordion", { detail: { title: "Heads Up Display (HUD)" } }));
+                                  selectHudWidget("buttons");
                                 }
                               }}
                               className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
@@ -7623,7 +7820,7 @@ const App: React.FC = () => {
                                 if (isPlaying) {
                                   setIsSkillsOpen(!isSkillsOpen);
                                 } else {
-                                  setEditorMode("rpg_systems");
+                                  selectHudWidget("buttons");
                                 }
                               }}
                               className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
@@ -7646,7 +7843,7 @@ const App: React.FC = () => {
                               if (isPlaying) {
                                 setIsQuestLogOpen(!isQuestLogOpen);
                               } else {
-                                setEditorMode("rpg_systems");
+                                selectHudWidget("buttons");
                               }
                             }}
                             className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
@@ -7669,8 +7866,7 @@ const App: React.FC = () => {
                               if (isPlaying) {
                                 setIsCraftingOpen(!isCraftingOpen);
                               } else {
-                                setEditorMode("items");
-                                setItemsTab("crafting");
+                                selectHudWidget("buttons");
                               }
                             }}
                             className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-[1.05] active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
@@ -7698,7 +7894,7 @@ const App: React.FC = () => {
                                   }
                                   setIsMapOpen(!isMapOpen);
                                 } else {
-                                  setEditorMode("map_maker");
+                                  selectHudWidget("buttons");
                                 }
                               }}
                               className={`w-12 h-12 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
@@ -7721,8 +7917,7 @@ const App: React.FC = () => {
                               if (isPlaying) {
                                 setIsInventoryOpen(!isInventoryOpen);
                               } else {
-                                setEditorMode("items");
-                                setItemsTab("items");
+                                selectHudWidget("buttons");
                               }
                             }}
                             className={`w-14 h-14 flex items-center justify-center shadow-xl backdrop-blur-sm transition-transform hover:scale-[1.05] active:scale-95 border-2 hover:brightness-110 relative group ${!isPlaying ? "border-emerald-500/60" : ""}`}
@@ -7751,6 +7946,11 @@ const App: React.FC = () => {
                               {isPlaying ? "Inventory" : "✏️ Edit Items & Inventory"}
                             </span>
                           </button>
+                        )}
+                        {renderHudResizeHandles(
+                          "buttons",
+                          hudButtonsScaleX,
+                          hudButtonsScaleY,
                         )}
                       </div>
                     )}
@@ -10281,6 +10481,117 @@ const App: React.FC = () => {
 
                       <Accordion title="Heads Up Display (HUD)">
                         <div className="space-y-4 bg-neutral-950/50 p-2 rounded">
+                          {selectedHudWidget && selectedHudConfig && (
+                            <div className="rounded border-2 border-pink-400/60 bg-pink-500/10 p-3 shadow-[0_0_20px_rgba(244,114,182,0.08)]">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <div className="font-comic text-sm font-bold text-pink-300">
+                                    Selected: {selectedHudConfig.label}
+                                  </div>
+                                  <p className="mt-0.5 text-[10px] leading-relaxed text-neutral-400">
+                                    Drag it directly on the game screen. Pull
+                                    the pink side handles to stretch one
+                                    direction, or the corner to resize freely.
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedHudWidget(null)}
+                                  className="rounded border border-neutral-700 px-2 py-1 text-[9px] font-bold text-neutral-400 hover:bg-neutral-800 hover:text-white"
+                                >
+                                  Deselect
+                                </button>
+                              </div>
+
+                              <div className="mt-3">
+                                <InterfaceSizeControl
+                                  label={selectedHudConfig.label}
+                                  description="This uses the same independent Width + Height language as canvas objects and overlay artwork."
+                                  widthPercent={selectedHudScaleX * 100}
+                                  heightPercent={selectedHudScaleY * 100}
+                                  onChange={(size) =>
+                                    setProject((current) => ({
+                                      ...current,
+                                      globalSettings: {
+                                        ...current.globalSettings,
+                                        [selectedHudConfig.scaleXKey]:
+                                          size.widthPercent / 100,
+                                        [selectedHudConfig.scaleYKey]:
+                                          size.heightPercent / 100,
+                                      },
+                                    }))
+                                  }
+                                  onReset={() =>
+                                    setProject((current) => ({
+                                      ...current,
+                                      globalSettings: {
+                                        ...current.globalSettings,
+                                        [selectedHudConfig.scaleXKey]: 1,
+                                        [selectedHudConfig.scaleYKey]: 1,
+                                      },
+                                    }))
+                                  }
+                                />
+                              </div>
+
+                              {selectedHudPosition ? (
+                                <div className="mt-3 grid grid-cols-2 gap-2">
+                                  {(["x", "y"] as const).map((axis) => (
+                                    <label
+                                      key={axis}
+                                      className="text-[9px] font-bold text-neutral-400"
+                                    >
+                                      {axis === "x"
+                                        ? "Left / Right"
+                                        : "Top / Bottom"}
+                                      <input
+                                        type="number"
+                                        value={Math.round(
+                                          selectedHudPosition[axis],
+                                        )}
+                                        onChange={(event) =>
+                                          setProject((current) => ({
+                                            ...current,
+                                            globalSettings: {
+                                              ...current.globalSettings,
+                                              [selectedHudConfig.positionKey]: {
+                                                ...selectedHudPosition,
+                                                [axis]:
+                                                  Number(event.target.value) ||
+                                                  0,
+                                              },
+                                            },
+                                          }))
+                                        }
+                                        className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-white"
+                                      />
+                                    </label>
+                                  ))}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setProject((current) => ({
+                                        ...current,
+                                        globalSettings: {
+                                          ...current.globalSettings,
+                                          [selectedHudConfig.positionKey]:
+                                            undefined,
+                                        },
+                                      }))
+                                    }
+                                    className="col-span-2 rounded border border-neutral-700 px-2 py-1.5 text-[9px] font-bold text-neutral-400 hover:bg-neutral-800 hover:text-white"
+                                  >
+                                    Return to automatic corner
+                                  </button>
+                                </div>
+                              ) : (
+                                <p className="mt-3 rounded border border-[#00ffcc]/20 bg-[#00ffcc]/5 px-2 py-1.5 text-[9px] font-bold text-[#00ffcc]">
+                                  Position: automatic corner. Drag this widget
+                                  once to give it an exact editable position.
+                                </p>
+                              )}
+                            </div>
+                          )}
                           <div className="rounded border border-pink-500/20 bg-pink-500/5 p-3">
                             <span className="font-comic text-sm font-bold text-pink-300">
                               Cavebot-made widgets
@@ -10291,7 +10602,7 @@ const App: React.FC = () => {
                               room, frame, or custom artwork.
                             </p>
                             <p className="mt-1 rounded border border-[#00ffcc]/20 bg-[#00ffcc]/5 px-2 py-1.5 text-[10px] font-bold text-[#00ffcc]">
-                              In UI Canvas, drag any visible widget wherever you
+                              In Screen UI, drag any visible widget wherever you
                               want it. No X/Y math required.
                             </p>
                             <div className="mt-3 space-y-3">
@@ -10557,7 +10868,7 @@ const App: React.FC = () => {
                               Optional non-room artwork laid over the playable
                               screen: glass glare, a border, a decorative plate,
                               or illustrated controls. If it needs clickable
-                              pieces, build those in UI Canvas over this image.
+                              pieces, build those in Screen UI over this image.
                             </p>
                             <button
                               type="button"
@@ -13152,8 +13463,8 @@ const App: React.FC = () => {
                                 </optgroup>
 
                                 <optgroup label="Overlays & Interface">
-                                  <option value="open_ui">Open Custom UI Canvas</option>
-                                  <option value="close_ui">Close UI Canvas</option>
+                                  <option value="open_ui">Open Screen UI</option>
+                                  <option value="close_ui">Close Screen UI</option>
                                   <option value="toggle_inventory">Toggle Built-in Inventory</option>
                                   <option value="open_skills">Open Skills Menu</option>
                                   <option value="open_settings">Open Player Settings</option>
@@ -13846,7 +14157,7 @@ const App: React.FC = () => {
                             <div className="flex justify-between items-center">
                               <label className="text-sm text-neutral-500">
                                 {selectedObject.interaction === "open_ui"
-                                  ? "Target Custom UI Canvas"
+                                  ? "Target Screen UI"
                                   : "Canvas to Close (Optional)"}
                               </label>
                               {selectedObject.interaction === "open_ui" && selectedObject.targetUiId && (
@@ -13872,7 +14183,7 @@ const App: React.FC = () => {
                             >
                               <option value="">
                                 {selectedObject.interaction === "open_ui"
-                                  ? "Select a UI Canvas..."
+                                  ? "Select a Screen UI..."
                                   : "Currently Active Menu"}
                               </option>
                               {(project.uiMenus || []).map((s) => (
@@ -15397,13 +15708,13 @@ const App: React.FC = () => {
         {editorMode === "ui_maker" && (
           <div className="studio-page flex-1 flex flex-col bg-neutral-950 overflow-hidden">
             <StudioFeatureHeader
-              title="Menus & HUD"
-              description="Build inventory screens, overlays, journals, meters, and player-facing controls."
+              title="Interface Studio"
+              description="Build menus, HUD widgets, overlays, journals, meters, and clickable screen controls in one place."
               actions={<button
                 onClick={() => {
                   const newMenu: Scene = {
                     id: uuidv4(),
-                    name: `UI Menu ${(project.uiMenus || []).length + 1}`,
+                    name: `Interface Screen ${(project.uiMenus || []).length + 1}`,
                     width: logicalStageWidth,
                     height: logicalStageHeight,
                     backgroundColor: "transparent",
@@ -15418,7 +15729,7 @@ const App: React.FC = () => {
                 }}
                 className="studio-primary-button flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
               >
-                <Plus size={16} /> Create UI Menu
+                <Plus size={16} /> Create Interface Screen
               </button>}
             />
 
@@ -15608,7 +15919,7 @@ const App: React.FC = () => {
                         className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950"
                       />
                       <LabelWithHelp
-                        label="Block Clicks Below UI Canvas"
+                        label="Block Clicks Below Screen UI"
                         helpText="If checked, clicks inside this UI map's bounds will not pass through to the game scene below. Make the width/height match the stage if you want to block the entire screen!"
                       />
                     </label>
