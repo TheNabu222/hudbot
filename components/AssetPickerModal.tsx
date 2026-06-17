@@ -104,7 +104,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
 
   return (
     <div className="asset-picker-backdrop fixed inset-0 bg-black/80 z-[20000] flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="asset-picker-dialog bg-neutral-900 border border-neutral-600 rounded-lg max-w-4xl w-full h-[80vh] flex flex-col shadow-2xl overflow-hidden">
+      <div className="asset-picker-dialog bg-neutral-900 border border-neutral-600 rounded-lg max-w-5xl w-full h-[84vh] flex flex-col shadow-2xl overflow-hidden">
         
         {/* Header */}
         <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-950">
@@ -203,16 +203,22 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                 {visibleAssets.map(asset => (
                   <div 
                     key={asset.id}
-                    className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg group hover:border-emerald-500 transition-colors flex flex-col hover:z-50 relative"
+                    className={`bg-neutral-800/50 border rounded-lg group transition-colors flex flex-col relative ${
+                      editingInfoId === asset.id
+                        ? "border-[#00ffcc]/70 shadow-[0_0_0_1px_rgba(0,255,204,0.28)]"
+                        : "border-neutral-700/50 hover:border-emerald-500"
+                    }`}
                   >
                     <div 
                       onClick={() => onSelect(asset.id)}
-                      className="asset-thumbnail h-32 flex items-center justify-center p-2 relative rounded-t-lg cursor-pointer overflow-hidden"
+                      className="asset-thumbnail h-32 flex items-center justify-center p-2 relative rounded-t-lg cursor-pointer overflow-hidden bg-[linear-gradient(135deg,rgba(0,255,204,0.07),rgba(255,79,200,0.08)),#070812]"
                     >
                       {asset.type === 'audio' ? (
                         <Music size={32} className="text-emerald-500 group-hover:scale-110 transition-transform" />
+                      ) : asset.type === 'video' ? (
+                        <video src={asset.src} className="h-full w-full object-contain pointer-events-none relative z-10" muted />
                       ) : (
-                        <img src={asset.src} alt={asset.name} className="max-w-full max-h-full object-contain pointer-events-none group-hover:scale-125 transition-transform relative z-10" loading="lazy" />
+                        <img src={asset.src} alt={asset.name} className="h-full w-full object-contain pointer-events-none transition-transform group-hover:scale-105 relative z-10" loading="lazy" />
                       )}
                       {onToggleFavorite && (
                          <div 
@@ -225,12 +231,14 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                          </div>
                       )}
                       {onUpdateAsset && (
-                        <div 
+                        <button
+                           type="button"
+                           aria-label={`Edit info for ${asset.name}`}
                            className={`absolute top-2 left-2 p-1.5 rounded-md backdrop-blur-md z-20 bg-black/40 text-neutral-400 opacity-0 group-hover:opacity-100 hover:bg-neutral-700 hover:text-white transition-all`}
                            onClick={(e) => { e.stopPropagation(); setEditingInfoId(editingInfoId === asset.id ? null : asset.id); }}
                          >
                            <Info size={14} />
-                         </div>
+                         </button>
                       )}
                       {asset.type === 'image' && onEditImage && (
                         <button
@@ -248,7 +256,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                       )}
                     </div>
                     {editingInfoId === asset.id ? (
-                      <div className="p-3 border-t border-neutral-700/50 flex flex-col gap-2 bg-neutral-900 absolute top-full left-0 right-0 z-[100] rounded-b-lg shadow-xl shadow-black/50 border-x border-b border-emerald-500 max-h-64 overflow-y-auto">
+                      <div className="p-3 border-t border-[#00ffcc]/30 flex flex-col gap-2 bg-neutral-950/95 rounded-b-lg shadow-inner">
                         <input 
                            type="text" 
                            value={asset.name} 

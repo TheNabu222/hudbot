@@ -154,9 +154,9 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
   };
 
   return (
-    <div className="fixed inset-0 bg-black/90 z-[3000] flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/90 z-[30000] flex items-center justify-center p-4">
       {errorMsg && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[4000] bg-red-500 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[31000] bg-red-500 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2">
           <span>{errorMsg}</span>
           <button onClick={() => setErrorMsg(null)} className="text-white/80 hover:text-white">&times;</button>
         </div>

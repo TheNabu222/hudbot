@@ -99,6 +99,12 @@ const helpSections: HelpSection[] = [
         tip: "If you are choosing artwork for a map, cursor, HUD overlay, or sound response, the same popup says Use this asset instead because it is filling a slot rather than placing a visible object.",
       },
       {
+        title: "Start the collection fresh",
+        detail:
+          "Use Clear Collection in Collect when you want to empty the file library and rebuild your asset set from scratch. Cavebot asks first, and placed canvas objects stay in the room.",
+        tip: "This is meant for cleaning the library/archive, not deleting the game scene itself.",
+      },
+      {
         title: "One asset slot everywhere",
         detail:
           "Map artwork, location icons, item icons, cursors, HUD overlays, sounds, and videos now use the same inspector: preview, current name and type, Change, and Remove. Change always opens the same searchable asset popup.",

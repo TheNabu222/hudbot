@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { Plus, Trash2, Edit2, Play, Music, Video, Image as ImageIcon, Search, Star, CheckSquare } from "lucide-react";
+import { Plus, Trash2, Play, Music, Image as ImageIcon, Search, Star, CheckSquare } from "lucide-react";
 import { Project, Asset } from "../types";
 import { v4 as uuidv4 } from "uuid";
 import { StudioFeatureHeader } from "./StudioFeatureHeader";
@@ -84,18 +84,42 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
     return true;
   });
 
+  const requestClearCollection = () =>
+    setConfirmDialog({
+      isOpen: true,
+      message:
+        "Clear the whole file collection? Placed canvas objects stay where they are, but the Collect library starts fresh.",
+      onConfirm: () => {
+        updateProject({ assets: [] });
+        setSelectedAssetIds(new Set());
+        setActiveCategory("all");
+      },
+    });
+
   return (
     <div className="studio-page asset-library-page flex-1 flex flex-col bg-neutral-900 border-l border-neutral-800 h-full overflow-hidden">
       <StudioFeatureHeader
         title="File Library"
         description="Upload, tag, favorite, edit, and send reusable files straight into the current room."
         actions={
-          <button
-            onClick={() => uploadInputRef.current?.click()}
-            className="studio-primary-button px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold flex items-center gap-2"
-          >
-            <Plus size={16} /> Add File
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {project.assets.length > 0 && (
+              <button
+                type="button"
+                onClick={requestClearCollection}
+                className="rounded border border-rose-400/40 bg-rose-500/10 px-3 py-2 font-comic text-xs font-bold text-rose-200 hover:bg-rose-500/20"
+              >
+                <Trash2 size={14} className="inline-block mr-1" />
+                Clear Collection
+              </button>
+            )}
+            <button
+              onClick={() => uploadInputRef.current?.click()}
+              className="studio-primary-button px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold flex items-center gap-2"
+            >
+              <Plus size={16} /> Add File
+            </button>
+          </div>
         }
       />
       <input
@@ -172,6 +196,19 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
             >
                + New Category
             </button>
+            {project.assets.length > 0 && (
+              <>
+                <div className="h-px bg-neutral-800 my-2 mx-2"></div>
+                <button
+                  type="button"
+                  onClick={requestClearCollection}
+                  className="w-full rounded border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-left text-sm font-bold text-rose-300 hover:bg-rose-500/20"
+                >
+                  <Trash2 size={14} className="mr-2 inline-block" />
+                  Clear Collection
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -266,7 +303,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
           )}
 
           {onPlaceAsset && filteredAssets.length > 0 && (
-            <div className="mb-5 rounded-[6px_18px_6px_18px] border border-[#00ffcc]/35 bg-[#00ffcc]/10 px-4 py-3 text-sm text-[#063b44] shadow-[0_0_20px_rgba(0,255,204,0.12)] dark:text-[#b9fff4]">
+            <div className="mb-5 rounded-[6px_18px_6px_18px] border border-[#00ffcc]/45 bg-[#eafffb] px-4 py-3 text-sm text-[#09272d] shadow-[0_0_20px_rgba(0,255,204,0.12)] dark:bg-[#00ffcc]/10 dark:text-[#d9fff9]">
               <span className="font-comic font-bold text-[#ff4fc8]">
                 How to use a file:
               </span>{" "}
@@ -285,7 +322,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                 }`}
               >
                 <div 
-                   className="aspect-square flex items-center justify-center p-4 relative bg-black/40 cursor-pointer"
+                   className="aspect-square min-h-40 flex items-center justify-center p-3 relative bg-[linear-gradient(135deg,rgba(0,255,204,0.08),rgba(255,79,200,0.08)),#070812] cursor-pointer"
                    onClick={() => {
                       const newSet = new Set(selectedAssetIds);
                       if (newSet.has(asset.id)) newSet.delete(asset.id);
@@ -308,7 +345,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                      <CheckSquare size={16} />
                   </button>
                   {asset.type === "image" ? (
-                    <img src={asset.src} className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md" />
+                    <img src={asset.src} alt={asset.name} className="h-full w-full object-contain pointer-events-none drop-shadow-md" loading="lazy" />
                   ) : asset.type === "audio" ? (
                     <div className="flex flex-col items-center justify-center pointer-events-none text-indigo-400 w-full h-full relative">
                       <Music size={40} className="mb-2 opacity-80" />
@@ -402,7 +439,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                     <button
                       type="button"
                       onClick={() => onPlaceAsset(asset)}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-[4px_12px_4px_12px] border border-[#00ffcc]/45 bg-[#00ffcc]/10 px-2 py-1.5 font-comic text-[11px] font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20"
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[4px_12px_4px_12px] border border-[#00a896]/50 bg-[#00ffcc]/20 px-2 py-1.5 font-comic text-[11px] font-bold text-[#00675d] shadow-sm hover:bg-[#00ffcc]/30 dark:border-[#00ffcc]/45 dark:bg-[#00ffcc]/10 dark:text-[#00ffcc] dark:hover:bg-[#00ffcc]/20"
                     >
                       <Plus size={13} />
                       Place in current room

@@ -18684,7 +18684,10 @@ const App: React.FC = () => {
               ),
             }));
           }}
-          onEditImage={(id) => setEditingAssetId(id)}
+          onEditImage={(id) => {
+            setAssetPickerCb(null);
+            setEditingAssetId(id);
+          }}
           repositoryFolders={repositoryFolders}
           onOpenRepositoryFolder={(path) => fetchFromGitHub(path)}
           onLoadRepositoryRoot={() => fetchFromGitHub("", true)}
