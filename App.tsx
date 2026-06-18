@@ -8,6 +8,7 @@ import {
   Image as ImageIcon,
   Layers,
   Settings,
+  Move,
   MoveUp,
   MoveDown,
   Trash2,
@@ -1162,6 +1163,7 @@ const App: React.FC = () => {
     | "hudButtonsScaleY";
   const [selectedHudWidget, setSelectedHudWidget] =
     useState<HudWidgetId | null>(null);
+  const [isHudPlacementMode, setIsHudPlacementMode] = useState(false);
   const [draggingHudWidget, setDraggingHudWidget] = useState<{
     key: HudPositionKey;
     pointerId: number;
@@ -1228,6 +1230,16 @@ const App: React.FC = () => {
     if (isPlaying || !stageRef.current) return;
     event.stopPropagation();
     didDragRef.current = false;
+    const widget =
+      key === "hudNeedsPosition"
+        ? "needs"
+        : key === "hudSkillsPosition"
+          ? "skills"
+          : "buttons";
+    setSelectedHudWidget(widget);
+    if (!isHudPlacementMode) {
+      return;
+    }
     const stageRect = stageRef.current.getBoundingClientRect();
     const widgetRect = event.currentTarget.getBoundingClientRect();
     const scaleX = logicalStageWidth / stageRect.width;
@@ -1240,13 +1252,6 @@ const App: React.FC = () => {
       offsetX: (event.clientX - stageRect.left) * scaleX - widgetX,
       offsetY: (event.clientY - stageRect.top) * scaleY - widgetY,
     });
-    setSelectedHudWidget(
-      key === "hudNeedsPosition"
-        ? "needs"
-        : key === "hudSkillsPosition"
-          ? "skills"
-          : "buttons",
-    );
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -1374,7 +1379,7 @@ const App: React.FC = () => {
     scaleX: number,
     scaleY: number,
   ) => {
-    if (isPlaying || selectedHudWidget !== widget) return null;
+    if (isPlaying || !isHudPlacementMode || selectedHudWidget !== widget) return null;
     const handleClass =
       "absolute z-[2100] border-2 border-neutral-950 bg-pink-300 shadow-[0_0_0_1px_white]";
     return (
@@ -3686,6 +3691,35 @@ const App: React.FC = () => {
   const selectedHudPosition = selectedHudConfig
     ? project.globalSettings[selectedHudConfig.positionKey]
     : undefined;
+  const openScreenControlsEditor = () => {
+    const existingMenu =
+      (project.uiMenus || []).find(
+        (menu) => menu.id === project.currentUiMenuId,
+      ) || (project.uiMenus || [])[0];
+    if (existingMenu) {
+      setProject((current) => ({
+        ...current,
+        currentUiMenuId: existingMenu.id,
+      }));
+    } else {
+      const newMenu: Scene = {
+        id: uuidv4(),
+        name: "Game Screen Controls",
+        width: logicalStageWidth,
+        height: logicalStageHeight,
+        backgroundColor: "transparent",
+        objects: [],
+        blocksClicks: false,
+        isOpenByDefault: true,
+      };
+      pushHistory({
+        ...project,
+        uiMenus: [...(project.uiMenus || []), newMenu],
+        currentUiMenuId: newMenu.id,
+      });
+    }
+    setEditorMode("ui_stage");
+  };
 
   return (
     <div className={`studio-app ${studioTheme === "sunny" ? "sunny-theme" : ""} flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans overflow-hidden`}>
@@ -5251,11 +5285,25 @@ const App: React.FC = () => {
                 </div>
               )}
 
+              {!isPlaying && rightSidebarWidth === 0 && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setRightSidebarWidth(320);
+                  }}
+                  className="absolute right-4 top-4 z-[5200] rounded-[8px_18px_8px_18px] border border-pink-400/50 bg-neutral-950/90 px-3 py-2 font-comic text-sm font-bold text-pink-200 shadow-xl backdrop-blur hover:bg-pink-500/15"
+                  title="Bring the Options / Layers panel back"
+                >
+                  Show Inspector
+                </button>
+              )}
+
               {/* Quick Edit Toggle for Canvas */}
               {(editorMode === "stage" || editorMode === "ui_stage") &&
                 !isPlaying && (
                   <div
-                    className={`${quickEditPos ? "absolute" : "relative self-center mb-3"} z-[5000] flex bg-neutral-900 border border-neutral-700 p-1 rounded-lg shadow-2xl items-center gap-1`}
+                    className={`studio-quick-edit-toolbar ${quickEditPos ? "absolute" : "relative self-center mb-3"} z-[5000] flex max-w-[calc(100vw-2rem)] flex-wrap justify-center bg-neutral-900 border border-neutral-700 p-1 rounded-lg shadow-2xl items-center gap-1`}
                     style={{
                       ...(quickEditPos && {
                         left: quickEditPos.x,
@@ -5340,6 +5388,36 @@ const App: React.FC = () => {
                           </option>
                         ))}
                       </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newScene: Scene = {
+                            id: uuidv4(),
+                            name: `Scene ${project.scenes.length + 1}`,
+                            width:
+                              currentScene?.width ||
+                              project.globalSettings.stageWidth ||
+                              800,
+                            height:
+                              currentScene?.height ||
+                              project.globalSettings.stageHeight ||
+                              600,
+                            backgroundColor:
+                              currentScene?.backgroundColor || "#000000",
+                            objects: [],
+                          };
+                          pushHistory({
+                            ...project,
+                            scenes: [...project.scenes, newScene],
+                            currentSceneId: newScene.id,
+                          });
+                          setEditorMode("stage");
+                        }}
+                        className="rounded border border-white/15 bg-white/10 px-2 py-1 text-xs font-bold text-white hover:border-[#00ffcc]/60 hover:text-[#00ffcc]"
+                        title="Create a new empty room/scene"
+                      >
+                        + Scene
+                      </button>
                     </div>
 
                     <div
@@ -5392,6 +5470,24 @@ const App: React.FC = () => {
                       <span>{hideEditorHud ? "HUD: Hidden" : "HUD: Visible"}</span>
                     </button>
 
+                    {!hideEditorHud && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setIsHudPlacementMode((active) => !active)
+                        }
+                        className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-bold transition-all ${
+                          isHudPlacementMode
+                            ? "border-pink-400 bg-pink-500/20 text-pink-200"
+                            : "border-neutral-700 bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white"
+                        }`}
+                        title="Unlock built-in HUD panels so they can be dragged and resized"
+                      >
+                        <Move size={14} />
+                        {isHudPlacementMode ? "Moving HUD" : "Move HUD"}
+                      </button>
+                    )}
+
                     {editorMode === "stage" && (
                       <button
                         type="button"
@@ -5420,7 +5516,7 @@ const App: React.FC = () => {
                     ? deviceFrame!.outerHeight
                     : logicalStageHeight,
                   transform: `scale(${stageZoom})`,
-                  transformOrigin: "top left",
+                  transformOrigin: "center center",
                   cursor:
                     isPlaying &&
                     (hoverCursorAssetId ||
@@ -7565,7 +7661,7 @@ const App: React.FC = () => {
                         onPointerUp={handleHudWidgetPointerUp}
                         className={`absolute top-4 right-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2 transition-all ${
                           !isPlaying 
-                            ? "cursor-move hover:ring-2 hover:ring-emerald-400 group/needs select-none"
+                            ? `${isHudPlacementMode ? "cursor-move" : "cursor-pointer"} hover:ring-2 hover:ring-emerald-400 group/needs select-none`
                             : ""
                         } ${selectedHudWidget === "needs" && !isPlaying ? "ring-2 ring-pink-400" : ""}`}
                         style={{
@@ -7650,7 +7746,7 @@ const App: React.FC = () => {
                         )}
                         {!isPlaying && (
                           <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-emerald-500 text-neutral-950 font-bold scale-0 group-hover/needs:scale-100 transition-all text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded shadow-lg whitespace-nowrap z-50 pointer-events-none flex items-center gap-1">
-                            <span>✏️ Click to Edit</span>
+                            <span>{isHudPlacementMode ? "✋ Drag to Move" : "✏️ Click to Edit"}</span>
                           </div>
                         )}
                         {renderHudResizeHandles(
@@ -7678,7 +7774,7 @@ const App: React.FC = () => {
                         onPointerUp={handleHudWidgetPointerUp}
                         className={`absolute top-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2 transition-all ${
                           !isPlaying 
-                            ? "cursor-move hover:ring-2 hover:ring-emerald-400 group/skills select-none"
+                            ? `${isHudPlacementMode ? "cursor-move" : "cursor-pointer"} hover:ring-2 hover:ring-emerald-400 group/skills select-none`
                             : ""
                         } ${selectedHudWidget === "skills" && !isPlaying ? "ring-2 ring-pink-400" : ""}`}
                         style={{
@@ -7746,7 +7842,7 @@ const App: React.FC = () => {
                         ))}
                         {!isPlaying && (
                           <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-emerald-500 text-neutral-950 font-bold scale-0 group-hover/skills:scale-100 transition-all text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded shadow-lg whitespace-nowrap z-50 pointer-events-none flex items-center gap-1">
-                            <span>✏️ Click to Edit</span>
+                            <span>{isHudPlacementMode ? "✋ Drag to Move" : "✏️ Click to Edit"}</span>
                           </div>
                         )}
                         {renderHudResizeHandles(
@@ -7772,7 +7868,7 @@ const App: React.FC = () => {
                         }
                         onPointerMove={handleHudWidgetPointerMove}
                         onPointerUp={handleHudWidgetPointerUp}
-                        className={`absolute bottom-4 right-4 flex items-end gap-2 z-[2000] ${!isPlaying ? "cursor-move" : ""} ${selectedHudWidget === "buttons" && !isPlaying ? "ring-2 ring-pink-400" : ""}`}
+                        className={`absolute bottom-4 right-4 flex items-end gap-2 z-[2000] ${!isPlaying ? (isHudPlacementMode ? "cursor-move" : "cursor-pointer") : ""} ${selectedHudWidget === "buttons" && !isPlaying ? "ring-2 ring-pink-400" : ""}`}
                         style={{
                           ...(project.globalSettings.hudButtonsPosition
                             ? {
@@ -9660,7 +9756,7 @@ const App: React.FC = () => {
             {/* Right Sidebar - Properties/Layers */}
             {!isPlaying && (
             <aside
-              className="studio-inspector flex-shrink-0 bg-neutral-900 border-l border-neutral-800 flex flex-col z-20 relative"
+              className={`studio-inspector flex-shrink-0 bg-neutral-900 border-l border-neutral-800 flex flex-col z-20 relative ${rightSidebarWidth === 0 ? "hidden" : ""}`}
               style={{
                 width: rightSidebarWidth,
                 maxWidth: "min(420px, 42vw)",
@@ -10240,8 +10336,37 @@ const App: React.FC = () => {
                       </Accordion>
 
                       <Accordion title="Visual Export Layout Arranger">
+                        <div className="mb-2 rounded-[8px_20px_8px_20px] border border-[#00ffcc]/25 bg-[#00ffcc]/5 p-3">
+                          <div className="font-comic text-sm font-bold text-[#00ffcc]">
+                            Preview only — use the buttons below to move the real pieces.
+                          </div>
+                          <p className="mt-1 text-sm leading-relaxed text-neutral-300">
+                            This little mock screen shows the exported layout. It does not drag things itself, because HUD pieces, screen buttons, overlays, and shell frames each live in a different layer.
+                          </p>
+                          <div className="mt-3 grid grid-cols-1 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditorMode("ui_stage");
+                                setHideEditorHud(false);
+                                setIsHudPlacementMode(true);
+                                setSelectedHudWidget("buttons");
+                              }}
+                              className="rounded border border-pink-400/45 bg-pink-500/10 px-3 py-2 font-comic text-sm font-bold text-pink-200 hover:bg-pink-500/20"
+                            >
+                              Move built-in HUD pieces →
+                            </button>
+                            <button
+                              type="button"
+                              onClick={openScreenControlsEditor}
+                              className="rounded border border-cyan-300/45 bg-cyan-400/10 px-3 py-2 font-comic text-sm font-bold text-cyan-100 hover:bg-cyan-400/20"
+                            >
+                              Place clickable screen controls →
+                            </button>
+                          </div>
+                        </div>
                         <div className="bg-neutral-950 p-2 rounded relative flex items-center justify-center border border-neutral-800 mt-2" style={{ resize: 'both', overflow: 'hidden', minHeight: '150px', height: '400px', minWidth: '150px' }}>
-                          <div className={`relative flex w-full h-full text-[10px] items-center justify-center p-2 rounded bg-neutral-900 border border-neutral-700 ${project.globalSettings.dialoguePosition === 'below' ? 'flex-col' : 'flex-row'}`}>
+                          <div className={`relative flex w-full h-full text-sm items-center justify-center p-2 rounded bg-neutral-900 border border-neutral-700 ${project.globalSettings.dialoguePosition === 'below' ? 'flex-col' : 'flex-row'}`}>
                             
                             {/* Game Canvas */}
                             <div 
@@ -10253,7 +10378,7 @@ const App: React.FC = () => {
                                 maxWidth: '100%'
                               }}
                             >
-                                <span className="text-emerald-500 opacity-50 font-bold uppercase tracking-widest pointer-events-none">Game Canvas</span>
+                                <span className="text-emerald-500 opacity-60 font-bold uppercase tracking-widest pointer-events-none">Game Canvas Preview</span>
 
                                 {/* HUD Icons Approximation */}
                                 <div className="absolute top-2 right-2 flex flex-col gap-1 pointer-events-none">
@@ -10315,7 +10440,7 @@ const App: React.FC = () => {
                                     }}
                                   >
                                     <span className="font-bold">Dialogue Box</span>
-                                    <span className="text-[8px] opacity-80">(In-Canvas: {project.globalSettings.dialoguePosition || "bottom"}) - Click to Rotate</span>
+                                    <span className="text-[11px] opacity-80">(In-Canvas: {project.globalSettings.dialoguePosition || "bottom"}) · click to rotate</span>
                                   </div>
                                 )}
                             </div>
@@ -10336,7 +10461,7 @@ const App: React.FC = () => {
                                   }}
                                 >
                                   <span className="font-bold">Dialogue Box (Below Canvas)</span>
-                                  <span className="text-[8px] opacity-80">Click to attach inside canvas</span>
+                                  <span className="text-[11px] opacity-80">Click to attach inside canvas</span>
                                 </div>
                             )}
                           </div>
@@ -10344,14 +10469,14 @@ const App: React.FC = () => {
                           <div className="absolute top-2 left-2 flex gap-1 z-10 pointer-events-auto">
                             <button
                               onClick={() => pushHistory({...project, globalSettings: {...project.globalSettings, dialoguePosition: 'below'}})}
-                              className={`text-[9px] px-1.5 py-0.5 rounded border shadow ${project.globalSettings.dialoguePosition === 'below' ? 'bg-cyan-500 border-cyan-400 text-black' : 'bg-neutral-800 border-neutral-600 text-neutral-300 hover:bg-neutral-700'} transition-all`}
+                              className={`px-2 py-1 text-xs rounded border shadow ${project.globalSettings.dialoguePosition === 'below' ? 'bg-cyan-500 border-cyan-400 text-black' : 'bg-neutral-800 border-neutral-600 text-neutral-300 hover:bg-neutral-700'} transition-all`}
                             >
                               Move Dialogue Below Canvas
                             </button>
                           </div>
                         </div>
-                        <p className="text-[10px] text-neutral-400 mt-2 leading-tight">
-                          This preview approximates how your game will layout upon export. Click the Dialogue Box to change its attachment point! Check "Heads Up Display" settings to hide/show corner icons.
+                        <p className="text-sm text-neutral-300 mt-2 leading-relaxed">
+                          Dragging happens in Screen UI. This panel is for export layout decisions: dialogue placement, maximum dialogue size, game shell, and overlay artwork.
                         </p>
                         <div className="grid grid-cols-2 gap-2 mt-2 border-t border-neutral-800 pt-2">
                           <div>
@@ -10592,9 +10717,9 @@ const App: React.FC = () => {
                                     Selected: {selectedHudConfig.label}
                                   </div>
                                   <p className="mt-0.5 text-[10px] leading-relaxed text-neutral-400">
-                                    Drag it directly on the game screen. Pull
-                                    the pink side handles to stretch one
-                                    direction, or the corner to resize freely.
+                                    Click HUD pieces to edit them. Turn on Move
+                                    HUD when you want to drag them around the
+                                    game screen or use the pink resize handles.
                                   </p>
                                 </div>
                                 <button
@@ -10689,8 +10814,9 @@ const App: React.FC = () => {
                                 </div>
                               ) : (
                                 <p className="mt-3 rounded border border-[#00ffcc]/20 bg-[#00ffcc]/5 px-2 py-1.5 text-[9px] font-bold text-[#00ffcc]">
-                                  Position: automatic corner. Drag this widget
-                                  once to give it an exact editable position.
+                                  Position: automatic corner. Turn on Move HUD,
+                                  then drag this widget once to give it an exact
+                                  editable position.
                                 </p>
                               )}
                             </div>
@@ -10705,8 +10831,9 @@ const App: React.FC = () => {
                               room, frame, or custom artwork.
                             </p>
                             <p className="mt-1 rounded border border-[#00ffcc]/20 bg-[#00ffcc]/5 px-2 py-1.5 text-[10px] font-bold text-[#00ffcc]">
-                              In Screen UI, drag any visible widget wherever you
-                              want it. No X/Y math required.
+                              In Screen UI, click a widget to select it. Use
+                              Move HUD only when you want to reposition built-in
+                              widgets. No accidental scooting.
                             </p>
                             <div className="mt-3 space-y-3">
                               {(
@@ -10975,39 +11102,7 @@ const App: React.FC = () => {
                             </p>
                             <button
                               type="button"
-                              onClick={() => {
-                                const existingMenu =
-                                  (project.uiMenus || []).find(
-                                    (menu) =>
-                                      menu.id === project.currentUiMenuId,
-                                  ) || (project.uiMenus || [])[0];
-                                if (existingMenu) {
-                                  setProject((current) => ({
-                                    ...current,
-                                    currentUiMenuId: existingMenu.id,
-                                  }));
-                                } else {
-                                  const newMenu: Scene = {
-                                    id: uuidv4(),
-                                    name: "Game Screen Controls",
-                                    width: logicalStageWidth,
-                                    height: logicalStageHeight,
-                                    backgroundColor: "transparent",
-                                    objects: [],
-                                    blocksClicks: false,
-                                    isOpenByDefault: true,
-                                  };
-                                  pushHistory({
-                                    ...project,
-                                    uiMenus: [
-                                      ...(project.uiMenus || []),
-                                      newMenu,
-                                    ],
-                                    currentUiMenuId: newMenu.id,
-                                  });
-                                }
-                                setEditorMode("ui_stage");
-                              }}
+                              onClick={openScreenControlsEditor}
                               className="my-1 w-full rounded border border-pink-400/40 bg-pink-500/10 px-3 py-2 font-comic text-xs font-bold text-pink-300 hover:bg-pink-500/20"
                             >
                               Place clickable screen controls →

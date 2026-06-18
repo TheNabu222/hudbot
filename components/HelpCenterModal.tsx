@@ -174,6 +174,12 @@ const helpSections: HelpSection[] = [
         tip: "Do not also place the shell as a scene object. Its outside buttons and ornaments belong to the shell layer; scenery and characters belong inside the marked screen.",
       },
       {
+        title: "Export preview versus editing",
+        detail:
+          "The Visual Export Layout Arranger is a preview and routing panel, not the drag surface. Use its buttons to jump to Screen UI for moving clickable controls, Move HUD for built-in widgets, or the Game Shell marker for the playable screen opening.",
+        tip: "If something looks right in the preview but will not drag there, it probably belongs to another layer. Cavebot now labels those jumps directly.",
+      },
+      {
         title: "Clickable shell buttons",
         detail:
           "After marking a Game Shell screen, choose Edit Outside Buttons. Draw boxes over the shell's knobs, icons, and decorative buttons. Select any box again to drag it elsewhere or freely stretch and shrink it from every edge and corner. Exact Left, Top, Width, and Height fields are available when you want precision.",
@@ -182,7 +188,7 @@ const helpSections: HelpSection[] = [
       {
         title: "Cavebot-made widgets",
         detail:
-          "Click Needs, Skills, or the built-in button cluster directly on the game screen to select it. The HUD inspector opens automatically with the same Position, Width, Height, reset, drag, and freeform resize language used elsewhere. Pink side handles stretch one direction; the corner changes both.",
+          "Click Needs, Skills, or the built-in button cluster directly on the game screen to select it. To prevent accidental scooting, built-in HUD pieces only drag or show resize handles after you turn on Move HUD in the canvas toolbar.",
         tip: "Interface Studio manages what player-facing pieces exist. Screen UI places custom interface objects. The HUD inspector edits Cavebot-made widgets. Use HUD: Hidden only to clear the editing view; it does not delete anything.",
       },
       {

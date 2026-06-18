@@ -785,7 +785,7 @@
 .studio-inspector,
 .asset-picker-dialog,
 .asset-inspector-slot {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .studio-step {
@@ -799,7 +799,7 @@
 
 .studio-step__label,
 .studio-tab {
-  font-size: 0.84rem;
+  font-size: 0.9rem;
 }
 
 .studio-workflow__eyebrow {
@@ -815,7 +815,7 @@
 .studio-page :is(button, input, select, textarea),
 .studio-inspector :is(button, input, select, textarea),
 .asset-picker-dialog :is(button, input, select, textarea) {
-  font-size: 0.84rem;
+  font-size: 0.9rem;
   line-height: 1.35;
 }
 
@@ -828,7 +828,7 @@
 .studio-inspector {
   min-width: 0;
   max-width: min(420px, 42vw);
-  font-size: 0.84rem;
+  font-size: 0.9rem;
 }
 
 .studio-inspector [class*="text-[9px]"],
