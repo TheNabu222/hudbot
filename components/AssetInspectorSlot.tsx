@@ -26,13 +26,13 @@ export function AssetInspectorSlot({
   compact = false,
 }: AssetInspectorSlotProps) {
   return (
-    <div className="asset-inspector-slot rounded-[7px_18px_7px_18px] border border-[#00ffcc]/15 bg-neutral-950/75 p-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+    <div className="asset-inspector-slot rounded-[7px_18px_7px_18px] border border-[#00ffcc]/15 bg-neutral-950/75 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
       <div className="mb-2">
-        <div className="font-comic text-[11px] font-bold text-white">
+        <div className="font-comic text-sm font-bold text-white">
           {label}
         </div>
         {description && (
-          <p className="mt-0.5 text-[9px] leading-relaxed text-neutral-500">
+          <p className="mt-1 text-xs leading-relaxed text-neutral-400">
             {description}
           </p>
         )}
@@ -80,17 +80,17 @@ export function AssetInspectorSlot({
         </button>
 
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[11px] font-bold text-neutral-200">
+          <div className="truncate text-sm font-bold text-neutral-200">
             {asset?.name || emptyLabel}
           </div>
-          <div className="mt-1 inline-flex rounded border border-neutral-700/70 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.16em] text-neutral-500">
+          <div className="mt-1 inline-flex rounded border border-neutral-700/70 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-neutral-400">
             {asset ? asset.type : "empty slot"}
           </div>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <button
               type="button"
               onClick={onChoose}
-              className="rounded border border-[#00ffcc]/35 bg-[#00ffcc]/10 px-2 py-1 text-[9px] font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20"
+              className="rounded border border-[#00ffcc]/35 bg-[#00ffcc]/10 px-2.5 py-1.5 text-xs font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20"
             >
               {asset ? "Change" : chooseLabel}
             </button>
@@ -98,9 +98,9 @@ export function AssetInspectorSlot({
               <button
                 type="button"
                 onClick={onClear}
-                className="inline-flex items-center gap-1 rounded border border-red-500/25 px-2 py-1 text-[9px] font-bold text-red-400 hover:bg-red-500/10"
+                className="inline-flex items-center gap-1 rounded border border-red-500/25 px-2.5 py-1.5 text-xs font-bold text-red-400 hover:bg-red-500/10"
               >
-                <X size={10} />
+                <X size={12} />
                 Remove
               </button>
             )}

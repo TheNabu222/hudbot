@@ -3807,8 +3807,8 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-      <header className="studio-titlebar flex items-center justify-between gap-4 px-4 py-2 relative z-[2100] custom-scrollbar min-h-[58px] shrink-0">
-        <div className="flex items-center gap-3 shrink-0 min-w-0">
+      <header className="studio-titlebar relative z-[2100] flex min-h-[58px] shrink-0 items-center justify-between gap-4 px-4 py-2 custom-scrollbar">
+        <div className="studio-titlebar__project flex min-w-0 shrink-0 items-center gap-3">
           <div className="studio-brand hidden md:flex" aria-label="Cavebot Studio">
             <span className="studio-brand__sigil">✦</span>
             <span className="studio-brand__name">CAVEBOT</span>
@@ -3830,7 +3830,7 @@ const App: React.FC = () => {
           />
         </div>
 
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="studio-titlebar__actions flex min-w-0 items-center gap-2">
           {/* Save Status Indicator */}
           <div className="flex items-center gap-1 mr-2 text-sm font-mono">
             {saveStatus === "saving" && (
@@ -3865,7 +3865,7 @@ const App: React.FC = () => {
 
           <div className="h-6 w-px bg-neutral-800 mx-2"></div>
 
-          <div className="flex items-center gap-2 mr-2 cursor-pointer hover:text-neutral-200">
+          <div className="studio-titlebar__toggle mr-2 flex cursor-pointer items-center gap-2 hover:text-neutral-200">
             <input
               type="checkbox"
               checked={project.globalSettings.snapToGrid}
@@ -3886,7 +3886,7 @@ const App: React.FC = () => {
               helpText="Align objects to a grid when moving them."
             />
           </div>
-          <div className="flex items-center gap-2 mr-4 cursor-pointer hover:text-neutral-200">
+          <div className="studio-titlebar__toggle mr-4 flex cursor-pointer items-center gap-2 hover:text-neutral-200">
             <input
               type="checkbox"
               checked={project.globalSettings.showGhostOutlines}
@@ -3926,7 +3926,7 @@ const App: React.FC = () => {
                   className="fixed inset-0 z-[2999]" 
                   onClick={() => setIsBackupMenuOpen(false)} 
                 />
-                <div className="absolute right-0 mt-2 w-[410px] max-h-[85vh] overflow-y-auto custom-scrollbar bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl z-[3000] p-4 flex flex-col gap-4 text-xs select-none">
+                <div className="absolute right-0 z-[3000] mt-2 flex max-h-[85vh] w-[410px] max-w-[calc(100vw-1rem)] select-none flex-col gap-4 overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-950 p-4 text-xs shadow-2xl custom-scrollbar">
                   <div className="flex items-center justify-between pb-2 border-b border-neutral-800/60">
                     <div className="flex items-center gap-1.5">
                       <History size={14} className="text-emerald-500 animate-pulse" />

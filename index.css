@@ -410,6 +410,22 @@
 }
 
 @media (max-width: 980px) {
+  .studio-titlebar {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .studio-titlebar__project {
+    flex: 1 1 320px;
+  }
+
+  .studio-titlebar__actions {
+    width: 100%;
+    justify-content: flex-end;
+    overflow-x: auto;
+    padding-bottom: 0.15rem;
+  }
+
   .studio-workflow__context {
     align-items: flex-start;
     flex-direction: column;
@@ -432,12 +448,76 @@
     padding-left: 0.5rem;
   }
 
+  .studio-titlebar__project {
+    flex-basis: 100%;
+  }
+
+  .studio-titlebar__project .studio-project-name {
+    width: auto;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .studio-titlebar__actions {
+    justify-content: flex-start;
+  }
+
+  .studio-titlebar__toggle {
+    margin-right: 0;
+  }
+
+  .studio-workflow__rail {
+    padding: 0.35rem 0.5rem 0;
+    overflow-x: visible;
+  }
+
+  .studio-workflow__steps {
+    min-width: 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .studio-step {
+    min-width: 0;
+    border-bottom: 1px solid rgb(52 54 77 / 90%);
+    border-radius: 6px 12px 6px 12px;
+  }
+
+  .studio-step__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .studio-workflow__detail {
     display: none;
   }
 
   .studio-workflow__context {
     min-height: 44px;
+  }
+
+  .studio-subtools {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  .studio-subtool {
+    flex: 1 1 150px;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 460px) {
+  .studio-workflow__steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .studio-titlebar__actions {
+    gap: 0.35rem;
+  }
+
+  .studio-titlebar__toggle label,
+  .studio-titlebar__toggle button[aria-label] + span {
+    display: none;
   }
 }
 
@@ -784,7 +864,10 @@
 .studio-page,
 .studio-inspector,
 .asset-picker-dialog,
-.asset-inspector-slot {
+.asset-inspector-slot,
+.help-center-modal,
+.image-editor-modal,
+.ai-sprite-modal {
   font-size: 14px;
 }
 
@@ -814,7 +897,10 @@
 
 .studio-page :is(button, input, select, textarea),
 .studio-inspector :is(button, input, select, textarea),
-.asset-picker-dialog :is(button, input, select, textarea) {
+.asset-picker-dialog :is(button, input, select, textarea),
+.help-center-modal :is(button, input, select, textarea),
+.image-editor-modal :is(button, input, select, textarea),
+.ai-sprite-modal :is(button, input, select, textarea) {
   font-size: 0.9rem;
   line-height: 1.35;
 }
@@ -847,6 +933,42 @@
 .asset-picker-dialog [class*="text-[11px]"] {
   font-size: 0.78rem !important;
   line-height: 1.35 !important;
+}
+
+.studio-page [class*="text-[8px]"],
+.studio-page [class*="text-[9px]"],
+.studio-page [class*="text-[10px]"],
+.asset-picker-dialog [class*="text-[8px]"],
+.asset-picker-dialog [class*="text-[9px]"],
+.device-calibrator [class*="text-[8px]"],
+.device-calibrator [class*="text-[9px]"],
+.device-calibrator [class*="text-[10px]"] {
+  font-size: 0.75rem !important;
+  line-height: 1.4 !important;
+}
+
+.studio-page [class*="text-[11px]"],
+.device-calibrator [class*="text-[11px]"] {
+  font-size: 0.8rem !important;
+  line-height: 1.4 !important;
+}
+
+.studio-app :is(button, input, select, textarea):focus-visible {
+  outline: 2px solid #00ffcc;
+  outline-offset: 2px;
+}
+
+.asset-picker-dialog,
+.device-calibrator,
+.studio-inspector,
+.help-center-modal,
+.image-editor-modal,
+.ai-sprite-modal {
+  scrollbar-gutter: stable;
+}
+
+.interface-size-control input[type="range"] {
+  min-height: 24px;
 }
 
 @media (max-width: 900px) {

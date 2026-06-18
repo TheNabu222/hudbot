@@ -107,13 +107,13 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
       <div className="asset-picker-dialog bg-neutral-900 border border-neutral-600 rounded-lg max-w-5xl w-full h-[84vh] flex flex-col shadow-2xl overflow-hidden">
         
         {/* Header */}
-        <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-950">
-          <div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 bg-neutral-950 p-4">
+          <div className="min-w-[220px] flex-1">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               {filterType === 'image' ? <ImageIcon size={20} className="text-emerald-500"/> : filterType === 'audio' ? <Music size={20} className="text-indigo-500" /> : filterType === 'video' ? <Video size={20} className="text-blue-500"/> : <Folder size={20} className="text-neutral-500" />}
               {title}
             </h2>
-            <p className="text-[10px] text-neutral-500 mt-0.5">
+            <p className="mt-1 text-sm leading-relaxed text-neutral-400">
               {helperText} Cavebot asset folders load only when opened.
             </p>
           </div>
@@ -125,12 +125,12 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                 onLoadRepositoryRoot();
               }}
               disabled={isLoadingRepository}
-              className="ml-auto mr-2 rounded border border-[#00ffcc]/35 bg-[#00ffcc]/10 px-3 py-1.5 font-comic text-[10px] font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20 disabled:opacity-50"
+              className="ml-auto rounded border border-[#00ffcc]/35 bg-[#00ffcc]/10 px-3 py-2 font-comic text-xs font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20 disabled:opacity-50"
             >
               {isLoadingRepository ? 'Loading folder…' : repositoryFolders.length ? 'Refresh Cavebot Assets' : 'Browse Cavebot Assets'}
             </button>
           )}
-          <button aria-label="Close asset picker" onClick={onClose} className="p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-white transition-colors">
+          <button aria-label="Close asset picker" onClick={onClose} className="rounded p-2 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white">
             <X size={20} />
           </button>
         </div>
@@ -141,8 +141,8 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
           {/* Main Area */}
           <div className="flex-1 flex flex-col p-4 overflow-hidden">
             {/* Search & Breadcrumbs */}
-            <div className="flex items-center gap-4 mb-4">
-              <div className="relative flex-1 max-w-xs">
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <div className="relative min-w-[220px] flex-1">
                 <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-500" />
                 <input 
                   type="text" 
@@ -245,7 +245,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                           type="button"
                           aria-label={`Edit ${asset.name}`}
                           title="Crop, remove background, recolor, or add filters"
-                          className="absolute bottom-2 right-2 z-20 flex items-center gap-1 rounded-md border border-[#ff4fc8]/50 bg-black/70 px-2 py-1 font-comic text-[10px] font-bold text-[#ff8bd8] opacity-90 shadow-lg backdrop-blur-md transition-all hover:border-[#00ffcc] hover:text-[#00ffcc] group-hover:opacity-100"
+                          className="absolute bottom-2 right-2 z-20 flex items-center gap-1 rounded-md border border-[#ff4fc8]/50 bg-black/70 px-2 py-1 font-comic text-xs font-bold text-[#ff8bd8] opacity-90 shadow-lg backdrop-blur-md transition-all hover:border-[#00ffcc] hover:text-[#00ffcc] group-hover:opacity-100"
                           onClick={(event) => {
                             event.stopPropagation();
                             onEditImage(asset.id);
@@ -279,7 +279,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                         />
                         {(asset.type === 'audio' || asset.type === 'video') && (
                           <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-neutral-800">
-                             <div className="text-[10px] uppercase font-bold text-neutral-500">Trim / Volume Edit</div>
+                             <div className="text-xs font-bold uppercase text-neutral-400">Trim / Volume Edit</div>
                              <div className="flex gap-2">
                                <input type="number" step="0.1" value={asset.trimStart || 0} onChange={e => onUpdateAsset!(asset.id, { trimStart: Math.max(0, parseFloat(e.target.value) || 0)})} className="w-1/2 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-200 outline-none focus:border-emerald-500" placeholder="Start (s)" title="Trim Start (seconds)" />
                                <input type="number" step="0.1" value={asset.trimEnd || ''} onChange={e => onUpdateAsset!(asset.id, { trimEnd: e.target.value ? Math.max(0, parseFloat(e.target.value) || 0) : undefined})} className="w-1/2 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-200 outline-none focus:border-emerald-500" placeholder="End (s)" title="Trim End (seconds)" />
@@ -306,13 +306,13 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                       <div className="p-2 border-t border-neutral-700/50">
                         <p className="text-xs text-neutral-300 truncate font-medium group-hover:text-emerald-400 transition-colors" title={asset.name}>{asset.name}</p>
                         <div className="mt-1 flex items-center justify-between gap-1">
-                          <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                          <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-neutral-400">
                             {asset.type}
                           </span>
                           <button
                             type="button"
                             onClick={() => onSelect(asset.id)}
-                            className="rounded border border-[#00ffcc]/40 bg-[#00ffcc]/10 px-2 py-1 font-comic text-[9px] font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20"
+                            className="rounded border border-[#00ffcc]/40 bg-[#00ffcc]/10 px-2.5 py-1.5 font-comic text-xs font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20"
                           >
                             {selectLabel}
                           </button>
@@ -320,7 +320,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                         {asset.tags && asset.tags.length > 0 && (
                           <div className="flex gap-1 overflow-hidden mt-1 mt-1">
                             {asset.tags.slice(0, 3).map(t => (
-                              <span key={t} className="text-[9px] bg-neutral-900 text-emerald-400/80 px-1 rounded border border-emerald-500/20 whitespace-nowrap">{t}</span>
+                              <span key={t} className="whitespace-nowrap rounded border border-emerald-500/20 bg-neutral-900 px-1.5 py-0.5 text-[10px] text-emerald-300">{t}</span>
                             ))}
                           </div>
                         )}

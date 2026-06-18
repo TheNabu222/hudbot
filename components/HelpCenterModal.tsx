@@ -75,7 +75,7 @@ const helpSections: HelpSection[] = [
         title: "The same layout follows you",
         detail:
           "Feature pages now share one pattern: the heading says what the tool is for, tabs switch related jobs, the left rail holds collections, the center is the work area, and selected things open their editing controls.",
-        tip: "Sunny and Midnight theme the whole studio. They do not change the colors inside your exported game.",
+        tip: "On narrow windows, the inspector becomes an overlay and image tools stack vertically instead of crushing the canvas. Sunny and Midnight do not change exported game colors.",
       },
     ],
   },
@@ -459,7 +459,7 @@ export const HelpCenterModal: React.FC<HelpCenterModalProps> = ({ onClose }) => 
 
   return (
     <div
-      className="fixed inset-0 z-[20000] flex bg-[#030208]/95 p-3 backdrop-blur-md md:p-6"
+      className="help-center-modal fixed inset-0 z-[26000] flex bg-[#030208]/95 p-3 backdrop-blur-md md:p-6"
       role="dialog"
       aria-modal="true"
       aria-label="Cavebot Help Center"
@@ -539,7 +539,11 @@ export const HelpCenterModal: React.FC<HelpCenterModalProps> = ({ onClose }) => 
                   setQuery("");
                   setActiveSectionId(section.id);
                 }}
-                className="whitespace-nowrap rounded-full border border-neutral-700 px-3 py-1.5 font-comic text-xs text-neutral-300"
+                className={`whitespace-nowrap rounded-full border px-3 py-2 font-comic text-sm transition-colors ${
+                  activeSectionId === section.id && !query
+                    ? "border-[#00ffcc]/60 bg-[#00ffcc]/10 text-[#00ffcc]"
+                    : "border-neutral-700 text-neutral-300 hover:border-[#ff4fc8]/50 hover:text-white"
+                }`}
               >
                 {section.title}
               </button>

@@ -37,14 +37,14 @@ export function InterfaceSizeControl({
   };
 
   return (
-    <div className="rounded border border-white/10 bg-black/15 p-2.5">
+    <div className="interface-size-control rounded-[7px_18px_7px_18px] border border-white/10 bg-black/15 p-3">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="font-comic text-[11px] font-bold text-white">
+          <div className="font-comic text-sm font-bold text-white">
             {label}
           </div>
           {description && (
-            <p className="mt-0.5 text-[9px] leading-relaxed text-neutral-500">
+            <p className="mt-1 text-xs leading-relaxed text-neutral-400">
               {description}
             </p>
           )}
@@ -53,11 +53,11 @@ export function InterfaceSizeControl({
           <button
             type="button"
             onClick={onReset}
-            className="rounded border border-neutral-700 p-1 text-neutral-500 hover:bg-neutral-800 hover:text-white"
+            className="rounded border border-neutral-700 p-2 text-neutral-400 hover:bg-neutral-800 hover:text-white"
             aria-label={`Reset ${label} size`}
             title="Reset width and height"
           >
-            <RotateCcw size={12} />
+            <RotateCcw size={14} />
           </button>
         )}
       </div>
@@ -74,7 +74,7 @@ export function InterfaceSizeControl({
           return (
             <label
               key={dimension}
-              className="text-[9px] font-bold text-neutral-400"
+              className="text-xs font-bold text-neutral-300"
             >
               <span className="flex items-center justify-between">
                 {dimensionLabel}
@@ -91,7 +91,7 @@ export function InterfaceSizeControl({
                 onChange={(event) =>
                   changeDimension(dimension, Number(event.target.value))
                 }
-                className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-[#00ffcc]"
+                className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2.5 py-2 text-sm text-[#00ffcc]"
               />
               <input
                 type="range"
@@ -108,7 +108,7 @@ export function InterfaceSizeControl({
           );
         })}
       </div>
-      <p className="mt-2 text-[9px] font-bold text-pink-300">
+      <p className="mt-2 text-xs font-bold leading-relaxed text-pink-300">
         Width and height are independent—stretch or squash freely.
       </p>
     </div>

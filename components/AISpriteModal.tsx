@@ -36,8 +36,8 @@ export const AISpriteModal: React.FC<AISpriteModalProps> = ({ onClose, onSave })
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-neutral-900 border border-neutral-700 rounded-lg max-w-xl w-full flex flex-col shadow-2xl overflow-hidden">
+    <div className="ai-sprite-modal fixed inset-0 z-[30000] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[92vh] w-full max-w-xl flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 shadow-2xl">
         <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-950">
           <h2 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
             <Sparkles size={18} /> AI Sprite Generator
@@ -57,7 +57,7 @@ export const AISpriteModal: React.FC<AISpriteModalProps> = ({ onClose, onSave })
               className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-sm focus:border-emerald-500 outline-none text-white resize-none"
               rows={3}
             />
-            <p className="text-[10px] text-neutral-500 mt-2">
+            <p className="mt-2 text-sm leading-relaxed text-neutral-400">
               Note: The AI will try to generate it on a solid dark green background. You can use the Image Editor's "Remove Background Color" tool afterwards to make it transparent!
             </p>
           </div>

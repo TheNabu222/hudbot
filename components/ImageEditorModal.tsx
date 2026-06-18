@@ -154,14 +154,14 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
   };
 
   return (
-    <div className="fixed inset-0 bg-black/90 z-[30000] flex items-center justify-center p-4">
+    <div className="image-editor-modal fixed inset-0 z-[30000] flex items-center justify-center bg-black/90 p-3 md:p-4">
       {errorMsg && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[31000] bg-red-500 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2">
           <span>{errorMsg}</span>
           <button onClick={() => setErrorMsg(null)} className="text-white/80 hover:text-white">&times;</button>
         </div>
       )}
-      <div className="bg-neutral-900 border border-neutral-700 rounded-lg max-w-5xl w-full h-[90vh] flex shadow-2xl overflow-hidden">
+      <div className="flex h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 shadow-2xl md:h-[90vh] md:flex-row">
         
         {/* Editor Area */}
         <div className="flex-1 bg-neutral-950 flex flex-col relative overflow-hidden">
@@ -180,10 +180,10 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
         </div>
 
         {/* Controls Sidebar */}
-        <div className="w-80 bg-neutral-900 border-l border-neutral-700 p-6 flex flex-col overflow-y-auto custom-scrollbar">
+        <div className="flex max-h-[48vh] w-full flex-col overflow-y-auto border-t border-neutral-700 bg-neutral-900 p-4 custom-scrollbar md:max-h-none md:w-80 md:border-l md:border-t-0 md:p-6">
           <div className="mb-6">
             <h2 className="text-xl font-bold mb-1">Edit Image</h2>
-            <p className="text-[10px] text-neutral-400">Click and drag on the image to crop it. You can extract individual sprites from sheets this way!</p>
+            <p className="mt-1 text-sm leading-relaxed text-neutral-400">Click and drag on the image to crop it. You can extract individual sprites from sheets this way!</p>
           </div>
 
           <div className="space-y-6 flex-1">
@@ -283,7 +283,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
                     <span className="text-xs text-neutral-500">{chromaTolerance}</span>
                   </div>
                   <input type="range" min="0" max="255" value={chromaTolerance} onChange={e => setChromaTolerance(Number(e.target.value))} className="w-full accent-emerald-500" />
-                  <p className="text-[10px] text-amber-500 mt-1">Note: Transparency isn't previewed here, but will apply when you save!</p>
+                  <p className="mt-1 text-xs leading-relaxed text-amber-400">Transparency is applied when you save, even though this preview stays opaque.</p>
                 </div>
               )}
             </div>
