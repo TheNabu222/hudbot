@@ -147,9 +147,40 @@ export interface SaveSlotMeta {
   timeMs?: number;
 }
 
+const inspectorSectionDescriptions: Record<string, string> = {
+  "Game Screen & Room Size":
+    "Set the playable room size, game cursor, and global screen behavior.",
+  "Visual Export Layout Arranger":
+    "Preview how the exported player screen, HUD, and dialogue stack together.",
+  "User Interface Theming":
+    "Choose the fonts, colors, and feel of player-facing menus.",
+  "Heads Up Display (HUD)":
+    "Edit built-in Needs, Skills, buttons, shells, and overlay artwork.",
+  "Advanced Setup": "Extra interface knobs for spacing, rounding, and defaults.",
+  "Simulation & Overrides":
+    "Preview condition-based content without replaying the whole game.",
+  "Identity & Setup":
+    "Name the selected thing, preview its asset, and swap its source file.",
+  "Transform":
+    "Move, resize, rotate, flip, stretch, and layer the selected thing.",
+  "Visual Layers & Sorting":
+    "Control front/back order, opacity, locking, and click-through behavior.",
+  "Object Identity & Notes":
+    "Name the selected thing and describe what it is for.",
+  "Look & Feel":
+    "Tune image fit, filters, animation, blend mode, and cursor behavior.",
+  "Clicks, Cursors & Reactions":
+    "Tell this thing what happens when the player points at it or clicks it.",
+  "Move Together & Relationships":
+    "Attach objects to each other and link them to character/social systems.",
+  "Story & Game Details":
+    "Connect this object to RPG logic, stats, needs, items, and flags.",
+};
+
 const Accordion = ({ title, children, defaultOpen = false }: { title: string, children: React.ReactNode, defaultOpen?: boolean }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const elementId = `accordion-${title.replace(/[^a-zA-Z0-9]/g, "-")}`;
+  const description = inspectorSectionDescriptions[title];
 
   useEffect(() => {
     const handleOpen = (e: Event) => {
@@ -175,17 +206,26 @@ const Accordion = ({ title, children, defaultOpen = false }: { title: string, ch
   return (
     <div 
       id={elementId} 
-      className="bg-neutral-900 border border-neutral-800 rounded-lg overflow-hidden shrink-0 transition-all duration-300"
+      className="group/accordion shrink-0 overflow-hidden rounded-[8px_20px_8px_20px] border border-[#00ffcc]/10 bg-neutral-950/75 shadow-[0_10px_30px_rgba(0,0,0,0.18)] transition-all duration-300 hover:border-[#00ffcc]/25"
     >
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-neutral-800/50 hover:bg-neutral-800 transition-colors text-left"
+        className="w-full flex items-start justify-between gap-3 px-3.5 py-3 bg-gradient-to-r from-neutral-900 via-neutral-900 to-neutral-950 hover:from-[#00ffcc]/10 hover:to-[#ff4fc8]/10 transition-colors text-left"
       >
-        <span className="text-sm font-bold text-neutral-300 uppercase tracking-wider">{title}</span>
-        <ChevronDown size={16} className={`text-neutral-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <span className="min-w-0">
+          <span className="block font-comic text-[12px] font-bold text-white">
+            {title}
+          </span>
+          {description && (
+            <span className="mt-0.5 block text-[9px] leading-snug text-neutral-500">
+              {description}
+            </span>
+          )}
+        </span>
+        <ChevronDown size={16} className={`mt-0.5 shrink-0 text-[#00ffcc] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
       {isOpen && (
-        <div className="p-4 space-y-4 border-t border-neutral-800">
+        <div className="space-y-4 border-t border-[#00ffcc]/10 bg-neutral-950/45 p-3.5">
           {children}
         </div>
       )}
@@ -10017,6 +10057,54 @@ const App: React.FC = () => {
                 {rightSidebarTab === "properties" &&
                   (!selectedObject ? (
                     <div className="space-y-2">
+                      <div className="rounded-[8px_22px_8px_22px] border border-[#00ffcc]/20 bg-gradient-to-br from-[#00ffcc]/10 via-neutral-950 to-[#ff4fc8]/10 p-3 shadow-[0_12px_34px_rgba(0,0,0,0.2)]">
+                        <div className="font-comic text-sm font-bold text-white">
+                          Nothing selected
+                        </div>
+                        <p className="mt-1 text-[10px] leading-relaxed text-neutral-400">
+                          Click a prop, character, text box, invisible target,
+                          HUD widget, or shell button to edit that exact thing.
+                          These controls affect the whole room/game.
+                        </p>
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-[9px] font-bold text-neutral-300">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setAssetPickerCb({
+                                title: "Add Something to Canvas",
+                                helperText:
+                                  "Choose a file and Cavebot will place it in the current room.",
+                                selectLabel: "Place in current room",
+                                onSelect: (id) => {
+                                  const asset = project.assets.find(
+                                    (candidate) => candidate.id === id,
+                                  );
+                                  if (asset) handleInsertAssetToStage(asset);
+                                  setAssetPickerCb(null);
+                                },
+                              })
+                            }
+                            className="rounded border border-[#00ffcc]/35 bg-[#00ffcc]/10 px-2 py-1.5 text-[#00ffcc] hover:bg-[#00ffcc]/20"
+                          >
+                            + Add asset
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleInsertAssetToStage({
+                                id: uuidv4(),
+                                name: "Clickable Area",
+                                type: "hitbox",
+                                category: "tools",
+                                src: "",
+                              })
+                            }
+                            className="rounded border border-[#ff4fc8]/35 bg-[#ff4fc8]/10 px-2 py-1.5 text-[#ff8bd8] hover:bg-[#ff4fc8]/20"
+                          >
+                            + Click target
+                          </button>
+                        </div>
+                      </div>
                       <Accordion title="Game Screen & Room Size" defaultOpen={true}>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
@@ -11492,6 +11580,29 @@ const App: React.FC = () => {
                     </div>
                   ) : (
                     <div className="space-y-2 pb-16">
+                      <div className="rounded-[8px_22px_8px_22px] border border-pink-400/30 bg-gradient-to-br from-pink-500/12 via-neutral-950 to-[#00ffcc]/10 p-3 shadow-[0_12px_34px_rgba(0,0,0,0.2)]">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-comic text-sm font-bold text-pink-200 truncate">
+                              {selectedObject.name || "Selected thing"}
+                            </div>
+                            <p className="mt-1 text-[10px] leading-relaxed text-neutral-400">
+                              Editing this canvas object. Use the sections below
+                              for position, appearance, click behavior, and RPG
+                              logic.
+                            </p>
+                          </div>
+                          <span className="shrink-0 rounded border border-[#00ffcc]/30 bg-[#00ffcc]/10 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-[#00ffcc]">
+                            {selectedObject.isHitbox
+                              ? "click target"
+                              : selectedObject.isText
+                                ? "text"
+                                : selectedObject.isUiElement
+                                  ? "screen UI"
+                                  : "asset"}
+                          </span>
+                        </div>
+                      </div>
                       <Accordion title="Identity & Setup" defaultOpen={true}>
                         <div className="space-y-4">
                           {/* Object Preview Visualizer Sandbox */}

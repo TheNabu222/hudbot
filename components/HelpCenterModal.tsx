@@ -107,7 +107,7 @@ const helpSections: HelpSection[] = [
       {
         title: "One asset slot everywhere",
         detail:
-          "Map artwork, location icons, item icons, cursors, HUD overlays, sounds, and videos now use the same inspector: preview, current name and type, Change, and Remove. Change always opens the same searchable asset popup.",
+          "Map artwork, location icons, item icons, cursors, HUD overlays, sounds, and videos now use the same mini-inspector: framed preview, current name, type badge, Change, and Remove. Change always opens the same searchable asset popup.",
       },
       {
         title: "One coordinate space",
