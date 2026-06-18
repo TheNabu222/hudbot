@@ -54,7 +54,7 @@ const helpSections: HelpSection[] = [
       {
         title: "2. Build a room",
         detail:
-          "Open Compose → Scene Studio. Choose Add Something, select an asset, then drag, resize, rotate, layer, duplicate, or lock it.",
+          "Open Compose → Scene Studio. Choose Add Asset, select a file, then drag, resize, stretch, squash, rotate, layer, duplicate, or lock it.",
       },
       {
         title: "3. Make it react",
@@ -95,7 +95,7 @@ const helpSections: HelpSection[] = [
       {
         title: "Get a file onto the canvas",
         detail:
-          "There are two equal paths: in Collect, press Place in current room on a file card; in Compose → Scene Studio, press Add Something and then Place in current room inside the popup. Both create a real canvas object you can move, resize, stretch, squash, layer, and give behaviors.",
+          "There are two equal paths: in Collect, press Place in current room on a file card; in Compose → Scene Studio, press Add Asset and then Place in current room inside the popup. Both create a real canvas object you can move, resize, stretch, squash, layer, and give behaviors.",
         tip: "If you are choosing artwork for a map, cursor, HUD overlay, or sound response, the same popup says Use this asset instead because it is filling a slot rather than placing a visible object.",
       },
       {

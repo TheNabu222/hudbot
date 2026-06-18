@@ -2910,7 +2910,7 @@ const App: React.FC = () => {
           const newWidth = document.body.clientWidth - e.clientX;
           if (newWidth < 120) return 0;
           if (w === 0 && newWidth > 30) return 288;
-          return Math.max(0, Math.min(800, newWidth));
+          return Math.max(0, Math.min(520, newWidth));
         });
       }
     };
@@ -5171,7 +5171,7 @@ const App: React.FC = () => {
 
             {/* Center - Stage */}
             <main
-              className="studio-stage-shell flex-1 bg-neutral-950 overflow-auto p-4 relative flex flex-col"
+              className="studio-stage-shell min-w-0 flex-1 bg-neutral-950 overflow-auto p-4 relative flex flex-col"
               onPointerDown={() => {
                 if (isPlaying && selectedInventoryItemId) {
                   setSelectedInventoryItemId(null);
@@ -5194,9 +5194,9 @@ const App: React.FC = () => {
                     type="button"
                     onClick={() =>
                       setAssetPickerCb({
-                        title: "Add Something to Canvas",
+                        title: "Add Asset to Canvas",
                         helperText:
-                          "Choose a file and Cavebot will place it in the current room.",
+                          "Search your Cavebot asset library, choose a file, then Cavebot drops it into this room.",
                         selectLabel: "Place in current room",
                         onSelect: (id) => {
                           const asset = project.assets.find(
@@ -5208,9 +5208,10 @@ const App: React.FC = () => {
                       })
                     }
                     className="flex items-center gap-2 rounded-[4px_12px_4px_12px] border border-emerald-400/60 bg-neutral-950/95 px-3 py-2 font-comic text-xs font-bold text-white shadow-[0_0_18px_rgba(0,255,204,0.16)] backdrop-blur hover:bg-emerald-500/15"
+                    title="Open asset library and place a file in this scene"
                   >
                     <Plus size={15} className="text-emerald-300" />
-                    Add Something
+                    Add Asset
                   </button>
                   <button
                     type="button"
@@ -5244,6 +5245,9 @@ const App: React.FC = () => {
                   >
                     <Type size={14} />
                   </button>
+                  <div className="hidden max-w-[320px] rounded border border-cyan-300/25 bg-neutral-950/80 px-2 py-1 font-comic text-[12px] leading-tight text-cyan-100 shadow-lg backdrop-blur lg:block">
+                    Add Asset = pick from your library. Collect = import, clear, and organize.
+                  </div>
                 </div>
               )}
 
@@ -9657,7 +9661,11 @@ const App: React.FC = () => {
             {!isPlaying && (
             <aside
               className="studio-inspector flex-shrink-0 bg-neutral-900 border-l border-neutral-800 flex flex-col z-20 relative"
-              style={{ width: rightSidebarWidth }}
+              style={{
+                width: rightSidebarWidth,
+                maxWidth: "min(420px, 42vw)",
+                minWidth: rightSidebarWidth === 0 ? 0 : 300,
+              }}
             >
               <div
                 className="absolute top-0 bottom-0 -left-[3px] w-[6px] cursor-col-resize z-[100] hover:bg-emerald-500/50"
@@ -10071,9 +10079,9 @@ const App: React.FC = () => {
                             type="button"
                             onClick={() =>
                               setAssetPickerCb({
-                                title: "Add Something to Canvas",
+                                title: "Add Asset to Canvas",
                                 helperText:
-                                  "Choose a file and Cavebot will place it in the current room.",
+                                  "Search your Cavebot asset library, choose a file, then Cavebot drops it into this room.",
                                 selectLabel: "Place in current room",
                                 onSelect: (id) => {
                                   const asset = project.assets.find(

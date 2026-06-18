@@ -776,7 +776,95 @@
   scrollbar-gutter: stable;
 }
 
+.studio-stage-shell {
+  min-width: 0;
+}
+
+.studio-workflow,
+.studio-page,
+.studio-inspector,
+.asset-picker-dialog,
+.asset-inspector-slot {
+  font-size: 13px;
+}
+
+.studio-step {
+  min-height: 42px;
+  padding: 0.48rem 0.7rem 0.5rem;
+}
+
+.studio-step__number {
+  font-size: 0.66rem;
+}
+
+.studio-step__label,
+.studio-tab {
+  font-size: 0.84rem;
+}
+
+.studio-workflow__eyebrow {
+  font-size: 0.86rem;
+}
+
+.studio-workflow__detail,
+.studio-feature-description {
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.studio-page :is(button, input, select, textarea),
+.studio-inspector :is(button, input, select, textarea),
+.asset-picker-dialog :is(button, input, select, textarea) {
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.studio-page button,
+.studio-inspector button,
+.asset-picker-dialog button {
+  min-height: 34px;
+}
+
+.studio-inspector {
+  min-width: 0;
+  max-width: min(420px, 42vw);
+  font-size: 0.84rem;
+}
+
+.studio-inspector [class*="text-[9px]"],
+.studio-inspector [class*="text-[10px]"],
+.asset-picker-dialog [class*="text-[9px]"],
+.asset-picker-dialog [class*="text-[10px]"],
+.asset-inspector-slot [class*="text-[9px]"],
+.asset-inspector-slot [class*="text-[10px]"],
+.studio-page .studio-feature-header [class*="text-[9px]"],
+.studio-page .studio-feature-header [class*="text-[10px]"] {
+  font-size: 0.72rem !important;
+  line-height: 1.35 !important;
+}
+
+.studio-inspector [class*="text-[11px]"],
+.asset-picker-dialog [class*="text-[11px]"] {
+  font-size: 0.78rem !important;
+  line-height: 1.35 !important;
+}
+
 @media (max-width: 900px) {
+  .studio-workspace {
+    position: relative;
+  }
+
+  .studio-workspace .studio-inspector {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(340px, 82vw) !important;
+    min-width: 0 !important;
+    max-width: min(340px, 82vw) !important;
+    box-shadow: -12px 0 34px rgb(7 27 61 / 22%);
+  }
+
   .studio-feature-header__main {
     align-items: flex-start;
   }
