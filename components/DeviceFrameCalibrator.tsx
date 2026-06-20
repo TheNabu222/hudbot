@@ -100,6 +100,16 @@ interface Rect {
   height: number;
 }
 
+type ScreenTransform =
+  | { mode: "move"; pointerId: number; start: Point; rect: Rect }
+  | {
+      mode: "resize";
+      pointerId: number;
+      start: Point;
+      rect: Rect;
+      corner: "nw" | "ne" | "sw" | "se";
+    };
+
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, value));
 
@@ -121,6 +131,8 @@ export const DeviceFrameCalibrator: React.FC<
     initialCalibration?.screen || null,
   );
   const [dragStart, setDragStart] = useState<Point | null>(null);
+  const [screenTransform, setScreenTransform] =
+    useState<ScreenTransform | null>(null);
 
   useEffect(() => {
     setScreenRect(initialCalibration?.screen || null);
@@ -145,6 +157,7 @@ export const DeviceFrameCalibrator: React.FC<
   };
 
   const beginMarking = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("[data-screen-rect]")) return;
     const point = pointFromEvent(event);
     if (!point) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -152,7 +165,60 @@ export const DeviceFrameCalibrator: React.FC<
     setScreenRect({ x: point.x, y: point.y, width: 0, height: 0 });
   };
 
+  const beginScreenTransform = (
+    event: React.PointerEvent<HTMLElement>,
+    mode: "move" | "resize",
+    corner?: "nw" | "ne" | "sw" | "se",
+  ) => {
+    if (!screenRect) return;
+    const point = pointFromEvent(event);
+    if (!point) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setScreenTransform(
+      mode === "move"
+        ? { mode, pointerId: event.pointerId, start: point, rect: screenRect }
+        : {
+            mode,
+            pointerId: event.pointerId,
+            start: point,
+            rect: screenRect,
+            corner: corner || "se",
+          },
+    );
+  };
+
   const continueMarking = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (screenTransform && screenRect) {
+      const point = pointFromEvent(event);
+      if (!point) return;
+      const dx = point.x - screenTransform.start.x;
+      const dy = point.y - screenTransform.start.y;
+      const start = screenTransform.rect;
+      if (screenTransform.mode === "move") {
+        setScreenRect({
+          ...start,
+          x: clamp(start.x + dx, 0, imageSize.width - start.width),
+          y: clamp(start.y + dy, 0, imageSize.height - start.height),
+        });
+        return;
+      }
+      let left = start.x;
+      let top = start.y;
+      let right = start.x + start.width;
+      let bottom = start.y + start.height;
+      if (screenTransform.corner.includes("w"))
+        left = clamp(start.x + dx, 0, right - 10);
+      if (screenTransform.corner.includes("e"))
+        right = clamp(start.x + start.width + dx, left + 10, imageSize.width);
+      if (screenTransform.corner.includes("n"))
+        top = clamp(start.y + dy, 0, bottom - 10);
+      if (screenTransform.corner.includes("s"))
+        bottom = clamp(start.y + start.height + dy, top + 10, imageSize.height);
+      setScreenRect({ x: left, y: top, width: right - left, height: bottom - top });
+      return;
+    }
     if (!dragStart) return;
     const point = pointFromEvent(event);
     if (!point) return;
@@ -165,6 +231,13 @@ export const DeviceFrameCalibrator: React.FC<
   };
 
   const finishMarking = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (screenTransform) {
+      setScreenTransform(null);
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {}
+      return;
+    }
     if (!dragStart) return;
     continueMarking(event);
     setDragStart(null);
@@ -186,8 +259,7 @@ export const DeviceFrameCalibrator: React.FC<
               Mark the Game Screen
             </div>
             <p className="mt-0.5 text-xs text-neutral-400">
-              Drag one box over the blank screen opening. You can redraw it as
-              many times as you want.
+              Drag over the blank opening once. Then move the box or pull its pink corners until it fits.
             </p>
           </div>
           <button
@@ -224,7 +296,9 @@ export const DeviceFrameCalibrator: React.FC<
 
             {screenRect && imageSize.width > 0 && imageSize.height > 0 && (
               <div
-                className="pointer-events-none absolute border-2 border-emerald-300 bg-emerald-400/15 shadow-[0_0_0_9999px_rgba(0,0,0,0.38),0_0_24px_rgba(0,255,204,0.9)]"
+                data-screen-rect="true"
+                onPointerDown={(event) => beginScreenTransform(event, "move")}
+                className="absolute cursor-move touch-none border-2 border-emerald-300 bg-emerald-400/15 shadow-[0_0_0_9999px_rgba(0,0,0,0.38),0_0_24px_rgba(0,255,204,0.9)]"
                 style={{
                   left: `${(screenRect.x / imageSize.width) * 100}%`,
                   top: `${(screenRect.y / imageSize.height) * 100}%`,
@@ -232,9 +306,29 @@ export const DeviceFrameCalibrator: React.FC<
                   height: `${(screenRect.height / imageSize.height) * 100}%`,
                 }}
               >
-                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap bg-neutral-950/90 px-2 py-1 font-pixel text-lg text-emerald-300">
-                  GAME GOES HERE
+                <span className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap bg-neutral-950/90 px-2 py-1 font-comic text-sm font-bold text-emerald-300">
+                  PLAYABLE SCREEN · {Math.round(screenRect.width)} × {Math.round(screenRect.height)}
                 </span>
+                {(["nw", "ne", "sw", "se"] as const).map((corner) => (
+                  <button
+                    key={corner}
+                    type="button"
+                    data-screen-rect="true"
+                    aria-label={`Resize playable screen from ${corner}`}
+                    onPointerDown={(event) =>
+                      beginScreenTransform(event, "resize", corner)
+                    }
+                    className={`absolute h-5 w-5 rounded border-2 border-neutral-950 bg-pink-300 shadow-[0_0_0_1px_white] ${
+                      corner === "nw"
+                        ? "-left-2.5 -top-2.5 cursor-nwse-resize"
+                        : corner === "ne"
+                          ? "-right-2.5 -top-2.5 cursor-nesw-resize"
+                          : corner === "sw"
+                            ? "-bottom-2.5 -left-2.5 cursor-nesw-resize"
+                            : "-bottom-2.5 -right-2.5 cursor-nwse-resize"
+                    }`}
+                  />
+                ))}
               </div>
             )}
           </div>
@@ -243,7 +337,7 @@ export const DeviceFrameCalibrator: React.FC<
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-800 bg-neutral-900 px-4 py-3">
           <div className="text-xs text-neutral-400">
             {hasUsableScreen
-              ? "Looks good. The frame will wrap around Play mode and exported games."
+              ? `Playable opening: ${Math.round(screenRect!.width)} × ${Math.round(screenRect!.height)}. Drag the box to move it; pull a pink corner to resize it.`
               : "Drag across the empty screen area to continue."}
           </div>
           <div className="flex gap-2">

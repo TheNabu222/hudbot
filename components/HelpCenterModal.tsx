@@ -95,7 +95,7 @@ const helpSections: HelpSection[] = [
       {
         title: "Get a file onto the canvas",
         detail:
-          "There are two equal paths: in Collect, press Place in current room on a file card; in Compose → Scene Studio, press Add Asset and then Place in current room inside the popup. Both create a real canvas object you can move, resize, stretch, squash, layer, and give behaviors.",
+          "Compose has a permanent Assets inspector tab containing the same collection as Collect. Search it, upload more files without leaving the room, then click Place or drag a card directly onto the canvas. Add Asset still opens the larger searchable popup when you want more room.",
         tip: "If you are choosing artwork for a map, cursor, HUD overlay, or sound response, the same popup says Use this asset instead because it is filling a slot rather than placing a visible object.",
       },
       {
@@ -153,8 +153,8 @@ const helpSections: HelpSection[] = [
       {
         title: "Transform and arrange",
         detail:
-          "Move, resize, rotate, flip, stretch, change opacity, alter layer order, lock, hide, duplicate, and delete objects. Resizing is freeform by default: pull a pink side handle to change only width or height, or pull a green corner to change both and freely stretch or squash the image.",
-        tip: "Hold Shift while dragging a corner only when you want to preserve the object's original shape. No modifier key is needed to stretch.",
+          "Move, resize, rotate, flip, stretch, change opacity, alter layer order, lock, hide, duplicate, and delete objects. Resizing is freeform by default: pull a pink side handle to change only width or height, or pull a green corner to change both and freely stretch or squash the image. Send to Back never places artwork behind the canvas itself.",
+        tip: "Hold Shift while dragging a corner only when you want to preserve the object's original shape. If an object is hard to click, choose it in Layers; even the bottom layer remains selectable and resizable.",
       },
       {
         title: "Resize the room without math",
@@ -182,14 +182,20 @@ const helpSections: HelpSection[] = [
       {
         title: "Clickable shell buttons",
         detail:
-          "After marking a Game Shell screen, choose Edit Outside Buttons. Draw boxes over the shell's knobs, icons, and decorative buttons. Select any box again to drag it elsewhere or freely stretch and shrink it from every edge and corner. Exact Left, Top, Width, and Height fields are available when you want precision.",
-        tip: "There are no fixed size presets. Each shell control can be any rectangular shape and can have one or many ordered responses with optional conditions and one-time behavior.",
+          "After marking a Game Shell screen, choose Edit Outside Buttons. Draw a box over a shell icon, then plainly choose what it opens: Map, Inventory, Quests, Relationships, Skills, Lore, Crafting, Settings, or one of your custom interface screens.",
+        tip: "Use Advanced only when a shell button needs extra sounds, conditions, travel, or several ordered actions. The ordinary setup no longer makes you sort through object behavior jargon.",
+      },
+      {
+        title: "Marking the playable screen",
+        detail:
+          "Drag once over the blank opening in your CRT or computer frame. After the box appears, drag the whole box to move it or pull any pink corner to resize it. The live label shows the opening size.",
+        tip: "Fit now measures the complete outer device and both the available width and height, so the shell should remain visible without shrinking the browser itself.",
       },
       {
         title: "Cavebot-made widgets",
         detail:
-          "Click Needs, Skills, or the built-in button cluster directly on the game screen to select it. To prevent accidental scooting, built-in HUD pieces only drag or show resize handles after you turn on Move HUD in the canvas toolbar.",
-        tip: "Interface Studio manages what player-facing pieces exist. Screen UI places custom interface objects. The HUD inspector edits Cavebot-made widgets. Use HUD: Hidden only to clear the editing view; it does not delete anything.",
+          "Built-in Needs, Skills, and button clusters stay hidden while you arrange ordinary rooms and custom Screen UI. Choose Move built-in HUD pieces when you specifically want to see, move, or freely stretch them.",
+        tip: "HUD pieces are clamped inside the playable screen so they cannot run away beyond its edges. HUD: Hidden only clears the editing view; it does not delete anything or hide it from Play mode.",
       },
       {
         title: "Reusable stamps",

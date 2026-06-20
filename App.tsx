@@ -403,6 +403,7 @@ const App: React.FC = () => {
   const [rightSidebarWidth, setRightSidebarWidth] = useState(288);
   const [assetPaletteCategory, setAssetPaletteCategory] =
     useState<string>("all");
+  const [assetPaletteSearch, setAssetPaletteSearch] = useState("");
   const [activeTreeId, setActiveTreeId] = useState<string | null>(null);
   const [playerInventory, setPlayerInventory] = useState<string[]>([]);
   const [playerFlags, setPlayerFlags] = useState<string[]>([]);
@@ -582,8 +583,6 @@ const App: React.FC = () => {
   useEffect(() => {
     if (editorMode === "stage") {
       setHideEditorHud(true);
-    } else if (editorMode === "ui_stage") {
-      setHideEditorHud(false);
     }
   }, [editorMode]);
 
@@ -1276,13 +1275,24 @@ const App: React.FC = () => {
     const y =
       (event.clientY - stageRect.top) * scaleY -
       draggingHudWidget.offsetY;
+    const widgetRect = event.currentTarget.getBoundingClientRect();
+    const widgetWidth = widgetRect.width * scaleX;
+    const widgetHeight = widgetRect.height * scaleY;
+    const clampedX = Math.max(
+      0,
+      Math.min(logicalStageWidth - widgetWidth, x),
+    );
+    const clampedY = Math.max(
+      0,
+      Math.min(logicalStageHeight - widgetHeight, y),
+    );
     setProject((current) => ({
       ...current,
       globalSettings: {
         ...current.globalSettings,
         [draggingHudWidget.key]: {
-          x: Math.round(x),
-          y: Math.round(y),
+          x: Math.round(clampedX),
+          y: Math.round(clampedY),
         },
       },
     }));
@@ -1741,6 +1751,30 @@ const App: React.FC = () => {
       };
       reader.readAsDataURL(file);
     });
+
+  const importFilesToLibrary = async (files: File[]) => {
+    const imported = (await Promise.all(files.map(readDroppedFile))).filter(
+      (
+        result,
+      ): result is { asset: Asset; width: number; height: number } =>
+        result !== null,
+    );
+    if (!imported.length) {
+      showError("Choose images, GIFs, audio, or video files.");
+      return;
+    }
+    setProject((current) => ({
+      ...current,
+      assets: [
+        ...imported.map((result) => result.asset),
+        ...current.assets,
+      ],
+    }));
+    setRightSidebarTab("assets");
+    showError(
+      `${imported.length} file${imported.length === 1 ? "" : "s"} added to your collection ✦`,
+    );
+  };
 
   const handleDropOnStage = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -2942,7 +2976,7 @@ const App: React.FC = () => {
   const moveZIndex = (id: string, dir: 1 | -1) => {
     const obj = currentScene.objects.find((o) => o.id === id);
     if (!obj) return;
-    updateObject(id, { zIndex: obj.zIndex + dir });
+    updateObject(id, { zIndex: Math.max(0, obj.zIndex + dir) });
   };
 
   const [previewDialogueText, _setPreviewDialogue] = useState<string | null>(
@@ -3691,6 +3725,47 @@ const App: React.FC = () => {
   const selectedHudPosition = selectedHudConfig
     ? project.globalSettings[selectedHudConfig.positionKey]
     : undefined;
+
+  useEffect(() => {
+    if (isPlaying || (editorMode !== "stage" && editorMode !== "ui_stage")) {
+      return;
+    }
+    const fitForWorkspace = () => {
+      if (window.innerWidth > 1200) return;
+      const mainElement = document.querySelector<HTMLElement>(
+        ".studio-stage-shell",
+      );
+      if (!mainElement) return;
+      const targetWidth = showDeviceFrame
+        ? deviceFrame!.outerWidth
+        : logicalStageWidth;
+      const targetHeight = showDeviceFrame
+        ? deviceFrame!.outerHeight
+        : logicalStageHeight;
+      const availableWidth = Math.max(160, mainElement.clientWidth - 48);
+      const availableHeight = Math.max(160, mainElement.clientHeight - 120);
+      const nextZoom = Math.max(
+        0.15,
+        Math.min(1, availableWidth / targetWidth, availableHeight / targetHeight),
+      );
+      setStageZoom(Number(nextZoom.toFixed(2)));
+    };
+    const frameId = window.requestAnimationFrame(fitForWorkspace);
+    window.addEventListener("resize", fitForWorkspace);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", fitForWorkspace);
+    };
+  }, [
+    editorMode,
+    isPlaying,
+    logicalStageHeight,
+    logicalStageWidth,
+    rightSidebarWidth,
+    showDeviceFrame,
+    deviceFrame?.outerHeight,
+    deviceFrame?.outerWidth,
+  ]);
   const openScreenControlsEditor = () => {
     const existingMenu =
       (project.uiMenus || []).find(
@@ -5655,7 +5730,7 @@ const App: React.FC = () => {
                       objectId: null,
                     });
                   }}
-                  className={`absolute shadow-2xl transition-all overflow-visible ${editorMode === "ui_stage" ? "ring-4 ring-indigo-500/40 shadow-[0_0_30px_rgba(99,102,241,0.2)]" : "ring-2 ring-pink-500 shadow-[0_0_40px_rgba(0,0,0,0.5)] z-10"}`}
+                  className={`studio-canvas-stage absolute shadow-2xl transition-all overflow-visible ${editorMode === "ui_stage" ? "ring-4 ring-indigo-500/70 shadow-[0_0_30px_rgba(99,102,241,0.2)]" : "ring-4 ring-pink-500 shadow-[0_0_40px_rgba(0,0,0,0.5)] z-10"}`}
                   style={{
                     left: showDeviceFrame ? deviceFrame!.screen.x : 0,
                     top: showDeviceFrame ? deviceFrame!.screen.y : 0,
@@ -5666,6 +5741,12 @@ const App: React.FC = () => {
                       : undefined,
                     transformOrigin: "top left",
                     backgroundColor: currentScene.backgroundColor,
+                    outline: isPlaying
+                      ? undefined
+                      : editorMode === "ui_stage"
+                        ? "2px solid rgba(129,140,248,.95)"
+                        : "2px solid rgba(255,79,200,.95)",
+                    outlineOffset: "3px",
                     backgroundImage: project.globalSettings.snapToGrid
                       ? `linear-gradient(to right, #ffffff10 1px, transparent 1px), linear-gradient(to bottom, #ffffff10 1px, transparent 1px)`
                       : "none",
@@ -5927,7 +6008,7 @@ const App: React.FC = () => {
                                 top: obj.stretchToScreen ? 0 : renderY,
                                 width: obj.stretchToScreen ? "100%" : obj.width,
                                 height: obj.stretchToScreen ? "100%" : obj.height,
-                                zIndex: obj.zIndex,
+                                zIndex: Math.max(0, obj.zIndex),
                                 opacity: obj.hidden
                                   ? (isPlaying ? 0 : 0.2)
                                   : isOutOfBounds
@@ -9724,19 +9805,28 @@ const App: React.FC = () => {
                     >
                       <ZoomIn size={12} />
                     </button>
-                    <button 
+                    <button
                       onClick={() => {
-                        const mainEl = document.querySelector('main');
+                        const mainEl = document.querySelector('.studio-stage-shell');
                         if (mainEl) {
-                          const parentW = mainEl.clientWidth - 32; // subtracting padding
-                          const targetScene = project.scenes.find((s) => s.id === project.currentSceneId) || project.scenes[0];
-                          const targetW = targetScene?.width || project.globalSettings.stageWidth || 800;
-                          const ratio = Math.min(1.0, +(parentW / targetW).toFixed(2));
+                          const availableWidth = mainEl.clientWidth - 48;
+                          const availableHeight = mainEl.clientHeight - 120;
+                          const targetWidth = showDeviceFrame
+                            ? deviceFrame!.outerWidth
+                            : logicalStageWidth;
+                          const targetHeight = showDeviceFrame
+                            ? deviceFrame!.outerHeight
+                            : logicalStageHeight;
+                          const ratio = Math.min(
+                            1,
+                            availableWidth / targetWidth,
+                            availableHeight / targetHeight,
+                          );
                           setStageZoom(Math.max(0.15, ratio));
                         }
-                      }} 
+                      }}
                       className="px-1.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white hover:text-white text-[10px] font-bold rounded flex items-center gap-1 transition-colors active:scale-95"
-                      title="Fit to Screen width"
+                      title="Fit the whole room or device frame into the workspace"
                     >
                       <Maximize2 size={10} />
                       Fit
@@ -9787,6 +9877,12 @@ const App: React.FC = () => {
                   className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${rightSidebarTab === "prefabs" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
                 >
                   <Box size={14} /> Stamps
+                </button>
+                <button
+                  onClick={() => setRightSidebarTab("assets")}
+                  className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${rightSidebarTab === "assets" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
+                >
+                  <ImageIcon size={14} /> Assets
                 </button>
               </div>
 
@@ -9997,7 +10093,7 @@ const App: React.FC = () => {
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       updateObject(obj.id, {
-                                        zIndex: obj.zIndex - 1,
+                                        zIndex: Math.max(0, obj.zIndex - 1),
                                       });
                                     }}
                                     className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white transition-colors"
@@ -10014,7 +10110,7 @@ const App: React.FC = () => {
                                         ),
                                       );
                                       updateObject(obj.id, {
-                                        zIndex: minZ - 1,
+                                        zIndex: Math.max(0, minZ - 1),
                                       });
                                     }}
                                     className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white transition-colors"
@@ -10155,6 +10251,96 @@ const App: React.FC = () => {
                       </div>
                     </div>
                   </div>
+                  </div>
+                )}
+
+                {rightSidebarTab === "assets" && (
+                  <div className="flex min-h-0 flex-1 flex-col gap-3">
+                    <div>
+                      <div className="font-comic text-base font-bold text-white">
+                        Collected Assets
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+                        Click Place or drag a file straight onto the room. This is the same collection from Collect.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <label className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded border border-pink-400/45 bg-pink-500/10 px-2 py-2 font-comic text-xs font-bold text-pink-200 hover:bg-pink-500/20">
+                        <Upload size={14} /> Add files
+                        <input
+                          type="file"
+                          multiple
+                          accept="image/*,audio/*,video/*,.gif,.svg"
+                          className="hidden"
+                          onChange={(event) => {
+                            const files = Array.from(event.target.files || []);
+                            if (files.length) importFilesToLibrary(files);
+                            event.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => fetchFromGitHub("", true)}
+                        disabled={isFetchingGithub}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded border border-[#00ffcc]/35 bg-[#00ffcc]/10 px-2 py-2 font-comic text-xs font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20 disabled:opacity-50"
+                      >
+                        <FolderOpen size={14} /> Repo files
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-500" />
+                      <input
+                        type="search"
+                        value={assetPaletteSearch}
+                        onChange={(event) => setAssetPaletteSearch(event.target.value)}
+                        placeholder="Search names, notes, or tags…"
+                        className="w-full rounded border border-neutral-700 bg-neutral-950 py-2 pl-8 pr-3 text-sm text-white outline-none focus:border-[#00ffcc]"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 pb-3">
+                      {project.assets
+                        .filter((asset) => {
+                          const query = assetPaletteSearch.trim().toLowerCase();
+                          if (!query) return true;
+                          return [
+                            asset.name,
+                            asset.description || "",
+                            ...(asset.tags || []),
+                          ].some((value) => value.toLowerCase().includes(query));
+                        })
+                        .slice(0, 80)
+                        .map((asset) => (
+                          <div
+                            key={asset.id}
+                            draggable
+                            onDragStart={(event) => handleDragStartAsset(event, asset)}
+                            className="group overflow-hidden rounded border border-neutral-700 bg-neutral-950"
+                          >
+                            <div className="flex h-24 items-center justify-center bg-[linear-gradient(135deg,rgba(0,255,204,.08),rgba(255,79,200,.08))] p-2">
+                              {asset.type === "image" ? (
+                                <img src={asset.src} alt="" loading="lazy" className="h-full w-full object-contain" />
+                              ) : asset.type === "audio" ? (
+                                <Music size={30} className="text-[#00ffcc]" />
+                              ) : (
+                                <Video size={30} className="text-pink-300" />
+                              )}
+                            </div>
+                            <div className="p-2">
+                              <div className="truncate text-xs font-bold text-white" title={asset.name}>
+                                {asset.name}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleInsertAssetToStage(asset)}
+                                className="mt-2 w-full rounded border border-[#00ffcc]/40 bg-[#00ffcc]/10 px-2 py-1.5 font-comic text-xs font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20"
+                              >
+                                + Place
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
                   </div>
                 )}
 
@@ -12767,7 +12953,7 @@ const App: React.FC = () => {
                                   ...currentScene.objects.map((o) => o.zIndex),
                                 );
                                 updateObject(selectedObject.id, {
-                                  zIndex: minZ - 1,
+                                  zIndex: Math.max(0, minZ - 1),
                                 });
                               }}
                               className="p-1 bg-neutral-800 hover:bg-neutral-700 rounded"
@@ -18617,7 +18803,9 @@ const App: React.FC = () => {
                   <button
                     className="w-full text-left px-3 py-1.5 hover:bg-neutral-800 flex items-center gap-2"
                     onClick={() => {
-                      updateObject(obj.id, { zIndex: obj.zIndex - 1 });
+                      updateObject(obj.id, {
+                        zIndex: Math.max(0, obj.zIndex - 1),
+                      });
                       setContextMenu(null);
                     }}
                   >
@@ -18906,6 +19094,7 @@ const App: React.FC = () => {
           onOpenRepositoryFolder={(path) => fetchFromGitHub(path)}
           onLoadRepositoryRoot={() => fetchFromGitHub("", true)}
           isLoadingRepository={isFetchingGithub}
+          onUploadFiles={importFilesToLibrary}
         />
       )}
 

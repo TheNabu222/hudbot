@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Check, MousePointer2, Plus, Trash2, X } from "lucide-react";
 import {
   Asset,
+  ClickResponse,
   DeviceFrameControl,
   DialogueTree,
   InventoryItem,
@@ -56,6 +57,45 @@ const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, value));
 
 const MIN_CONTROL_SIZE = 8;
+
+const shellDestinations: Array<{
+  interaction: ClickResponse["interaction"];
+  label: string;
+  detail: string;
+}> = [
+  { interaction: "open_map", label: "Map", detail: "Open the travel map" },
+  {
+    interaction: "toggle_inventory",
+    label: "Inventory",
+    detail: "Open or close the player's items",
+  },
+  {
+    interaction: "open_quest_log",
+    label: "Quests",
+    detail: "Open the quest journal",
+  },
+  {
+    interaction: "open_relationships",
+    label: "Relationships",
+    detail: "Open people and reputation",
+  },
+  { interaction: "open_skills", label: "Skills", detail: "Open player skills" },
+  {
+    interaction: "open_almanac",
+    label: "Lore",
+    detail: "Open the almanac",
+  },
+  {
+    interaction: "open_crafting",
+    label: "Crafting",
+    detail: "Open recipes and crafting",
+  },
+  {
+    interaction: "open_settings",
+    label: "Settings",
+    detail: "Open player settings",
+  },
+];
 
 export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
   calibration,
@@ -246,6 +286,13 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
         control.id === selectedId ? { ...control, ...updates } : control,
       ),
     );
+  };
+
+  const setPrimaryResponse = (response: ClickResponse) => {
+    if (!selected) return;
+    updateSelected({
+      clickResponses: [response, ...selected.clickResponses.slice(1)],
+    });
   };
 
   const beginTransform = (
@@ -530,25 +577,105 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
                     ))}
                   </div>
                 </div>
-                <ClickResponseEditor
-                  responses={selected.clickResponses}
-                  assets={assets}
-                  scenes={scenes}
-                  dialogueTrees={dialogueTrees}
-                  inventoryItems={inventoryItems}
-                  quests={quests}
-                  gameFlags={gameFlags}
-                  uiMenus={uiMenus}
-                  skillIds={skillIds}
-                  needIds={needIds}
-                  relationshipIds={relationshipIds}
-                  heading="What happens when clicked?"
-                  description="Add one response or stack several in order."
-                  startNumber={1}
-                  onChange={(clickResponses) =>
-                    updateSelected({ clickResponses })
-                  }
-                />
+                <div className="rounded border border-pink-400/35 bg-pink-500/5 p-3">
+                  <div className="font-comic text-sm font-bold text-white">
+                    What should this button open?
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+                    Pick the screen this shell icon represents. This is the normal setup for CRT and computer-frame buttons.
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {shellDestinations.map((destination) => {
+                      const isActive =
+                        selected.clickResponses[0]?.interaction ===
+                        destination.interaction;
+                      return (
+                        <button
+                          key={destination.interaction}
+                          type="button"
+                          onClick={() =>
+                            setPrimaryResponse({
+                              id:
+                                selected.clickResponses[0]?.id ||
+                                crypto.randomUUID(),
+                              interaction: destination.interaction,
+                            })
+                          }
+                          className={`rounded border px-3 py-2 text-left transition-colors ${
+                            isActive
+                              ? "border-[#00ffcc] bg-[#00ffcc]/15 text-white"
+                              : "border-neutral-700 bg-neutral-950 text-neutral-300 hover:border-pink-400/60 hover:text-white"
+                          }`}
+                        >
+                          <span className="block font-comic text-sm font-bold">
+                            {destination.label}
+                          </span>
+                          <span className="mt-0.5 block text-[11px] text-neutral-400">
+                            {destination.detail}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-3 border-t border-neutral-700 pt-3">
+                    <label className="block text-xs font-bold text-neutral-300">
+                      Or open one of your custom interface screens
+                      <select
+                        value={
+                          selected.clickResponses[0]?.interaction === "open_ui"
+                            ? selected.clickResponses[0]?.targetUiId || ""
+                            : ""
+                        }
+                        onChange={(event) => {
+                          if (!event.target.value) return;
+                          setPrimaryResponse({
+                            id:
+                              selected.clickResponses[0]?.id ||
+                              crypto.randomUUID(),
+                            interaction: "open_ui",
+                            targetUiId: event.target.value,
+                          });
+                        }}
+                        className="mt-1.5 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-white"
+                      >
+                        <option value="">Choose a custom screen…</option>
+                        {uiMenus.map((menu) => (
+                          <option key={menu.id} value={menu.id}>
+                            {menu.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+
+                <details className="rounded border border-neutral-700 bg-neutral-950/60">
+                  <summary className="cursor-pointer px-3 py-2 font-comic text-xs font-bold text-neutral-300 hover:text-white">
+                    Advanced: stack sounds, conditions, travel, and other actions
+                  </summary>
+                  <div className="border-t border-neutral-700 p-3">
+                    <ClickResponseEditor
+                      responses={selected.clickResponses}
+                      assets={assets}
+                      scenes={scenes}
+                      dialogueTrees={dialogueTrees}
+                      inventoryItems={inventoryItems}
+                      quests={quests}
+                      gameFlags={gameFlags}
+                      uiMenus={uiMenus}
+                      skillIds={skillIds}
+                      needIds={needIds}
+                      relationshipIds={relationshipIds}
+                      heading="Advanced button actions"
+                      description="Optional: stack several actions in order or add conditions."
+                      startNumber={1}
+                      onChange={(clickResponses) =>
+                        updateSelected({ clickResponses })
+                      }
+                    />
+                  </div>
+                </details>
               </div>
             ) : (
               <div className="flex h-full flex-col items-center justify-center text-center text-neutral-500">

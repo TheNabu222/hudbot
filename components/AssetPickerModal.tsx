@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Folder, Image as ImageIcon, Music, Search, X, Video, Star, Info, Wand2 } from 'lucide-react';
+import { Folder, Image as ImageIcon, Music, Search, X, Video, Star, Info, Wand2, Upload } from 'lucide-react';
 import { Asset } from '../types';
 
 interface AssetPickerModalProps {
@@ -19,6 +19,7 @@ interface AssetPickerModalProps {
   onOpenRepositoryFolder?: (path: string) => void;
   onLoadRepositoryRoot?: () => void;
   isLoadingRepository?: boolean;
+  onUploadFiles?: (files: File[]) => void;
 }
 
 export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
@@ -38,6 +39,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
   onOpenRepositoryFolder,
   onLoadRepositoryRoot,
   isLoadingRepository = false,
+  onUploadFiles,
 }) => {
   const [activeBin, setActiveBin] = useState<string>('all');
   const [assetSearch, setAssetSearch] = useState('');
@@ -129,6 +131,23 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
             >
               {isLoadingRepository ? 'Loading folder…' : repositoryFolders.length ? 'Refresh Cavebot Assets' : 'Browse Cavebot Assets'}
             </button>
+          )}
+          {onUploadFiles && (
+            <label className="cursor-pointer rounded border border-pink-400/45 bg-pink-500/10 px-3 py-2 font-comic text-xs font-bold text-pink-200 hover:bg-pink-500/20">
+              <Upload size={14} className="mr-1.5 inline" />
+              Add files
+              <input
+                type="file"
+                multiple
+                accept="image/*,audio/*,video/*,.gif,.svg"
+                className="hidden"
+                onChange={(event) => {
+                  const files = Array.from(event.target.files || []);
+                  if (files.length) onUploadFiles(files);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
           )}
           <button aria-label="Close asset picker" onClick={onClose} className="rounded p-2 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white">
             <X size={20} />

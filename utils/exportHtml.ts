@@ -1550,6 +1550,8 @@ export function generateExportHtml(project: Project): string {
             toggleInventory();
           } else if (interaction === 'open_quest_log') {
             toggleQuestLog();
+          } else if (interaction === 'open_map') {
+            toggleMap();
           } else if (interaction === 'play_cutscene') {
             const videoAssetId = data;
             const scriptAssetId = obj.getAttribute('data-script-src');
@@ -1676,6 +1678,36 @@ export function generateExportHtml(project: Project): string {
           overlay.style.display = 'none';
           selectedInventoryItemId = null; // deselect when closed
         }
+      };
+
+      window.toggleMap = () => {
+        const overlay = document.getElementById('map-overlay');
+        if (!overlay) {
+          showSimpleDialogue('No world map has been created yet.', 'System');
+          return;
+        }
+        const opening = overlay.style.display === 'none' || !overlay.style.display;
+        overlay.style.display = opening ? 'flex' : 'none';
+        if (opening) {
+          overlay.querySelectorAll('.map-travel-node').forEach((node) => {
+            const requiredFlag = node.getAttribute('data-required-flag');
+            node.style.display = !requiredFlag || state.flags[requiredFlag] ? 'block' : 'none';
+          });
+        }
+      };
+
+      window.travelToScene = (sceneId) => {
+        if (!sceneId) return;
+        document.querySelectorAll('.game-scene').forEach((scene) => {
+          scene.style.display = 'none';
+        });
+        const targetScene = document.getElementById('scene-' + sceneId);
+        if (!targetScene) return;
+        targetScene.style.display = 'block';
+        state.currentSceneId = sceneId;
+        playBgm(targetScene.getAttribute('data-bgm') || null);
+        saveGame();
+        toggleMap();
       };
 
       let selectedInventoryItemId = null;
@@ -1895,6 +1927,7 @@ export function generateExportHtml(project: Project): string {
   }
 
   let deviceFrameHtml = "";
+  let deviceControlsHtml = "";
   if (hasDeviceFrame && deviceFrame && deviceFrameAsset) {
     const frameSrc = deviceFrameAsset.dataURL || deviceFrameAsset.src || "";
     const slices = [
@@ -1936,7 +1969,60 @@ export function generateExportHtml(project: Project): string {
           .join("")}
       </div>
     `;
+    deviceControlsHtml = (deviceFrame.controls || [])
+      .map(
+        (control) => `
+        <button
+          id="shell-control-${control.id}"
+          class="scene-object shell-control"
+          type="button"
+          aria-label="${control.name.replace(/"/g, "&quot;")}"
+          data-interaction="none"
+          data-interaction-data=""
+          data-give-item=""
+          data-target-ui=""
+          data-dialogue-tree=""
+          data-click-responses="${encodeURIComponent(JSON.stringify(control.clickResponses || []))}"
+          data-cursor-asset="${control.cursorAssetId || ""}"
+          style="position:absolute; left:${control.x}px; top:${control.y}px; width:${control.width}px; height:${control.height}px; z-index:4500; border:0; padding:0; background:transparent; cursor:${control.cursorAssetId ? "none" : control.cursor || "pointer"};"
+        ></button>`,
+      )
+      .join("");
   }
+
+  const mapOverlayHtml = (project.maps || []).length
+    ? `
+      <div id="map-overlay" onclick="toggleMap()" style="display:none; position:absolute; inset:0; z-index:100001; align-items:center; justify-content:center; padding:20px; background:rgba(0,0,0,.72);">
+        <div onclick="event.stopPropagation()" style="position:relative; width:min(92%,900px); height:min(86%,650px); overflow:auto; border:2px solid var(--ui-primary); background:var(--ui-bg); color:white; box-shadow:0 24px 80px rgba(0,0,0,.6);">
+          <div style="position:sticky; top:0; z-index:3; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; background:var(--ui-bg); border-bottom:1px solid var(--ui-primary);">
+            <strong>World Map</strong>
+            <button onclick="toggleMap()" style="border:1px solid var(--ui-primary); padding:6px 10px; color:var(--ui-primary); background:transparent; cursor:pointer;">Close</button>
+          </div>
+          ${(project.maps || [])
+            .map(
+              (map) => `
+              <section style="padding:16px;">
+                <h2 style="margin:0 0 12px; color:var(--ui-primary);">${map.name}</h2>
+                <div style="position:relative; min-height:360px; overflow:hidden; background:${map.backgroundSrc ? `url('${map.backgroundSrc}') center/cover no-repeat` : "rgba(255,255,255,.05)"}; border:1px solid color-mix(in srgb, var(--ui-primary) 55%, transparent);">
+                  ${map.nodes
+                    .map(
+                      (node) => `
+                      <button
+                        class="map-travel-node"
+                        data-required-flag="${node.requiredFlagId || ""}"
+                        onclick="travelToScene('${node.targetSceneId || ""}')"
+                        ${node.targetSceneId ? "" : "disabled"}
+                        style="position:absolute; left:${node.x}%; top:${node.y}%; transform:translate(-50%,-50%); border:2px solid var(--ui-primary); border-radius:999px; padding:8px 12px; color:white; background:var(--ui-bg); cursor:${node.targetSceneId ? "pointer" : "default"};"
+                      >${node.name}</button>`,
+                    )
+                    .join("")}
+                </div>
+              </section>`,
+            )
+            .join("")}
+        </div>
+      </div>`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1956,6 +2042,7 @@ export function generateExportHtml(project: Project): string {
     <div id="game-layout-resizer" style="position: relative; flex-shrink: 0; display: flex; justify-content: center; align-items: flex-start;">
       <div id="game-positioner" style="position: absolute; left: 0; top: 0; width: ${layoutWidth}px; height: ${layoutHeight}px;">
         ${deviceFrameHtml}
+        ${deviceControlsHtml}
         <div id="game-coordinate-space" style="position: absolute; left: ${hasDeviceFrame ? deviceFrame!.screen.x : offsetX}px; top: ${hasDeviceFrame ? deviceFrame!.screen.y : offsetY}px; width: ${exportWidth}px; height: ${exportHeight}px; transform: scale(${deviceScreenScaleX}, ${deviceScreenScaleY}); transform-origin: top left;">
         ${hudHtml}
         <div id="game-container" style="position: absolute; inset: 0; overflow: hidden; width: 100%; height: 100%;">
@@ -1971,6 +2058,7 @@ export function generateExportHtml(project: Project): string {
             <video id="cutscene-video" class="w-full h-full object-contain" style="max-width: 100%; max-height: 100%; object-fit: contain;"></video>
             <button id="cutscene-skip-btn" style="position: absolute; top: 1rem; right: 1rem; background: rgba(0,0,0,0.5); color: white; border: none; padding: 0.25rem 0.75rem; border-radius: 4px; cursor: pointer;">Skip</button>
         </div>
+        ${mapOverlayHtml}
 
         ${project.globalSettings?.dialoguePosition !== 'below' ? '<div id="dialogue-box"></div>' : ''}
         <div id="flavor-text"></div>
