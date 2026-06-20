@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Plus, Trash2, Play, Music, Image as ImageIcon, Search, Star, CheckSquare } from "lucide-react";
 import { Project, Asset } from "../types";
 import { v4 as uuidv4 } from "uuid";
@@ -17,6 +17,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
+  const [visibleCount, setVisibleCount] = useState(60);
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -83,6 +84,11 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
     }
     return true;
   });
+  const visibleAssets = filteredAssets.slice(0, visibleCount);
+
+  useEffect(() => {
+    setVisibleCount(60);
+  }, [activeCategory, searchTerm]);
 
   const requestClearCollection = () =>
     setConfirmDialog({
@@ -314,7 +320,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
           )}
 
           <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-8 gap-6">
-            {filteredAssets.map((asset) => (
+            {visibleAssets.map((asset) => (
               <div
                 key={asset.id}
                 className={`studio-card group relative bg-neutral-900 border rounded-xl overflow-hidden flex flex-col shadow-lg transition-transform hover:-translate-y-1 hover:shadow-xl ${
@@ -351,7 +357,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                       <Music size={40} className="mb-2 opacity-80" />
                     </div>
                   ) : asset.type === "video" ? (
-                    <video src={asset.src} controls className="max-w-full max-h-full object-contain drop-shadow-md" />
+                    <video src={asset.src} controls preload="none" className="max-w-full max-h-full object-contain drop-shadow-md" />
                   ) : (
                     <div className="text-neutral-500 tracking-widest font-black text-xl opacity-50">
                        {asset.type.toUpperCase()}
@@ -486,6 +492,17 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
               </div>
             ))}
           </div>
+          {visibleAssets.length < filteredAssets.length && (
+            <div className="flex justify-center py-8">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((count) => count + 60)}
+                className="studio-primary-button px-5 py-2 font-comic text-sm font-bold"
+              >
+                Show 60 more ({filteredAssets.length - visibleAssets.length} remaining)
+              </button>
+            </div>
+          )}
           {filteredAssets.length === 0 && (
              <div className="studio-empty-state flex flex-col items-center justify-center h-full text-neutral-500">
                <div className="w-24 h-24 border-2 border-dashed border-neutral-700 rounded-full flex items-center justify-center mb-6 bg-neutral-950/50">

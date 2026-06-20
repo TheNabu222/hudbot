@@ -75,7 +75,7 @@ const helpSections: HelpSection[] = [
         title: "The same layout follows you",
         detail:
           "Feature pages now share one pattern: the heading says what the tool is for, tabs switch related jobs, the left rail holds collections, the center is the work area, and selected things open their editing controls.",
-        tip: "On narrow windows, the inspector becomes an overlay and image tools stack vertically instead of crushing the canvas. Sunny and Midnight do not change exported game colors.",
+        tip: "On narrow windows, the canvas opens first. Selecting an object opens the inspector as a temporary overlay; close it with X or bring it back with Show Inspector. Sunny and Midnight do not change exported game colors.",
       },
     ],
   },
@@ -90,12 +90,12 @@ const helpSections: HelpSection[] = [
       {
         title: "Browse without loading everything",
         detail:
-          "The asset popup supports All, Recent, Favorites, In Canvas, search, and folder browsing. Repository browsing is limited to entropic-ai/assets/_cavebot-assets, and its folders load only when opened to keep the collection responsive.",
+          "The asset popup supports All, Recent, Favorites, In Canvas, search, and folder browsing. Repository browsing is limited to entropic-ai/assets/_cavebot-assets, and its folders load only when opened. Collect also shows files in batches instead of rendering the entire collection at once.",
       },
       {
         title: "Get a file onto the canvas",
         detail:
-          "Compose has a permanent Assets inspector tab containing the same collection as Collect. Search it, upload more files without leaving the room, then click Place or drag a card directly onto the canvas. Add Asset still opens the larger searchable popup when you want more room.",
+          "Compose has a permanent Assets inspector tab containing the same collection as Collect. Other feature pages keep the same collection in a right-side Collected Assets dock, so you can place something into the current room without losing your work. Search it, upload more files, click Place, or open the full library.",
         tip: "If you are choosing artwork for a map, cursor, HUD overlay, or sound response, the same popup says Use this asset instead because it is filling a slot rather than placing a visible object.",
       },
       {
@@ -113,6 +113,7 @@ const helpSections: HelpSection[] = [
         title: "One coordinate space",
         detail:
           "Scenes, Interface Screens, HUD previews, and Play mode share the room's coordinate plane. Build the room once, then place interface pieces over it without maintaining a second canvas size. Resize Room only changes the actual scene.",
+        tip: "Use + Scene for a new room and + UI for a new transparent interface screen. Both controls stay together above the canvas.",
       },
       {
         title: "Edit metadata",
@@ -160,7 +161,12 @@ const helpSections: HelpSection[] = [
         title: "Resize the room without math",
         detail:
           "Choose Resize Room before changing the game boundary. Three amber handles then appear on the right, bottom, and corner, clearly separated from object handles. Choose Done Resizing Room when finished.",
-        tip: "The live badge reports dimensions while you drag. Hold Shift at the corner to preserve the room’s proportions. Viewport Scale and Fit change only your editing view, not exported dimensions.",
+        tip: "The live badge reports dimensions while you drag. Hold Shift at the corner to preserve the room’s proportions. Canvas view buttons change only your editing view, not exported dimensions: Fit shows the whole room and 100% shows actual pixels.",
+      },
+      {
+        title: "Project size versus room size",
+        detail:
+          "Project width and height are your usual game canvas. Current room size affects only the room you are editing. Choose Match project size whenever you want that room to use the usual dimensions again.",
       },
       {
         title: "Visual styling",

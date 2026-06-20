@@ -971,7 +971,7 @@
   min-height: 24px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1150px) {
   .studio-workspace {
     position: relative;
   }
@@ -984,6 +984,18 @@
     width: min(340px, 82vw) !important;
     min-width: 0 !important;
     max-width: min(340px, 82vw) !important;
+    box-shadow: -12px 0 34px rgb(7 27 61 / 22%);
+  }
+
+  .studio-workspace .feature-asset-dock {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 45;
+    width: min(340px, 86vw) !important;
+    min-width: 0 !important;
+    max-width: min(340px, 86vw) !important;
     box-shadow: -12px 0 34px rgb(7 27 61 / 22%);
   }
 
@@ -1019,7 +1031,7 @@
   }
 }
 
-@media (min-width: 901px) {
+@media (min-width: 1151px) {
   .studio-feature-layout {
     flex-direction: row;
   }
@@ -1200,6 +1212,49 @@
 
 .sunny-theme .studio-inspector input[type="range"] {
   accent-color: #255cff;
+}
+
+.sunny-theme .studio-page [class*="text-emerald-"],
+.sunny-theme .studio-page [class*="text-cyan-"],
+.sunny-theme .studio-feature-page [class*="text-emerald-"],
+.sunny-theme .studio-feature-page [class*="text-cyan-"] {
+  color: #006b67 !important;
+}
+
+.sunny-theme .studio-page [class*="text-neutral-"],
+.sunny-theme .studio-feature-page [class*="text-neutral-"] {
+  color: #234a73 !important;
+}
+
+.sunny-theme .studio-page :is(input, select, textarea),
+.sunny-theme .studio-feature-page :is(input, select, textarea) {
+  border-color: #78a9cf !important;
+  color: #071b3d !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+}
+
+.sunny-theme .feature-asset-dock {
+  border-left-color: #ff4fc8;
+  color: #071b3d;
+  background: #effbff;
+}
+
+.sunny-theme .feature-asset-dock [class*="text-white"] {
+  color: #071b3d !important;
+}
+
+.sunny-theme .feature-asset-dock [class*="text-neutral-"] {
+  color: #355f87 !important;
+}
+
+.studio-feature-page,
+.studio-page-content {
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.studio-canvas-view button {
+  font-family: Tahoma, "Trebuchet MS", sans-serif;
 }
 
 .sunny-theme ::-webkit-scrollbar-track {

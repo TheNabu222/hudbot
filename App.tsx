@@ -116,6 +116,7 @@ import { MapMaker } from "./components/MapMaker";
 import { AISpriteModal } from "./components/AISpriteModal";
 import { AssetPickerModal } from "./components/AssetPickerModal";
 import { AssetLibraryManager } from "./components/AssetLibraryManager";
+import { AssetQuickDock } from "./components/AssetQuickDock";
 import {
   EditorMode,
   StudioWorkflowNav,
@@ -400,7 +401,12 @@ const App: React.FC = () => {
     "properties" | "layers" | "prefabs" | "assets"
   >("properties");
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(256);
-  const [rightSidebarWidth, setRightSidebarWidth] = useState(288);
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(() =>
+    window.innerWidth <= 1150 ? 0 : 320,
+  );
+  const [showFeatureAssetDock, setShowFeatureAssetDock] = useState(
+    () => window.innerWidth > 1150,
+  );
   const [assetPaletteCategory, setAssetPaletteCategory] =
     useState<string>("all");
   const [assetPaletteSearch, setAssetPaletteSearch] = useState("");
@@ -1211,6 +1217,7 @@ const App: React.FC = () => {
 
   const selectHudWidget = (widget: HudWidgetId) => {
     if (isPlaying) return;
+    if (rightSidebarWidth === 0) setRightSidebarWidth(320);
     setSelectedHudWidget(widget);
     setSelectedObjectId(null);
     setSelectedMultiIds([]);
@@ -1783,8 +1790,12 @@ const App: React.FC = () => {
     if (!stageRef.current || isPlaying) return;
 
     const rect = stageRef.current.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / stageZoom;
-    const y = (e.clientY - rect.top) / stageZoom;
+    const stageWidth =
+      currentScene.width || project.globalSettings.stageWidth || 800;
+    const stageHeight =
+      currentScene.height || project.globalSettings.stageHeight || 600;
+    const x = ((e.clientX - rect.left) / rect.width) * stageWidth;
+    const y = ((e.clientY - rect.top) / rect.height) * stageHeight;
 
     try {
       const finderFiles = Array.from(e.dataTransfer.files || []);
@@ -2080,6 +2091,7 @@ const App: React.FC = () => {
     }
     if (obj.locked) return;
     e.stopPropagation();
+    if (rightSidebarWidth === 0) setRightSidebarWidth(320);
     setSelectedHudWidget(null);
 
     if (e.shiftKey) {
@@ -2112,10 +2124,10 @@ const App: React.FC = () => {
     didDragRef.current = false;
 
     // Calculate offset from top-left of object
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setDragOffset({
-      x: (e.clientX - rect.left) / stageZoom,
-      y: (e.clientY - rect.top) / stageZoom,
+      x: ((e.clientX - rect.left) / rect.width) * obj.width,
+      y: ((e.clientY - rect.top) / rect.height) * obj.height,
     });
 
     try {
@@ -2140,11 +2152,7 @@ const App: React.FC = () => {
       objX: obj.x,
       objY: obj.y,
       anchor,
-      preserveAspect:
-        !obj.isHitbox &&
-        !obj.isText &&
-        !obj.isScript &&
-        !obj.isUiElement,
+      preserveAspect: e.shiftKey,
       aspect: obj.height > 0 ? obj.width / obj.height : 1,
     });
     try {
@@ -2205,9 +2213,17 @@ const App: React.FC = () => {
     }
 
     if (resizingId) {
+      if (!stageRef.current) return;
       didDragRef.current = true;
-      const dx = (e.clientX - resizeStart.x) / stageZoom;
-      const dy = (e.clientY - resizeStart.y) / stageZoom;
+      const stageRect = stageRef.current.getBoundingClientRect();
+      const stageWidth =
+        currentScene.width || project.globalSettings.stageWidth || 800;
+      const stageHeight =
+        currentScene.height || project.globalSettings.stageHeight || 600;
+      const dx =
+        (e.clientX - resizeStart.x) * (stageWidth / stageRect.width);
+      const dy =
+        (e.clientY - resizeStart.y) * (stageHeight / stageRect.height);
 
       let newW = resizeStart.w;
       let newH = resizeStart.h;
@@ -2274,8 +2290,12 @@ const App: React.FC = () => {
 
     if (selectionStart && stageRef.current) {
       const rect = stageRef.current.getBoundingClientRect();
-      const mx = (e.clientX - rect.left) / stageZoom;
-      const my = (e.clientY - rect.top) / stageZoom;
+      const stageWidth =
+        currentScene.width || project.globalSettings.stageWidth || 800;
+      const stageHeight =
+        currentScene.height || project.globalSettings.stageHeight || 600;
+      const mx = ((e.clientX - rect.left) / rect.width) * stageWidth;
+      const my = ((e.clientY - rect.top) / rect.height) * stageHeight;
       setSelectionBox({
         x: selectionStart.x,
         y: selectionStart.y,
@@ -2289,8 +2309,14 @@ const App: React.FC = () => {
     didDragRef.current = true;
 
     const rect = stageRef.current.getBoundingClientRect();
-    let newX = (e.clientX - rect.left) / stageZoom - dragOffset.x;
-    let newY = (e.clientY - rect.top) / stageZoom - dragOffset.y;
+    const stageWidth =
+      currentScene.width || project.globalSettings.stageWidth || 800;
+    const stageHeight =
+      currentScene.height || project.globalSettings.stageHeight || 600;
+    let newX =
+      ((e.clientX - rect.left) / rect.width) * stageWidth - dragOffset.x;
+    let newY =
+      ((e.clientY - rect.top) / rect.height) * stageHeight - dragOffset.y;
 
     // Snap to grid if enabled or shift is held
     if (project.globalSettings.snapToGrid || e.shiftKey) {
@@ -3750,10 +3776,18 @@ const App: React.FC = () => {
       );
       setStageZoom(Number(nextZoom.toFixed(2)));
     };
-    const frameId = window.requestAnimationFrame(fitForWorkspace);
+    const frameId = window.requestAnimationFrame(() =>
+      window.requestAnimationFrame(fitForWorkspace),
+    );
+    const resizeObserver = new ResizeObserver(fitForWorkspace);
+    const mainElement = document.querySelector<HTMLElement>(
+      ".studio-stage-shell",
+    );
+    if (mainElement) resizeObserver.observe(mainElement);
     window.addEventListener("resize", fitForWorkspace);
     return () => {
       window.cancelAnimationFrame(frameId);
+      resizeObserver.disconnect();
       window.removeEventListener("resize", fitForWorkspace);
     };
   }, [
@@ -4289,13 +4323,15 @@ const App: React.FC = () => {
             </span>
           </button>
 
-          <button
-            onClick={() => setShowAIAssistant((prev) => !prev)}
-            className={`studio-ai-button flex items-center gap-1 px-3 py-1.5 text-sm font-medium transition-colors ${showAIAssistant ? "is-active" : ""}`}
-          >
-            <Bot size={16} />
-            <span className="hidden xl:inline">Oracle</span>
-          </button>
+          {false && (
+            <button
+              onClick={() => setShowAIAssistant((prev) => !prev)}
+              className={`studio-ai-button flex items-center gap-1 px-3 py-1.5 text-sm font-medium transition-colors ${showAIAssistant ? "is-active" : ""}`}
+            >
+              <Bot size={16} />
+              <span className="hidden xl:inline">Oracle</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -5530,6 +5566,29 @@ const App: React.FC = () => {
                           </option>
                         ))}
                       </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newMenu: Scene = {
+                            id: uuidv4(),
+                            name: `Screen UI ${(project.uiMenus || []).length + 1}`,
+                            width: logicalStageWidth,
+                            height: logicalStageHeight,
+                            backgroundColor: "transparent",
+                            objects: [],
+                          };
+                          pushHistory({
+                            ...project,
+                            uiMenus: [...(project.uiMenus || []), newMenu],
+                            currentUiMenuId: newMenu.id,
+                          });
+                          setEditorMode("ui_stage");
+                        }}
+                        className="rounded border border-white/15 bg-white/10 px-2 py-1 text-xs font-bold text-white hover:border-[#00ffcc]/60 hover:text-[#00ffcc]"
+                        title="Create a new interface screen"
+                      >
+                        + UI
+                      </button>
                     </div>
 
                     <button
@@ -5590,8 +5649,7 @@ const App: React.FC = () => {
                   height: showDeviceFrame
                     ? deviceFrame!.outerHeight
                     : logicalStageHeight,
-                  transform: `scale(${stageZoom})`,
-                  transformOrigin: "center center",
+                  zoom: stageZoom,
                   cursor:
                     isPlaying &&
                     (hoverCursorAssetId ||
@@ -5693,8 +5751,10 @@ const App: React.FC = () => {
                     } catch (err) {}
                     const rect = stageRef.current?.getBoundingClientRect();
                     if (!rect) return;
-                    const x = e.clientX - rect.left;
-                    const y = e.clientY - rect.top;
+                    const x =
+                      ((e.clientX - rect.left) / rect.width) * logicalStageWidth;
+                    const y =
+                      ((e.clientY - rect.top) / rect.height) * logicalStageHeight;
                     if (!e.shiftKey) {
                       setSelectedObjectId(null);
                       setSelectedMultiIds([]);
@@ -9767,43 +9827,27 @@ const App: React.FC = () => {
             ${isPlaying ? project.globalSettings.customCss || "" : ""}
           `}</style>
 
-              {/* Mobile & Desktop Viewport Live-Scale HUD Controls */}
+              {/* Editor camera controls. These change only the view, never game coordinates. */}
               {!isPlaying && (
                 <div 
-                  className="absolute bottom-4 right-4 bg-neutral-900/95 backdrop-blur-md border border-neutral-800 p-2 rounded-xl shadow-2xl flex items-center gap-3 z-[4000] select-none transition-all hover:border-neutral-700/80 hover:shadow-indigo-500/5 group"
+                  className="studio-canvas-view absolute bottom-4 right-4 bg-neutral-900/95 backdrop-blur-md border border-neutral-800 p-2 rounded-xl shadow-2xl flex items-center gap-2 z-[4000] select-none transition-all hover:border-neutral-700/80 group"
                   onPointerDown={(e) => e.stopPropagation()}
-                  title="Scale and Fit Viewport for Mobile Phones / Desktop"
+                  title="Change how large the room looks while you edit"
                 >
-                <div className="flex flex-col gap-0.5">
-                  <div className="flex items-center justify-between gap-3 px-1">
-                    <span className="text-[9px] font-bold text-neutral-500 uppercase tracking-wider">Viewport Scale</span>
-                    <span className="text-[10px] font-mono font-semibold text-neutral-300">
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between gap-4 px-1">
+                    <span className="font-comic text-xs font-bold text-neutral-300">Canvas view</span>
+                    <span className="text-xs font-mono font-bold text-[#00ffcc]">
                       {Math.round(stageZoom * 100)}%
                     </span>
                   </div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
+                  <div className="flex items-center gap-1.5">
                     <button 
                       onClick={() => setStageZoom(prev => Math.max(0.15, +(prev - 0.05).toFixed(2)))} 
-                      className="w-6 h-6 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white rounded flex items-center justify-center transition-colors border border-neutral-700 text-xs active:scale-95"
+                      className="h-8 w-8 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white rounded flex items-center justify-center transition-colors border border-neutral-700 active:scale-95"
                       title="Zoom Out"
                     >
-                      <ZoomOut size={12} />
-                    </button>
-                    <input 
-                      type="range" 
-                      min="0.15" 
-                      max="1.5" 
-                      step="0.05" 
-                      value={stageZoom} 
-                      onChange={(e) => setStageZoom(parseFloat(e.target.value))}
-                      className="w-20 h-1 bg-neutral-850 rounded-lg appearance-none cursor-pointer accent-indigo-500 hover:accent-indigo-400"
-                    />
-                    <button 
-                      onClick={() => setStageZoom(prev => Math.min(1.5, +(prev + 0.05).toFixed(2)))} 
-                      className="w-6 h-6 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white rounded flex items-center justify-center transition-colors border border-neutral-700 text-xs active:scale-95"
-                      title="Zoom In"
-                    >
-                      <ZoomIn size={12} />
+                      <ZoomOut size={15} />
                     </button>
                     <button
                       onClick={() => {
@@ -9825,17 +9869,25 @@ const App: React.FC = () => {
                           setStageZoom(Math.max(0.15, ratio));
                         }
                       }}
-                      className="px-1.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white hover:text-white text-[10px] font-bold rounded flex items-center gap-1 transition-colors active:scale-95"
+                      className="h-8 px-3 bg-pink-600 hover:bg-pink-500 text-white text-xs font-bold rounded flex items-center gap-1.5 transition-colors active:scale-95"
                       title="Fit the whole room or device frame into the workspace"
                     >
-                      <Maximize2 size={10} />
+                      <Maximize2 size={13} />
                       Fit
                     </button>
                     <button 
                       onClick={() => setStageZoom(1)} 
-                      className="px-1.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white text-[10px] font-medium rounded transition-colors active:scale-95"
+                      className="h-8 px-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white text-xs font-bold rounded transition-colors active:scale-95"
+                      title="Show the room at its actual pixel size"
                     >
-                      Reset
+                      100%
+                    </button>
+                    <button
+                      onClick={() => setStageZoom(prev => Math.min(1.5, +(prev + 0.05).toFixed(2)))}
+                      className="h-8 w-8 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white rounded flex items-center justify-center transition-colors border border-neutral-700 active:scale-95"
+                      title="Zoom In"
+                    >
+                      <ZoomIn size={15} />
                     </button>
                   </div>
                 </div>
@@ -9883,6 +9935,15 @@ const App: React.FC = () => {
                   className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${rightSidebarTab === "assets" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
                 >
                   <ImageIcon size={14} /> Assets
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRightSidebarWidth(0)}
+                  className="shrink-0 border-l border-neutral-800 px-2 text-neutral-500 hover:bg-neutral-900 hover:text-white"
+                  title="Hide inspector and give the canvas more room"
+                  aria-label="Hide inspector"
+                >
+                  <X size={15} />
                 </button>
               </div>
 
@@ -10395,11 +10456,14 @@ const App: React.FC = () => {
                           </button>
                         </div>
                       </div>
-                      <Accordion title="Game Screen & Room Size" defaultOpen={true}>
+                      <Accordion title="Canvas & Room Size" defaultOpen={false}>
+                        <p className="mb-3 rounded border border-cyan-500/25 bg-cyan-500/5 p-2 font-comic text-xs leading-relaxed text-cyan-200">
+                          Project size is the usual canvas. Current room size changes only this room.
+                        </p>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <LabelWithHelp
-                              label="Default Game Width"
+                              label="Project width"
                               helpText="The usual width of your playable screen. This is still measured in pixels."
                             />
                             <input
@@ -10419,7 +10483,7 @@ const App: React.FC = () => {
                           </div>
                           <div>
                             <LabelWithHelp
-                              label="Default Game Height"
+                              label="Project height"
                               helpText="The usual height of your playable screen. This is still measured in pixels."
                             />
                             <input
@@ -10451,8 +10515,8 @@ const App: React.FC = () => {
                           <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-neutral-800">
                             <div className="col-span-2">
                               <LabelWithHelp
-                                label="This Room Override Size"
-                                helpText="Override the size of this specific room only. Leave as 0 to use the default game size."
+                                label="Current room size"
+                                helpText="This room can have its own canvas size. Use Match project size to remove the difference."
                               />
                             </div>
                             <div>
@@ -10479,6 +10543,18 @@ const App: React.FC = () => {
                                 className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1 focus:border-indigo-500"
                               />
                             </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateScene({
+                                  width: project.globalSettings.stageWidth || 800,
+                                  height: project.globalSettings.stageHeight || 600,
+                                })
+                              }
+                              className="col-span-2 mt-1 rounded border border-[#00ffcc]/40 bg-[#00ffcc]/10 px-3 py-2 font-comic text-xs font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20"
+                            >
+                              Match project size
+                            </button>
                           </div>
                         )}
                         <div className="mt-4 pt-4 border-t border-neutral-800">
@@ -18407,6 +18483,35 @@ const App: React.FC = () => {
             }
           />
         )}
+
+        {editorMode !== "stage" &&
+          editorMode !== "ui_stage" &&
+          editorMode !== "assets" &&
+          showFeatureAssetDock && (
+            <AssetQuickDock
+              assets={project.assets}
+              onClose={() => setShowFeatureAssetDock(false)}
+              onOpenLibrary={() => setEditorMode("assets")}
+              onUploadFiles={importFilesToLibrary}
+              onPlaceAsset={(asset) => {
+                handleInsertAssetToStage(asset);
+                setEditorMode("stage");
+              }}
+            />
+          )}
+
+        {editorMode !== "stage" &&
+          editorMode !== "ui_stage" &&
+          editorMode !== "assets" &&
+          !showFeatureAssetDock && (
+            <button
+              type="button"
+              onClick={() => setShowFeatureAssetDock(true)}
+              className="absolute right-3 top-3 z-40 rounded border border-[#00ffcc]/45 bg-neutral-950 px-3 py-2 font-comic text-sm font-bold text-[#00ffcc] shadow-xl"
+            >
+              Show Assets
+            </button>
+          )}
       </div>
 
       {/* Template Modal */}
