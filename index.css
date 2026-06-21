@@ -3,6 +3,15 @@
 @tailwind components;
 @tailwind utilities;
 
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  overflow-x: hidden;
+}
+
 @layer components {
   .studio-app {
     --studio-cyan: #00ffcc;
@@ -871,13 +880,33 @@
   font-size: 14px;
 }
 
+.studio-titlebar {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  font-size: 15px;
+  scrollbar-width: thin;
+}
+
+.studio-titlebar :is(button, input, label),
+.studio-quick-edit-toolbar :is(button, select),
+.studio-stage-shell > div:first-of-type button {
+  font-size: 14px !important;
+  line-height: 1.25 !important;
+}
+
+.studio-titlebar :is(button, input),
+.studio-quick-edit-toolbar :is(button, select) {
+  min-height: 36px;
+}
+
 .studio-step {
   min-height: 42px;
   padding: 0.48rem 0.7rem 0.5rem;
 }
 
 .studio-step__number {
-  font-size: 0.66rem;
+  font-size: 0.74rem;
 }
 
 .studio-step__label,
@@ -891,7 +920,7 @@
 
 .studio-workflow__detail,
 .studio-feature-description {
-  font-size: 0.8rem;
+  font-size: 0.86rem;
   line-height: 1.45;
 }
 
@@ -925,14 +954,24 @@
 .asset-inspector-slot [class*="text-[10px]"],
 .studio-page .studio-feature-header [class*="text-[9px]"],
 .studio-page .studio-feature-header [class*="text-[10px]"] {
-  font-size: 0.72rem !important;
-  line-height: 1.35 !important;
+  font-size: 0.78rem !important;
+  line-height: 1.45 !important;
 }
 
 .studio-inspector [class*="text-[11px]"],
 .asset-picker-dialog [class*="text-[11px]"] {
-  font-size: 0.78rem !important;
-  line-height: 1.35 !important;
+  font-size: 0.84rem !important;
+  line-height: 1.45 !important;
+}
+
+.studio-inspector :is(button, input, select, textarea) {
+  min-height: 36px;
+}
+
+.studio-inspector p,
+.studio-inspector label,
+.studio-inspector span {
+  text-rendering: optimizeLegibility;
 }
 
 .studio-page [class*="text-[8px]"],
@@ -986,6 +1025,7 @@
     max-width: min(340px, 82vw) !important;
     box-shadow: -12px 0 34px rgb(7 27 61 / 22%);
   }
+
 
   .studio-workspace .feature-asset-dock {
     position: absolute;
@@ -1213,6 +1253,32 @@
 .sunny-theme .studio-inspector input[type="range"] {
   accent-color: #255cff;
 }
+
+.sunny-theme .studio-inspector [class*="text-cyan-"] {
+  color: #005f66 !important;
+}
+
+.sunny-theme .studio-inspector [class*="text-emerald-"] {
+  color: #006149 !important;
+}
+
+.sunny-theme .studio-inspector [class*="text-pink-"] {
+  color: #94145f !important;
+}
+
+.sunny-theme .studio-inspector [class*="text-indigo-"] {
+  color: #263f9b !important;
+}
+
+.sunny-theme .studio-inspector [class*="text-amber-"] {
+  color: #744500 !important;
+}
+
+.sunny-theme .studio-inspector p,
+.sunny-theme .studio-inspector label {
+  color: #183d66;
+}
+
 
 .sunny-theme .studio-page [class*="text-emerald-"],
 .sunny-theme .studio-page [class*="text-cyan-"],
