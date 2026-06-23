@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { Plus, Trash2, Play, Music, Image as ImageIcon, Search, Star, CheckSquare } from "lucide-react";
+import { Plus, Trash2, Play, Music, Image as ImageIcon, Search, Star, CheckSquare, Wand2 } from "lucide-react";
 import { Project, Asset } from "../types";
 import { v4 as uuidv4 } from "uuid";
 import { StudioFeatureHeader } from "./StudioFeatureHeader";
@@ -8,12 +8,14 @@ interface AssetLibraryManagerProps {
   project: Project;
   updateProject: (updates: Partial<Project>) => void;
   onPlaceAsset?: (asset: Asset) => void;
+  onEditImage?: (assetId: string) => void;
 }
 
 export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
   project,
   updateProject,
   onPlaceAsset,
+  onEditImage,
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
@@ -391,6 +393,21 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                   >
                      <Star size={16} className={asset.isFavorite ? "fill-yellow-100" : ""} />
                   </button>
+
+                  {asset.type === "image" && onEditImage && (
+                    <button
+                      type="button"
+                      className="absolute bottom-2 right-2 z-20 flex items-center gap-1 rounded-md border border-[#ff4fc8]/50 bg-black/75 px-2 py-1 font-comic text-xs font-bold text-[#ff8bd8] opacity-90 shadow-lg backdrop-blur-md transition-all hover:border-[#00ffcc] hover:text-[#00ffcc] group-hover:opacity-100"
+                      title="Cut out sprites, crop larger images, remove a background color, or recolor"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onEditImage(asset.id);
+                      }}
+                    >
+                      <Wand2 size={12} />
+                      Edit
+                    </button>
+                  )}
                 </div>
                 <div className="bg-neutral-900 p-3 flex flex-col flex-1 border-t border-neutral-800 space-y-2">
                   <input

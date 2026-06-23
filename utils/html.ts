@@ -69,7 +69,7 @@ export const zoomCamera = (html: string, zoomFactor: number = 0.8): string => {
   // It handles integer, float, and whitespace
   const regex = /camera\.position\.set\(\s*(-?\d*\.?\d+)\s*,\s*(-?\d*\.?\d+)\s*,\s*(-?\d*\.?\d+)\s*\)/g;
 
-  return html.replace(regex, (match, x, y, z) => {
+  return html.replace(regex, (_match, x, y, z) => {
     const newX = parseFloat(x) * zoomFactor;
     const newY = parseFloat(y) * zoomFactor;
     const newZ = parseFloat(z) * zoomFactor;

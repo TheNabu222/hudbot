@@ -3,7 +3,6 @@ export const exportToTwee = (tree: any): string => {
 
   if (tree.nodes) {
     tree.nodes.forEach((node: any) => {
-      let nodeText = "";
       // Twee 3 Passage Header
       output += `:: ${node.id} {"position":"0,0","size":"100,100"}\n`;
       if (node.speaker) {

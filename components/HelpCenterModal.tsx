@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Backpack,
   BookOpen,
   Boxes,
   Download,
@@ -9,7 +8,6 @@ import {
   Image,
   Keyboard,
   Map,
-  MessageSquare,
   MousePointerClick,
   Play,
   Search,

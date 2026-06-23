@@ -1,4 +1,3 @@
-import React from "react";
 import { FolderOpen, Music, X } from "lucide-react";
 import { Asset } from "../types";
 

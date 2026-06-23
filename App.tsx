@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 import {
   Play,
@@ -15,7 +15,6 @@ import {
   Copy,
   Undo,
   Redo,
-  FolderPlus,
   Search,
   ArrowUpToLine,
   ArrowDownToLine,
@@ -23,7 +22,6 @@ import {
   Backpack,
   Plus,
   FileCode,
-  Folder,
   HelpCircle,
   Save,
   Upload,
@@ -38,16 +36,12 @@ import {
   EyeOff,
   RefreshCw,
   Lock,
-  PlusCircle,
   Unlock,
   Sun,
   Moon,
   LayoutTemplate,
-  Palette,
-  ToggleRight,
   Pointer,
   MousePointerClick,
-  Menu,
   Star,
   Check,
   ArrowLeft,
@@ -63,10 +57,8 @@ import {
   ArrowDown,
   Video,
   Map as MapIcon,
-  Navigation,
   MapPin,
   FolderOpen,
-  Bot,
   Users,
   FileText,
   Zap,
@@ -77,15 +69,12 @@ import {
   Maximize2,
   History,
   Clock,
-  Calendar,
   BookOpen,
 } from "lucide-react";
 import Matter from "matter-js";
-import { AIAssistant } from "./components/AIAssistant";
 import {
   Project,
   SceneObject,
-  CursorType,
   AnimationType,
   InteractionType,
   Asset,
@@ -101,7 +90,6 @@ import {
   Faction,
   Companion,
 } from "./types";
-import { analyzeAssetVibe } from "./services/gemini";
 import { generateExportHtml } from "./utils/exportHtml";
 import { TEMPLATES } from "./utils/templates";
 import { ImageEditorModal } from "./components/ImageEditorModal";
@@ -113,7 +101,6 @@ import {
   evaluateRuleConditions,
 } from "./utils/runtimeRules";
 import { MapMaker } from "./components/MapMaker";
-import { AISpriteModal } from "./components/AISpriteModal";
 import { AssetPickerModal } from "./components/AssetPickerModal";
 import { AssetLibraryManager } from "./components/AssetLibraryManager";
 import { AssetQuickDock } from "./components/AssetQuickDock";
@@ -138,7 +125,7 @@ import { StudioFeatureHeader } from "./components/StudioFeatureHeader";
 import { AssetInspectorSlot } from "./components/AssetInspectorSlot";
 import { ShellControlEditor } from "./components/ShellControlEditor";
 import { InterfaceSizeControl } from "./components/InterfaceSizeControl";
-import { get, set } from "idb-keyval";
+import { del, get, set } from "idb-keyval";
 
 export interface SaveSlotMeta {
   slotId: number;
@@ -148,6 +135,10 @@ export interface SaveSlotMeta {
   gameFlagCount: number;
   timeMs?: number;
 }
+
+const PROJECT_STORAGE_KEY = "neocities_project";
+const SAVE_SLOTS_META_KEY = "neocities_project_slots_meta";
+const saveSlotStorageKey = (slotId: number) => `neocities_project_slot_${slotId}`;
 
 const inspectorSectionDescriptions: Record<string, string> = {
   "Game Screen & Room Size":
@@ -356,13 +347,11 @@ const App: React.FC = () => {
     objectId: string | null;
   } | null>(null);
   const [clipboard, setClipboard] = useState<SceneObject[]>([]);
-  const [activeBin, setActiveBin] = useState<string>("all");
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
   const [repositoryFolders, setRepositoryFolders] = useState<string[]>([]);
   const [loadedRepositoryFolders, setLoadedRepositoryFolders] = useState<
     string[]
   >([]);
-  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isFinderDragOverStage, setIsFinderDragOverStage] = useState(false);
   const [hoverCursorAssetId, setHoverCursorAssetId] = useState<string | null>(
     null,
@@ -382,8 +371,12 @@ const App: React.FC = () => {
 
   const [editorMode, setEditorMode] = useState<EditorMode>("stage");
   const editorModeBeforePlayRef = useRef<EditorMode>("stage");
-  const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [isHelpCenterOpen, setIsHelpCenterOpen] = useState(false);
+  const [isPublishMenuOpen, setIsPublishMenuOpen] = useState(false);
+  const [isLibraryPaletteOpen, setIsLibraryPaletteOpen] = useState(true);
+  const [libraryPaletteTab, setLibraryPaletteTab] = useState<
+    "assets" | "prefabs"
+  >("assets");
   const [studioTheme, setStudioTheme] = useState<"midnight" | "sunny">(() =>
     localStorage.getItem("cavebot_studio_theme") === "sunny"
       ? "sunny"
@@ -394,12 +387,14 @@ const App: React.FC = () => {
     document.documentElement.style.colorScheme =
       studioTheme === "sunny" ? "light" : "dark";
   }, [studioTheme]);
-  const [leftSidebarTab, setLeftSidebarTab] = useState<"librarian" | "theme">(
-    "librarian",
-  );
   const [rightSidebarTab, setRightSidebarTab] = useState<
     "properties" | "layers" | "prefabs" | "assets"
   >("properties");
+  useEffect(() => {
+    if (rightSidebarTab === "assets" || rightSidebarTab === "prefabs") {
+      setRightSidebarTab("properties");
+    }
+  }, [rightSidebarTab]);
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(256);
   const [rightSidebarWidth, setRightSidebarWidth] = useState(() =>
     window.innerWidth <= 1150 ? 0 : 320,
@@ -407,8 +402,6 @@ const App: React.FC = () => {
   const [showFeatureAssetDock, setShowFeatureAssetDock] = useState(
     () => window.innerWidth > 1150,
   );
-  const [assetPaletteCategory, setAssetPaletteCategory] =
-    useState<string>("all");
   const [assetPaletteSearch, setAssetPaletteSearch] = useState("");
   const [activeTreeId, setActiveTreeId] = useState<string | null>(null);
   const [playerInventory, setPlayerInventory] = useState<string[]>([]);
@@ -514,7 +507,6 @@ const App: React.FC = () => {
     future: Project[];
   }>({ past: [], future: [] });
   const dragStartProjectRef = useRef<Project | null>(null);
-  const [assetSearch, setAssetSearch] = useState("");
   const [transition, setTransition] = useState<{
     active: boolean;
     type: string;
@@ -567,7 +559,7 @@ const App: React.FC = () => {
 
   const [saveSlotsMeta, setSaveSlotsMeta] = useState<SaveSlotMeta[]>(() => {
     try {
-      const raw = localStorage.getItem("neocities_project_slots_meta");
+      const raw = localStorage.getItem(SAVE_SLOTS_META_KEY);
       if (raw) return JSON.parse(raw);
     } catch (e) {
       console.error("Failed to parse slots meta", e);
@@ -669,7 +661,12 @@ const App: React.FC = () => {
       setSaveStatus("saving");
       const strippedProject = stripDuplicatedAssetSources(project);
 
-      await set(`neocities_project_slot_${slotId}`, strippedProject);
+      await set(saveSlotStorageKey(slotId), strippedProject);
+      try {
+        localStorage.setItem(saveSlotStorageKey(slotId), JSON.stringify(strippedProject));
+      } catch (storageErr) {
+        console.warn("Could not mirror save slot to localStorage", storageErr);
+      }
 
       const timestamp = new Date().toLocaleString();
       const newMeta: SaveSlotMeta = {
@@ -685,7 +682,7 @@ const App: React.FC = () => {
         const updated = prev.filter((s) => s.slotId !== slotId);
         updated.push(newMeta);
         updated.sort((a, b) => a.slotId - b.slotId);
-        localStorage.setItem("neocities_project_slots_meta", JSON.stringify(updated));
+        localStorage.setItem(SAVE_SLOTS_META_KEY, JSON.stringify(updated));
         return updated;
       });
 
@@ -700,17 +697,13 @@ const App: React.FC = () => {
 
   const handleLoadFromSlot = async (slotId: number) => {
     try {
-      const saved = await get(`neocities_project_slot_${slotId}`);
+      let saved = await get(saveSlotStorageKey(slotId));
+      if (!saved) {
+        const localSaved = localStorage.getItem(saveSlotStorageKey(slotId));
+        if (localSaved) saved = JSON.parse(localSaved);
+      }
       if (saved) {
-        setProject((prev) => ({
-          ...prev,
-          ...hydrateProject(saved),
-          globalSettings: {
-            ...prev.globalSettings,
-            ...(saved.globalSettings || {}),
-          },
-        }));
-        setHistory({ past: [], future: [] });
+        restoreProjectSnapshot(saved);
         showError(`Restored Slot ${slotId} project version successfully!`);
       } else {
         showError(`No saved project version found in Slot ${slotId}.`);
@@ -723,14 +716,17 @@ const App: React.FC = () => {
 
   const handleDeleteSlot = async (slotId: number) => {
     try {
+      await del(saveSlotStorageKey(slotId));
+      localStorage.removeItem(saveSlotStorageKey(slotId));
       setSaveSlotsMeta((prev) => {
         const updated = prev.filter((s) => s.slotId !== slotId);
-        localStorage.setItem("neocities_project_slots_meta", JSON.stringify(updated));
+        localStorage.setItem(SAVE_SLOTS_META_KEY, JSON.stringify(updated));
         return updated;
       });
-      showError(`Reset Slot ${slotId} version backup info.`);
+      showError(`Cleared Slot ${slotId} backup.`);
     } catch (err) {
       console.error("Failed to delete slot info", err);
+      showError(`Failed to clear Slot ${slotId}.`);
     }
   };
 
@@ -843,7 +839,13 @@ const App: React.FC = () => {
             }),
           }))
         : [],
-      maps: parsed.maps || [],
+      maps: (parsed.maps || []).map((map: any, index: number) => ({
+        id: map.id || `map-${index + 1}`,
+        name: map.name || `World Map ${index + 1}`,
+        backgroundSrc: map.backgroundSrc || null,
+        ...map,
+        nodes: Array.isArray(map.nodes) ? map.nodes : [],
+      })),
       currentUiMenuId: parsed.currentUiMenuId || null,
       globalSettings: {
         ...(parsed.globalSettings || {}),
@@ -851,26 +853,83 @@ const App: React.FC = () => {
     };
   };
 
+  const normalizeRestoredProject = (parsed: any, fallback: Project): Project => {
+    const hydrated = hydrateProject(parsed);
+    const scenes =
+      hydrated.scenes && hydrated.scenes.length > 0
+        ? hydrated.scenes
+        : fallback.scenes;
+    const uiMenus = hydrated.uiMenus || [];
+    const currentSceneId = scenes.some((scene) => scene.id === hydrated.currentSceneId)
+      ? hydrated.currentSceneId
+      : scenes[0]?.id || fallback.currentSceneId;
+    const currentUiMenuId =
+      hydrated.currentUiMenuId &&
+      uiMenus.some((menu) => menu.id === hydrated.currentUiMenuId)
+        ? hydrated.currentUiMenuId
+        : uiMenus[0]?.id || null;
+
+    return {
+      ...fallback,
+      ...hydrated,
+      scenes,
+      uiMenus,
+      currentSceneId,
+      currentUiMenuId,
+      assets: hydrated.assets || [],
+      dialogueTrees: hydrated.dialogueTrees || [],
+      inventoryItems: hydrated.inventoryItems || [],
+      craftingRecipes: hydrated.craftingRecipes || [],
+      quests: hydrated.quests || [],
+      maps: hydrated.maps || [],
+      gameFlags: hydrated.gameFlags || [],
+      globalSettings: {
+        ...fallback.globalSettings,
+        ...(hydrated.globalSettings || {}),
+      },
+    };
+  };
+
+  const persistRestoredProject = async (restoredProject: Project) => {
+    const strippedProject = stripDuplicatedAssetSources(restoredProject);
+    await set(PROJECT_STORAGE_KEY, strippedProject);
+    try {
+      localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(strippedProject));
+    } catch (storageErr) {
+      console.warn("Could not mirror restored project to localStorage", storageErr);
+    }
+  };
+
+  const restoreProjectSnapshot = (snapshot: any) => {
+    setSaveStatus("saving");
+    const restoredProject = normalizeRestoredProject(snapshot, project);
+    setProject(restoredProject);
+    void persistRestoredProject(restoredProject)
+      .then(() => setSaveStatus("saved"))
+      .catch((err) => {
+        console.error("Failed to persist restored project", err);
+        setSaveStatus("error");
+        showError("Project restored, but saving it locally failed.");
+      });
+    setHistory({ past: [], future: [] });
+    setSelectedObjectId(null);
+    setSelectedMultiIds([]);
+    setIsPlaying(false);
+  };
+
   // Load from IndexedDB (fallback to LocalStorage) on mount
   useEffect(() => {
     const loadProject = async () => {
       try {
-        let saved = await get("neocities_project");
+        let saved = await get(PROJECT_STORAGE_KEY);
         if (!saved) {
-          const localSaved = localStorage.getItem("neocities_project");
+          const localSaved = localStorage.getItem(PROJECT_STORAGE_KEY);
           if (localSaved) {
             saved = JSON.parse(localSaved);
           }
         }
         if (saved) {
-          setProject((prev) => ({
-            ...prev,
-            ...hydrateProject(saved),
-            globalSettings: {
-              ...prev.globalSettings,
-              ...(saved.globalSettings || {}),
-            },
-          }));
+          setProject((prev) => normalizeRestoredProject(saved, prev));
         }
       } catch (e) {
         console.error("Failed to load project", e);
@@ -885,7 +944,7 @@ const App: React.FC = () => {
       setSaveStatus("saving");
       try {
         const strippedProject = stripDuplicatedAssetSources(project);
-        await set("neocities_project", strippedProject);
+        await set(PROJECT_STORAGE_KEY, strippedProject);
         setSaveStatus("saved");
       } catch (e) {
         console.error("Failed to save project to IndexedDB", e);
@@ -928,20 +987,11 @@ const App: React.FC = () => {
       try {
         let content = event.target?.result as string;
         if (file.name.endsWith(".html")) {
-          const startIndex = content.indexOf(
-            '<script id="__GAME_DATA__" type="application/json">',
+          const gameDataMatch = content.match(
+            /<script\b(?=[^>]*\bid=["']__GAME_DATA__["'])(?=[^>]*\btype=["']application\/json["'])[^>]*>([\s\S]*?)<\/script>/i,
           );
-          if (startIndex !== -1) {
-            const dataStart =
-              startIndex +
-              '<script id="__GAME_DATA__" type="application/json">'.length;
-            const endIndex = content.indexOf("</script>", dataStart);
-            if (endIndex !== -1) {
-              content = content.substring(dataStart, endIndex);
-            } else {
-              showError("No embedded project data found in HTML.");
-              return;
-            }
+          if (gameDataMatch?.[1]) {
+            content = gameDataMatch[1].trim();
           } else {
             showError("No embedded project data found in HTML.");
             return;
@@ -949,8 +999,7 @@ const App: React.FC = () => {
         }
         const parsed = JSON.parse(content);
         if (parsed && parsed.id && parsed.scenes) {
-          setProject(hydrateProject(parsed));
-          setHistory({ past: [], future: [] });
+          restoreProjectSnapshot(parsed);
           showError("Project loaded successfully!");
         } else {
           showError("Invalid project file format.");
@@ -1140,12 +1189,6 @@ const App: React.FC = () => {
     }
   }, [isPlaying, project.currentSceneId]);
 
-  const assetMap = useMemo(() => {
-    const map = new Map<string, Asset>();
-    project.assets.forEach(a => map.set(a.id, a));
-    return map;
-  }, [project.assets]);
-
   // Dragging state for stage objects
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -1159,13 +1202,6 @@ const App: React.FC = () => {
     | "hudNeedsPosition"
     | "hudSkillsPosition"
     | "hudButtonsPosition";
-  type HudScaleKey =
-    | "hudNeedsScaleX"
-    | "hudNeedsScaleY"
-    | "hudSkillsScaleX"
-    | "hudSkillsScaleY"
-    | "hudButtonsScaleX"
-    | "hudButtonsScaleY";
   const [selectedHudWidget, setSelectedHudWidget] =
     useState<HudWidgetId | null>(null);
   const [isHudPlacementMode, setIsHudPlacementMode] = useState(false);
@@ -1186,8 +1222,6 @@ const App: React.FC = () => {
     renderedWidth: number;
     renderedHeight: number;
   };
-  const [resizingHudWidget, setResizingHudWidget] =
-    useState<HudResizeState | null>(null);
   const resizingHudWidgetRef = useRef<HudResizeState | null>(null);
 
   const getHudWidgetConfig = (widget: HudWidgetId) => {
@@ -1347,7 +1381,6 @@ const App: React.FC = () => {
       renderedHeight: Math.max(1, bounds.height),
     };
     resizingHudWidgetRef.current = resizeState;
-    setResizingHudWidget(resizeState);
     const config = getHudWidgetConfig(widget);
     const handleWindowPointerMove = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId !== resizeState.pointerId) return;
@@ -1384,7 +1417,6 @@ const App: React.FC = () => {
       window.removeEventListener("pointerup", handleWindowPointerUp);
       window.removeEventListener("pointercancel", handleWindowPointerUp);
       resizingHudWidgetRef.current = null;
-      setResizingHudWidget(null);
     };
     window.addEventListener("pointermove", handleWindowPointerMove);
     window.addEventListener("pointerup", handleWindowPointerUp);
@@ -1573,8 +1605,8 @@ const App: React.FC = () => {
       name: asset.name,
       src: actualSrc,
       _assetId: asset.id,
-      x: (project.globalSettings.stageWidth || 800) / 2 - 50,
-      y: (project.globalSettings.stageHeight || 600) / 2 - 50,
+      x: (currentScene.width || project.globalSettings.stageWidth || 800) / 2 - 50,
+      y: (currentScene.height || project.globalSettings.stageHeight || 600) / 2 - 50,
       width:
         asset.type === "ui_element"
           ? asset.uiElementType === "panel"
@@ -1777,7 +1809,8 @@ const App: React.FC = () => {
         ...current.assets,
       ],
     }));
-    setRightSidebarTab("assets");
+    setLibraryPaletteTab("assets");
+    setIsLibraryPaletteOpen(true);
     showError(
       `${imported.length} file${imported.length === 1 ? "" : "s"} added to your collection ✦`,
     );
@@ -2622,10 +2655,7 @@ const App: React.FC = () => {
       if ((e.ctrlKey || e.metaKey) && e.key === "v") {
         e.preventDefault();
         if (clipboard.length === 0) return;
-        const rect = stageRef.current?.getBoundingClientRect();
         // Since we don't have mouse position in keyboard event, paste slightly offset from center or original
-        const firstX = clipboard[0].x;
-        const firstY = clipboard[0].y;
         const maxZ = Math.max(...currentScene.objects.map((o) => o.zIndex), 0);
         
         const newObjs = clipboard.map((o, i) => ({
@@ -2796,8 +2826,6 @@ const App: React.FC = () => {
     setIsInventoryOpen(false);
   };
 
-  const [page, setPage] = useState(1);
-  const ITEMS_PER_PAGE = 50;
   const CAVEBOT_ASSET_ROOT = "assets/_cavebot-assets";
 
   const fetchFromGitHub = async (folderPath = "", force = false) => {
@@ -3087,10 +3115,6 @@ const App: React.FC = () => {
     // Process Needs Effect
     if (obj.needsEffect) {
       try {
-        if (typeof obj.needsEffect === "string") {
-          const effect = JSON.parse(obj.needsEffect);
-          // skip string parsing if it's already an object
-        }
         const effect =
           typeof obj.needsEffect === "string"
             ? JSON.parse(obj.needsEffect)
@@ -3618,16 +3642,6 @@ const App: React.FC = () => {
   const usedAssetSrcs = new Set(
     project.scenes.flatMap((s) => s.objects.map((o) => o.src)),
   );
-  const sortedImageAssets = [
-    ...project.assets.filter((a) => a.type === "image"),
-  ].sort((a, b) => {
-    const aUsed = usedAssetSrcs.has(a.src);
-    const bUsed = usedAssetSrcs.has(b.src);
-    if (aUsed && !bUsed) return -1;
-    if (!aUsed && bUsed) return 1;
-    return a.name.localeCompare(b.name);
-  });
-
   const uiBg = project.globalSettings.uiColorBackground || "#08060d";
   const uiPrimary =
     (isPlaying ? playerUiColor : null) ||
@@ -4020,9 +4034,14 @@ const App: React.FC = () => {
           {/* Backup / Restore Controls */}
           <div className="relative">
             <button
-              onClick={() => setIsBackupMenuOpen((prev) => !prev)}
+              onClick={(event) => {
+                event.stopPropagation();
+                setIsBackupMenuOpen((prev) => !prev);
+              }}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 border border-neutral-700/85 hover:bg-neutral-800 rounded-lg text-xs font-bold transition-all shadow-sm text-neutral-200 active:scale-95"
               title="Backup, restore, or manage version slots"
+              aria-haspopup="dialog"
+              aria-expanded={isBackupMenuOpen}
             >
               <Save size={13} className="text-emerald-500" />
               Backup / Restore
@@ -4031,11 +4050,16 @@ const App: React.FC = () => {
 
             {isBackupMenuOpen && (
               <>
-                <div 
-                  className="fixed inset-0 z-[2999]" 
-                  onClick={() => setIsBackupMenuOpen(false)} 
+                <div
+                  className="fixed inset-0 z-[49999]"
+                  onClick={() => setIsBackupMenuOpen(false)}
                 />
-                <div className="absolute right-0 z-[3000] mt-2 flex max-h-[85vh] w-[410px] max-w-[calc(100vw-1rem)] select-none flex-col gap-4 overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-950 p-4 text-xs shadow-2xl custom-scrollbar">
+                <div
+                  className="studio-backup-menu fixed right-3 top-14 z-[50000] flex max-h-[calc(100vh-4.5rem)] w-[410px] max-w-[calc(100vw-1rem)] select-none flex-col gap-4 overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-950 p-4 text-xs shadow-2xl custom-scrollbar"
+                  role="dialog"
+                  aria-label="Backup and restore project"
+                  onClick={(event) => event.stopPropagation()}
+                >
                   <div className="flex items-center justify-between pb-2 border-b border-neutral-800/60">
                     <div className="flex items-center gap-1.5">
                       <History size={14} className="text-emerald-500 animate-pulse" />
@@ -4323,15 +4347,6 @@ const App: React.FC = () => {
             </span>
           </button>
 
-          {false && (
-            <button
-              onClick={() => setShowAIAssistant((prev) => !prev)}
-              className={`studio-ai-button flex items-center gap-1 px-3 py-1.5 text-sm font-medium transition-colors ${showAIAssistant ? "is-active" : ""}`}
-            >
-              <Bot size={16} />
-              <span className="hidden xl:inline">Oracle</span>
-            </button>
-          )}
         </div>
       </header>
 
@@ -4340,978 +4355,313 @@ const App: React.FC = () => {
         isPlaying={isPlaying}
         onModeChange={setEditorMode}
         onTogglePlay={togglePlayMode}
-        onExport={handleExport}
+        onExport={() => setIsPublishMenuOpen(true)}
       />
+
+      {isPublishMenuOpen && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/65 p-4"
+          onClick={() => setIsPublishMenuOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-cyan-300/35 bg-neutral-950 p-5 text-neutral-100 shadow-[0_24px_80px_rgba(0,0,0,0.65)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-black text-white">
+                  What do you want to publish?
+                </h2>
+                <p className="mt-1 text-sm leading-relaxed text-neutral-300">
+                  HTML is the playable game. JSON is the editable project backup.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPublishMenuOpen(false)}
+                className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm font-bold text-neutral-300 hover:border-neutral-500 hover:text-white"
+              >
+                ×
+              </button>
+            </div>
+            <div className="grid gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  handleExport();
+                  setIsPublishMenuOpen(false);
+                }}
+                className="rounded-xl border border-emerald-300/50 bg-emerald-500/15 px-4 py-3 text-left font-bold text-emerald-100 hover:bg-emerald-500/25"
+              >
+                <span className="block text-base">Playable HTML</span>
+                <span className="block text-sm font-medium text-emerald-100/80">
+                  Export a standalone Neocities-friendly game file.
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleExportProject();
+                  setIsPublishMenuOpen(false);
+                }}
+                className="rounded-xl border border-indigo-300/50 bg-indigo-500/15 px-4 py-3 text-left font-bold text-indigo-100 hover:bg-indigo-500/25"
+              >
+                <span className="block text-base">Editable JSON backup</span>
+                <span className="block text-sm font-medium text-indigo-100/80">
+                  Save the project source so it can be restored and edited later.
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="studio-workspace flex flex-1 overflow-hidden">
         {(editorMode === "stage" || editorMode === "ui_stage") && (
           <>
             {/* Left Sidebar */}
-            {false && (
-            <aside
-              className="hidden bg-neutral-900 border-r border-neutral-800 flex-col relative flex-shrink-0"
-              style={{ width: leftSidebarWidth }}
-            >
-              <div
-                className="absolute top-0 bottom-0 -right-[3px] w-[6px] cursor-col-resize z-[100] hover:bg-emerald-500/50"
-                onPointerDown={() =>
-                  document.body.classList.add("resizing-left-sidebar")
-                }
-              />
-              <div className="flex border-b border-neutral-800 bg-neutral-950">
-                <button
-                  onClick={() => setLeftSidebarTab("librarian")}
-                  className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${leftSidebarTab === "librarian" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
-                >
-                  <ImageIcon size={14} /> Library
-                </button>
-                <button
-                  onClick={() => setLeftSidebarTab("theme")}
-                  className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${leftSidebarTab === "theme" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
-                >
-                  <Palette size={14} /> Theme
-                </button>
-              </div>
+            {!isPlaying && isLibraryPaletteOpen && (
+              <aside className="studio-library-palette flex w-[300px] max-w-[34vw] shrink-0 flex-col border-r border-neutral-800 bg-neutral-950">
+                <div className="flex items-center gap-1 border-b border-neutral-800 bg-neutral-950 p-2">
+                  <button
+                    type="button"
+                    onClick={() => setLibraryPaletteTab("assets")}
+                    className={`flex-1 rounded-lg px-3 py-2 text-sm font-black ${
+                      libraryPaletteTab === "assets"
+                        ? "bg-cyan-400/15 text-cyan-100 ring-1 ring-cyan-300/40"
+                        : "text-neutral-300 hover:bg-neutral-900 hover:text-white"
+                    }`}
+                  >
+                    Assets
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLibraryPaletteTab("prefabs")}
+                    className={`flex-1 rounded-lg px-3 py-2 text-sm font-black ${
+                      libraryPaletteTab === "prefabs"
+                        ? "bg-pink-400/15 text-pink-100 ring-1 ring-pink-300/40"
+                        : "text-neutral-300 hover:bg-neutral-900 hover:text-white"
+                    }`}
+                  >
+                    Stamps
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsLibraryPaletteOpen(false)}
+                    className="rounded-lg border border-neutral-800 bg-neutral-900 px-2 py-2 text-neutral-400 hover:text-white"
+                    title="Hide assets and stamps"
+                    aria-label="Hide assets and stamps"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
 
-              {leftSidebarTab === "librarian" && (
-                <>
-                  <div className="p-2 border-b border-neutral-800 flex flex-col gap-2 bg-neutral-900">
-                    <div className="flex flex-wrap gap-1 justify-between w-full">
-                      <button
-                        onClick={() => setIsAiModalOpen(true)}
-                        className="flex-1 cursor-pointer text-xs bg-emerald-600 border border-emerald-500 text-white font-bold px-1.5 py-1 rounded hover:bg-emerald-500 flex items-center justify-center gap-1 shadow-lg shrink-0"
-                      >
-                        <Wand2 size={12} /> AI Make
-                      </button>
-                      <button
-                        onClick={() => fetchFromGitHub("", true)}
-                        disabled={isFetchingGithub}
-                        className="flex-1 cursor-pointer text-[10px] uppercase font-bold bg-indigo-500/20 text-indigo-400 px-1.5 py-1 rounded hover:bg-indigo-500/30 disabled:opacity-50 shrink-0"
-                      >
-                        {isFetchingGithub ? "Sync..." : "GH Sync"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          const inUse = new Set([
-                            ...project.scenes.flatMap((s) =>
-                              s.objects.map((o) => o.src),
-                            ),
-                            ...project.uiMenus.flatMap((s) =>
-                              s.objects.map((o) => o.src),
-                            ),
-                            ...project.inventoryItems
-                              .map((i) =>
-                                i.iconAssetId
-                                  ? project.assets.find(
-                                      (a) => a.id === i.iconAssetId,
-                                    )?.src
-                                  : null,
-                              )
-                              .filter(Boolean),
-                          ]);
-                          setProject((p) => ({
-                            ...p,
-                            assets: p.assets.filter(
-                              (a) =>
-                                !a.src.startsWith("data:") || inUse.has(a.src),
-                            ),
-                          }));
-                          showError(
-                            "Unused base64 assets removed to save space.",
-                          );
-                        }}
-                        className="flex-1 cursor-pointer text-[10px] uppercase font-bold bg-red-500/20 text-red-400 px-1.5 py-1 rounded hover:bg-red-500/30 ring-1 ring-red-500/50 hover:ring-red-500 shrink-0"
-                        title="Remove unused local assets to fix export size"
-                      >
-                        Purge B64
-                      </button>
-                      <label
-                        className="flex-1 text-center cursor-pointer text-xs bg-emerald-500/20 text-emerald-400 px-1.5 py-1 rounded hover:bg-emerald-500/30 ring-1 ring-emerald-500/50 hover:ring-emerald-500 shrink-0"
-                        title="Upload a folder of assets"
-                      >
-                        Folder
-                        <input
-                          type="file"
-                          className="hidden"
-                          {...({ webkitdirectory: "true" } as any)}
-                          onChange={async (e) => {
-                            const files = e.target.files;
-                            if (!files || files.length === 0) return;
-
-                            const newAssets: Asset[] = [];
-                            const promises = Array.from(files).map(
-                              (file: File) => {
-                                return new Promise<void>((resolve) => {
-                                  const isAudio =
-                                    file.type.startsWith("audio/");
-                                  const isImage =
-                                    file.type.startsWith("image/");
-                                  const isVideo =
-                                    file.type.startsWith("video/");
-                                  if (!isAudio && !isImage && !isVideo) {
-                                    resolve();
-                                    return;
-                                  }
-
-                                  const MAX_SIZE = 5 * 1024 * 1024; // 5MB limit
-                                  if (file.size > MAX_SIZE) {
-                                    showError(
-                                      `File ${file.name} is too large. Max size is 5MB to prevent export crashes.`,
-                                    );
-                                    resolve();
-                                    return;
-                                  }
-
-                                  let category = isAudio
-                                    ? "audio"
-                                    : isVideo
-                                      ? "video"
-                                      : "unsorted";
-                                  // Need any here because webkitRelativePath is missing from basic React File types
-                                  const pathParts = (file as any)
-                                    .webkitRelativePath
-                                    ? (file as any).webkitRelativePath.split(
-                                        "/",
-                                      )
-                                    : [];
-                                  if (pathParts.length > 2) {
-                                    category =
-                                      pathParts[pathParts.length - 2] ||
-                                      category;
-                                  } else if (pathParts.length === 2) {
-                                    category = pathParts[0];
-                                  }
-
-                                  const reader = new FileReader();
-                                  reader.onload = (ev) => {
-                                    const src = ev.target?.result as string;
-                                    newAssets.push({
-                                      id: uuidv4(),
-                                      type: isAudio
-                                        ? "audio"
-                                        : isVideo
-                                          ? "video"
-                                          : "image",
-                                      category,
-                                      src,
-                                      name: file.name,
-                                    });
-                                    resolve();
-                                  };
-                                  reader.onerror = () => resolve();
-                                  reader.readAsDataURL(file);
-                                });
-                              },
-                            );
-
-                            await Promise.all(promises);
-                            if (newAssets.length > 0) {
-                              setProject((p) => ({
-                                ...p,
-                                assets: [...newAssets, ...p.assets],
-                              }));
-                            }
-                          }}
-                        />
-                      </label>
-                      <label
-                        className="flex-1 text-center cursor-pointer text-xs bg-emerald-500/20 text-emerald-400 px-1.5 py-1 rounded hover:bg-emerald-500/30 ring-1 ring-emerald-500/50 hover:ring-emerald-500 shrink-0"
-                        title="Upload one or more files"
-                      >
-                        Files
-                        <input
-                          type="file"
-                          multiple
-                          className="hidden"
-                          accept="image/*, audio/*, video/*"
-                          onChange={async (e) => {
-                            const files = e.target.files;
-                            if (!files || files.length === 0) return;
-
-                            const newAssets: Asset[] = [];
-                            const vibesToAnalyze: Asset[] = [];
-
-                            const promises = Array.from(files).map(
-                              (file: File) => {
-                                return new Promise<void>((resolve) => {
-                                  const isAudio =
-                                    file.type.startsWith("audio/");
-                                  const isImage =
-                                    file.type.startsWith("image/");
-                                  const isVideo =
-                                    file.type.startsWith("video/");
-                                  if (!isAudio && !isImage && !isVideo) {
-                                    resolve();
-                                    return;
-                                  }
-
-                                  const MAX_SIZE = 5 * 1024 * 1024; // 5MB limit
-                                  if (file.size > MAX_SIZE) {
-                                    showError(
-                                      `File ${file.name} is too large. Max size is 5MB to prevent export crashes.`,
-                                    );
-                                    resolve();
-                                    return;
-                                  }
-
-                                  const reader = new FileReader();
-                                  reader.onload = (ev) => {
-                                    const src = ev.target?.result as string;
-                                    const newAsset: Asset = {
-                                      id: uuidv4(),
-                                      type: isAudio
-                                        ? "audio"
-                                        : isVideo
-                                          ? "video"
-                                          : "image",
-                                      category: isAudio
-                                        ? "audio"
-                                        : isVideo
-                                          ? "video"
-                                          : "unsorted",
-                                      src,
-                                      name: file.name,
-                                    };
-                                    newAssets.push(newAsset);
-                                    if (isImage && files.length <= 5) {
-                                      // Only auto-analyze if 5 or fewer files uploaded at once
-                                      vibesToAnalyze.push(newAsset);
-                                    }
-                                    resolve();
-                                  };
-                                  reader.onerror = () => resolve();
-                                  reader.readAsDataURL(file);
-                                });
-                              },
-                            );
-
-                            await Promise.all(promises);
-
-                            if (newAssets.length > 0) {
-                              setProject((p) => ({
-                                ...p,
-                                assets: [...newAssets, ...p.assets],
-                              }));
-
-                              // Analyze vibes in background
-                              vibesToAnalyze.forEach(async (asset) => {
-                                try {
-                                  const vibe = await analyzeAssetVibe(
-                                    asset.src,
-                                  );
-                                  setProject((p) => ({
-                                    ...p,
-                                    assets: p.assets.map((a) =>
-                                      a.id === asset.id
-                                        ? {
-                                            ...a,
-                                            description: vibe.description || "",
-                                            tags: vibe.tags || [],
-                                            category: (
-                                              vibe.tags || []
-                                            ).includes("background")
-                                              ? "backgrounds"
-                                              : "sprites",
-                                          }
-                                        : a,
-                                    ),
-                                  }));
-                                } catch (err) {
-                                  console.error("Vibe analysis failed", err);
-                                }
-                              });
-                            }
-                          }}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
-                    <div className="mb-4 space-y-2">
+                <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                  {libraryPaletteTab === "assets" ? (
+                    <div className="flex min-h-0 flex-1 flex-col gap-3">
+                      <div>
+                        <div className="text-base font-black text-white">
+                          Asset Library
+                        </div>
+                        <p className="mt-1 text-sm leading-relaxed text-neutral-300">
+                          Place files into the current room, or drag them onto
+                          the canvas.
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="flex cursor-pointer items-center justify-center gap-1.5 rounded border border-pink-400/45 bg-pink-500/10 px-2 py-2 text-sm font-bold text-pink-100 hover:bg-pink-500/20">
+                          <Upload size={14} /> Add files
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*,audio/*,video/*,.gif,.svg"
+                            className="hidden"
+                            onChange={(event) => {
+                              const files = Array.from(event.target.files || []);
+                              if (files.length) importFilesToLibrary(files);
+                              event.currentTarget.value = "";
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => fetchFromGitHub("", true)}
+                          disabled={isFetchingGithub}
+                          className="flex items-center justify-center gap-1.5 rounded border border-cyan-300/45 bg-cyan-400/10 px-2 py-2 text-sm font-bold text-cyan-100 hover:bg-cyan-400/20 disabled:opacity-50"
+                        >
+                          <FolderOpen size={14} /> Repo files
+                        </button>
+                      </div>
                       <div className="relative">
                         <Search
                           size={14}
-                          className="absolute left-2 top-2.5 text-neutral-500"
+                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400"
                         />
                         <input
-                          type="text"
-                          placeholder="Search assets..."
-                          value={assetSearch}
-                          onChange={(e) => setAssetSearch(e.target.value)}
-                          className="w-full bg-neutral-800 text-neutral-300 text-sm rounded-lg pl-8 pr-3 py-2 border border-neutral-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          type="search"
+                          value={assetPaletteSearch}
+                          onChange={(event) =>
+                            setAssetPaletteSearch(event.target.value)
+                          }
+                          placeholder="Search assets…"
+                          className="w-full rounded border border-neutral-700 bg-neutral-900 py-2 pl-8 pr-3 text-sm text-white outline-none focus:border-cyan-300"
                         />
                       </div>
-
-                      {/* Breadcrumb Navigation */}
-                      <div className="flex items-center gap-1 text-sm text-neutral-400 overflow-x-auto pb-1 custom-scrollbar">
-                        <button
-                          onClick={() => {
-                            setActiveBin("all");
-                            setPage(1);
-                          }}
-                          className={`hover:text-white whitespace-nowrap ${activeBin === "all" ? "text-emerald-400 font-medium" : ""}`}
-                        >
-                          All
-                        </button>
-                        <span className="text-neutral-600">/</span>
-                        <button
-                          onClick={() => {
-                            setActiveBin("");
-                            setPage(1);
-                          }}
-                          className={`hover:text-white whitespace-nowrap ${activeBin === "" ? "text-emerald-400 font-medium" : ""}`}
-                        >
-                          Root
-                        </button>
-                        {activeBin !== "all" &&
-                          activeBin !== "" &&
-                          activeBin
-                            .split("/")
-                            .filter(Boolean)
-                            .map((part, i, arr) => (
-                              <React.Fragment key={i}>
-                                <span className="text-neutral-600">/</span>
-                                <button
-                                  onClick={() => {
-                                    setActiveBin(arr.slice(0, i + 1).join("/"));
-                                    setPage(1);
-                                  }}
-                                  className={`hover:text-white whitespace-nowrap ${i === arr.length - 1 ? "text-emerald-400 font-medium" : ""}`}
-                                >
-                                  {part}
-                                </button>
-                              </React.Fragment>
-                            ))}
-                      </div>
-                    </div>
-
-                    {editorMode === "ui_stage" ? (
-                      <div className="grid grid-cols-2 gap-2 mb-4">
-                        <div
-                          draggable
-                          onDragStart={(e) =>
-                            handleDragStartAsset(e, {
-                              type: "ui_element",
-                              uiElementType: "panel",
-                              name: "UI Panel",
-                            })
-                          }
-                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                        >
-                          <Square size={16} className="text-emerald-400" />
-                          <span className="text-sm font-medium text-emerald-200 uppercase">
-                            Panel
-                          </span>
-                        </div>
-                        <div
-                          draggable
-                          onDragStart={(e) =>
-                            handleDragStartAsset(e, {
-                              type: "ui_element",
-                              uiElementType: "button",
-                              name: "UI Button",
-                            })
-                          }
-                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                        >
-                          <MousePointerClick
-                            size={16}
-                            className="text-emerald-400"
-                          />
-                          <span className="text-sm font-medium text-emerald-200 uppercase">
-                            Button
-                          </span>
-                        </div>
-                        <div
-                          draggable
-                          onDragStart={(e) =>
-                            handleDragStartAsset(e, {
-                              type: "ui_element",
-                              uiElementType: "progress",
-                              name: "UI Progress",
-                            })
-                          }
-                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                        >
-                          <Menu size={16} className="text-emerald-400" />
-                          <span className="text-sm font-medium text-emerald-200 uppercase">
-                            Progress
-                          </span>
-                        </div>
-                        <div
-                          draggable
-                          onDragStart={(e) =>
-                            handleDragStartAsset(e, {
-                              type: "ui_element",
-                              uiElementType: "toggle",
-                              name: "UI Toggle",
-                            })
-                          }
-                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                        >
-                          <ToggleRight size={16} className="text-emerald-400" />
-                          <span className="text-sm font-medium text-emerald-200 uppercase">
-                            Toggle
-                          </span>
-                        </div>
-                        <div
-                          draggable
-                          onDragStart={(e) =>
-                            handleDragStartAsset(e, {
-                              type: "ui_element",
-                              uiElementType: "icon",
-                              name: "UI Icon",
-                            })
-                          }
-                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                        >
-                          <Star size={16} className="text-emerald-400" />
-                          <span className="text-sm font-medium text-emerald-200 uppercase">
-                            Icon
-                          </span>
-                        </div>
-                        <div
-                          draggable
-                          onDragStart={(e) =>
-                            handleDragStartAsset(e, {
-                              type: "ui_element",
-                              uiElementType: "tooltip",
-                              name: "UI Tooltip",
-                            })
-                          }
-                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                        >
-                          <MessageSquare
-                            size={16}
-                            className="text-emerald-400"
-                          />
-                          <span className="text-sm font-medium text-emerald-200 uppercase">
-                            Tooltip
-                          </span>
-                        </div>
-                        <div
-                          draggable
-                          onDragStart={(e) =>
-                            handleDragStartAsset(e, {
-                              type: "ui_element",
-                              uiElementType: "selection",
-                              name: "UI Selection Indicator",
-                            })
-                          }
-                          className="h-16 p-2 border border-dashed border-emerald-500/50 bg-emerald-500/10 rounded-lg cursor-grab hover:bg-emerald-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                        >
-                          <Pointer size={16} className="text-emerald-400" />
-                          <span className="text-sm font-medium text-emerald-200 uppercase">
-                            Selection
-                          </span>
-                        </div>
-                        <div
-                          draggable
-                          onDragStart={(e) =>
-                            handleDragStartAsset(e, {
-                              type: "text",
-                              name: "Text",
-                            })
-                          }
-                          className="p-2 border border-dashed border-indigo-500/50 bg-indigo-500/10 rounded-lg cursor-grab hover:bg-indigo-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                        >
-                          <Type size={16} className="text-indigo-400" />
-                          <span className="text-sm font-medium text-indigo-200 uppercase">
-                            Text
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex gap-2 mb-4">
-                        <div
-                          draggable
-                          onDragStart={(e) =>
-                            handleDragStartAsset(e, {
-                              type: "hitbox",
-                              name: "Clickable Area",
-                            })
-                          }
-                          className="flex-1 p-2 border border-dashed border-red-500/50 bg-red-500/10 rounded-lg cursor-grab hover:bg-red-500/20 flex flex-col items-center justify-center gap-1 transition-colors text-center"
-                        >
-                          <Square size={16} className="text-red-400" />
-                          <span className="text-sm font-medium text-red-200 uppercase leading-tight">
-                            Clickable Area
-                          </span>
-                        </div>
-                        <div
-                          draggable
-                          onDragStart={(e) =>
-                            handleDragStartAsset(e, {
-                              type: "text",
-                              name: "Text",
-                            })
-                          }
-                          className="flex-1 p-2 border border-dashed border-indigo-500/50 bg-indigo-500/10 rounded-lg cursor-grab hover:bg-indigo-500/20 flex flex-col items-center justify-center gap-1 transition-colors"
-                        >
-                          <Type size={16} className="text-indigo-400" />
-                          <span className="text-sm font-medium text-indigo-200 uppercase">
-                            Text
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Subfolders */}
-                    {activeBin !== "all" &&
-                      (() => {
-                        const allCategories = Array.from(
-                          new Set<string>(
-                            project.assets.map((a) => a.category || ""),
-                          ),
-                        );
-                        const subfolders = new Set<string>();
-                        allCategories.forEach((cat) => {
-                          if (activeBin === "") {
-                            if (cat && cat !== "root")
-                              subfolders.add(cat.split("/")[0]);
-                          } else if (cat.startsWith(activeBin + "/")) {
-                            const remaining = cat.substring(
-                              activeBin.length + 1,
+                      <div className="grid grid-cols-2 gap-2 pb-4">
+                        {project.assets
+                          .filter((asset) => {
+                            const query = assetPaletteSearch
+                              .trim()
+                              .toLowerCase();
+                            if (!query) return true;
+                            return [
+                              asset.name,
+                              asset.description || "",
+                              ...(asset.tags || []),
+                            ].some((value) =>
+                              value.toLowerCase().includes(query),
                             );
-                            if (remaining)
-                              subfolders.add(remaining.split("/")[0]);
-                          }
-                        });
-                        const folders = Array.from(subfolders)
-                          .filter(Boolean)
-                          .sort();
-
-                        if (folders.length === 0) return null;
-
-                        return (
-                          <div className="grid grid-cols-2 gap-2 mb-4">
-                            {folders.map((sub) => (
-                              <div
-                                key={sub}
-                                onClick={() => {
-                                  setActiveBin(
-                                    activeBin ? `${activeBin}/${sub}` : sub,
-                                  );
-                                  setPage(1);
-                                }}
-                                className="bg-neutral-800 border border-neutral-700/50 rounded-lg cursor-pointer hover:bg-neutral-700 p-2 flex items-center gap-2 transition-colors"
-                              >
-                                <Folder
-                                  size={14}
-                                  className="text-emerald-400 shrink-0"
-                                />
-                                <span className="text-sm text-neutral-300 truncate">
-                                  {sub}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })()}
-
-                    <div className="grid grid-cols-2 gap-3">
-                      {project.assets
-                        .filter((a) => {
-                          if (assetSearch)
-                            return a.name
-                              .toLowerCase()
-                              .includes(assetSearch.toLowerCase());
-                          if (activeBin === "all") return true;
-                          const cat = a.category === "root" ? "" : a.category;
-                          return cat === activeBin;
-                        })
-                        .slice(0, page * ITEMS_PER_PAGE)
-                        .map((asset) => (
-                          <div
-                            key={asset.id}
-                            draggable
-                            onDragStart={(e) => handleDragStartAsset(e, asset)}
-                            className="bg-neutral-800 rounded-lg shadow cursor-grab hover:ring-2 hover:ring-emerald-500/50 group relative flex flex-col hover:z-50"
-                          >
-                            <div className="h-40 bg-neutral-900 flex items-center justify-center p-2 relative group/info rounded-t-lg">
-                              {asset.type === "script" ? (
-                                <FileCode
-                                  size={32}
-                                  className="text-neutral-500"
-                                />
-                              ) : asset.type === "audio" ? (
-                                <Music size={32} className="text-emerald-500" />
-                              ) : asset.type === "video" ? (
-                                <video
-                                  src={asset.src || undefined}
-                                  className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md group-hover:scale-150 transition-transform"
-                                />
-                              ) : (
-                                <img
-                                  src={asset.src || undefined}
-                                  alt={asset.name}
-                                  className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-md group-hover:scale-150 transition-transform max-w-[200%] max-h-[200%]"
-                                  loading="lazy"
-                                />
-                              )}
-                              <div className="absolute bottom-1 right-1 flex items-center gap-1 opacity-0 group-hover/info:opacity-100 transition-opacity">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleInsertAssetToStage(asset);
-                                  }}
-                                  className="p-1.5 bg-neutral-950/80 hover:bg-emerald-500/80 text-white rounded"
-                                  title="Quick Insert to Stage"
-                                >
-                                  <PlusCircle size={12} />
-                                </button>
-                                {asset.type === "image" && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setEditingAssetId(asset.id);
-                                    }}
-                                    className="p-1.5 bg-neutral-950/80 hover:bg-emerald-500/80 text-white rounded"
-                                    title="Edit Image"
-                                  >
-                                    <Wand2 size={12} />
-                                  </button>
-                                )}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setPromptModal({
-                                      isOpen: true,
-                                      message: "Enter new folder name:",
-                                      defaultValue: asset.category,
-                                      onSubmit: (newCat) => {
-                                        if (newCat) {
-                                          const newProj = {
-                                            ...project,
-                                            assets: project.assets.map((a) =>
-                                              a.id === asset.id
-                                                ? {
-                                                    ...a,
-                                                    category: newCat as any,
-                                                  }
-                                                : a,
-                                            ),
-                                          };
-                                          pushHistory(newProj);
-                                        }
-                                      },
-                                    });
-                                  }}
-                                  className="p-1.5 bg-neutral-950/80 hover:bg-emerald-500/80 text-white rounded"
-                                  title="Move to Folder"
-                                >
-                                  <FolderPlus size={12} />
-                                </button>
-                              </div>
-                            </div>
-                            <div className="p-2 border-t border-neutral-700/50">
-                              <span
-                                className="text-sm text-neutral-300 truncate block font-medium"
-                                title={asset.name}
-                              >
-                                {asset.name}
-                              </span>
-                              <span className="text-[8px] uppercase tracking-wider text-neutral-500 mt-0.5 block">
-                                {asset.category}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-
-                    {project.assets.filter(
-                      (a) => activeBin === "all" || a.category === activeBin,
-                    ).length >
-                      page * ITEMS_PER_PAGE && (
-                      <button
-                        onClick={() => setPage((p) => p + 1)}
-                        className="w-full mt-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium rounded-lg transition-colors"
-                      >
-                        Load More
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
-
-              {leftSidebarTab === "theme" && (
-                <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col gap-5">
-                  <div>
-                    <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                      <LayoutTemplate size={16} /> UI Theme Designer
-                    </h3>
-                    <p className="text-sm text-neutral-400 mb-4">
-                      Design the look of menus, dialogue boxes, and overlays.
-                    </p>
-
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-sm text-neutral-500 block mb-1">
-                          Preset Themes
-                        </label>
-                        <select
-                          value={project.globalSettings.uiTheme || "default"}
-                          onChange={(e) => {
-                            const theme = e.target.value as any;
-                            const presets: Record<string, any> = {
-                              default: {
-                                primary: "#00ffff",
-                                bg: "#1a0033",
-                                radius: 0,
-                                font: '"VT323", monospace',
-                              },
-                              minimalist: {
-                                primary: "#000000",
-                                bg: "rgba(255,255,255,0.95)",
-                                radius: 0,
-                                font: "Helvetica, Arial, sans-serif",
-                              },
-                              barbie: {
-                                primary: "#ff69b4",
-                                bg: "rgba(255, 228, 225, 0.9)",
-                                radius: 24,
-                                font: '"Comic Sans MS", cursive',
-                              },
-                              terminal: {
-                                primary: "#00ff00",
-                                bg: "rgba(0,0,0,0.9)",
-                                radius: 0,
-                                font: "monospace",
-                              },
-                              cyberpunk: {
-                                primary: "#fcee0a",
-                                bg: "rgba(0,0,0,0.85)",
-                                radius: 0,
-                                font: "Impact, sans-serif",
-                              },
-                              fantasy: {
-                                primary: "#d4af37",
-                                bg: "rgba(43, 27, 23, 0.9)",
-                                radius: 12,
-                                font: "Papyrus, fantasy",
-                              },
-                              retro: {
-                                primary: "#ffffff",
-                                bg: "rgba(0,0,170,0.9)",
-                                radius: 0,
-                                font: '"Press Start 2P", monospace',
-                              },
-                            };
-                            const s = presets[theme];
-                            pushHistory({
-                              ...project,
-                              globalSettings: {
-                                ...project.globalSettings,
-                                uiTheme: theme,
-                                uiColorPrimary: s.primary,
-                                uiColorBackground: s.bg,
-                                uiBorderRadius: s.radius,
-                                uiFontFamily: s.font,
-                              },
-                            });
-                          }}
-                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-500"
-                        >
-                          <option value="default">Default Dark</option>
-                          <option value="minimalist">Minimalist Light</option>
-                          <option value="barbie">Barbie Core / Y2K</option>
-                          <option value="terminal">Hacker Terminal</option>
-                          <option value="cyberpunk">Cyberpunk Neon</option>
-                          <option value="fantasy">Ancient / Fantasy</option>
-                          <option value="retro">Retro 8-bit</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="text-sm text-neutral-500 block mb-1">
-                          Accent (Primary) Color
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="color"
-                            value={
-                              project.globalSettings.uiColorPrimary || "#10b981"
-                            }
-                            onChange={(e) =>
-                              pushHistory({
-                                ...project,
-                                globalSettings: {
-                                  ...project.globalSettings,
-                                  uiColorPrimary: e.target.value,
-                                },
-                              })
-                            }
-                            className="w-8 h-8 rounded border-none bg-transparent cursor-pointer"
-                          />
-                          <input
-                            type="text"
-                            value={
-                              project.globalSettings.uiColorPrimary || "#10b981"
-                            }
-                            onChange={(e) =>
-                              pushHistory({
-                                ...project,
-                                globalSettings: {
-                                  ...project.globalSettings,
-                                  uiColorPrimary: e.target.value,
-                                },
-                              })
-                            }
-                            className="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="text-sm text-neutral-500 block mb-1">
-                          Background Color (RGBA)
-                        </label>
-                        <input
-                          type="text"
-                          value={
-                            project.globalSettings.uiColorBackground ||
-                            "rgba(0,0,0,0.8)"
-                          }
-                          onChange={(e) =>
-                            pushHistory({
-                              ...project,
-                              globalSettings: {
-                                ...project.globalSettings,
-                                uiColorBackground: e.target.value,
-                              },
-                            })
-                          }
-                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-sm text-neutral-500 block mb-1">
-                          Border Radius (px)
-                        </label>
-                        <input
-                          type="number"
-                          value={project.globalSettings.uiBorderRadius ?? 8}
-                          onChange={(e) =>
-                            pushHistory({
-                              ...project,
-                              globalSettings: {
-                                ...project.globalSettings,
-                                uiBorderRadius: parseInt(e.target.value),
-                              },
-                            })
-                          }
-                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-sm text-neutral-500 block mb-1">
-                          Font Family
-                        </label>
-                        <select
-                          value={
-                            project.globalSettings.uiFontFamily || "sans-serif"
-                          }
-                          onChange={(e) =>
-                            pushHistory({
-                              ...project,
-                              globalSettings: {
-                                ...project.globalSettings,
-                                uiFontFamily: e.target.value,
-                              },
-                            })
-                          }
-                          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-emerald-500"
-                        >
-                          <option value="sans-serif">System Sans-Serif</option>
-                          <option value="serif">System Serif</option>
-                          <option value="monospace">
-                            Monospace / Terminal
-                          </option>
-                          <option value="Helvetica, Arial, sans-serif">
-                            Helvetica / Arial
-                          </option>
-                          <option value="'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif">
-                            Trebuchet MS
-                          </option>
-                          <option value="Verdana, Geneva, sans-serif">
-                            Verdana
-                          </option>
-                          <option value="'Times New Roman', Times, serif">
-                            Times New Roman
-                          </option>
-                          <option value="Georgia, serif">Georgia</option>
-                          <option value="Garamond, serif">Garamond</option>
-                          <option value='"Comic Sans MS", cursive'>
-                            Comic Sans / Bubbly
-                          </option>
-                          <option value="'Brush Script MT', cursive">
-                            Brush Script
-                          </option>
-                          <option value="Impact, sans-serif">
-                            Impact / Heavy
-                          </option>
-                          <option value="Papyrus, fantasy">
-                            Papyrus / Ancient
-                          </option>
-                          <option value='"Press Start 2P", monospace'>
-                            8-Bit Pixel
-                          </option>
-                        </select>
-                      </div>
-
-                      <div className="pt-4 border-t border-neutral-800">
-                        <label className="flex items-center gap-2 cursor-pointer mb-2">
-                          <input
-                            type="checkbox"
-                            checked={!!project.globalSettings.customCss}
-                            onChange={(e) => {
-                              if (!e.target.checked) {
-                                pushHistory({
-                                  ...project,
-                                  globalSettings: {
-                                    ...project.globalSettings,
-                                    customCss: undefined,
-                                  },
-                                });
-                              } else {
-                                pushHistory({
-                                  ...project,
-                                  globalSettings: {
-                                    ...project.globalSettings,
-                                    customCss: "/* Custom CSS Editor */\\n",
-                                  },
-                                });
+                          })
+                          .slice(0, 80)
+                          .map((asset) => (
+                            <div
+                              key={asset.id}
+                              draggable
+                              onDragStart={(event) =>
+                                handleDragStartAsset(event, asset)
                               }
-                            }}
-                          />
-                          <span className="text-sm text-neutral-300">
-                            Enable Custom CSS
-                          </span>
-                        </label>
-                        {project.globalSettings.customCss !== undefined && (
-                          <textarea
-                            value={project.globalSettings.customCss}
-                            onChange={(e) =>
-                              pushHistory({
-                                ...project,
-                                globalSettings: {
-                                  ...project.globalSettings,
-                                  customCss: e.target.value,
-                                },
-                              })
-                            }
-                            className="w-full h-32 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-sm font-mono text-neutral-400 focus:text-neutral-200 outline-none custom-scrollbar"
-                            placeholder="body { ... }"
-                          />
+                              className="group overflow-hidden rounded-xl border border-neutral-700 bg-neutral-900"
+                            >
+                              <div className="flex h-24 items-center justify-center bg-[linear-gradient(135deg,rgba(0,255,204,.08),rgba(255,79,200,.08))] p-2">
+                                {asset.type === "image" ? (
+                                  <img
+                                    src={asset.src}
+                                    alt=""
+                                    loading="lazy"
+                                    className="h-full w-full object-contain"
+                                  />
+                                ) : asset.type === "audio" ? (
+                                  <Music size={30} className="text-cyan-200" />
+                                ) : (
+                                  <Video size={30} className="text-pink-200" />
+                                )}
+                              </div>
+                              <div className="p-2">
+                                <div
+                                  className="truncate text-sm font-bold text-white"
+                                  title={asset.name}
+                                >
+                                  {asset.name}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleInsertAssetToStage(asset)}
+                                  className="mt-2 w-full rounded border border-cyan-300/40 bg-cyan-400/10 px-2 py-1.5 text-sm font-bold text-cyan-100 hover:bg-cyan-400/20"
+                                >
+                                  Place
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        {project.assets.length === 0 && (
+                          <div className="col-span-2 rounded-xl border border-neutral-800 bg-neutral-900 p-4 text-center text-sm text-neutral-300">
+                            No assets yet. Add files or load repo files.
+                          </div>
                         )}
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex flex-col gap-4">
+                      <div>
+                        <div className="text-base font-black text-white">
+                          Stamps
+                        </div>
+                        <p className="mt-1 text-sm leading-relaxed text-neutral-300">
+                          Reusable blocks and smart starter objects.
+                        </p>
+                      </div>
+
+                      {(project.prefabs || []).length > 0 && (
+                        <div className="grid grid-cols-2 gap-2">
+                          {(project.prefabs || []).map((pObj, index) => (
+                            <div
+                              key={pObj.id || index}
+                              draggable
+                              onDragStart={(event) =>
+                                handleDragStartAsset(event, {
+                                  type: "custom_prefab",
+                                  prefabData: pObj,
+                                })
+                              }
+                              className="flex h-20 cursor-grab flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-indigo-400/55 bg-indigo-500/10 p-2 text-center hover:bg-indigo-500/20"
+                            >
+                              <ImageIcon
+                                size={18}
+                                className="text-indigo-200"
+                              />
+                              <span className="w-full truncate text-sm font-bold text-indigo-100">
+                                {pObj.name}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          {
+                            type: "ui_element",
+                            uiElementType: "panel",
+                            name: "Block",
+                            icon: Square,
+                          },
+                          { type: "text", name: "Text Label", icon: Type },
+                          {
+                            type: "ui_element",
+                            uiElementType: "button",
+                            name: "UI Button",
+                            icon: MousePointer2,
+                          },
+                          {
+                            type: "hitbox",
+                            name: "Clickable Area",
+                            icon: MousePointerClick,
+                          },
+                        ].map((stamp) => {
+                          const Icon = stamp.icon;
+                          return (
+                            <button
+                              key={stamp.name}
+                              type="button"
+                              draggable
+                              onDragStart={(event) =>
+                                handleDragStartAsset(event, stamp)
+                              }
+                              onClick={() => handleInsertAssetToStage(stamp)}
+                              className="flex min-h-20 flex-col items-center justify-center gap-1 rounded-xl border border-pink-300/40 bg-pink-500/10 p-2 text-center text-pink-100 hover:bg-pink-500/20"
+                            >
+                              <Icon size={18} />
+                              <span className="text-sm font-bold">
+                                {stamp.name}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </aside>
+              </aside>
+            )}
+
+            {!isPlaying && !isLibraryPaletteOpen && (
+              <button
+                type="button"
+                onClick={() => setIsLibraryPaletteOpen(true)}
+                className="studio-show-library absolute left-3 top-32 z-[5200] rounded-[8px_18px_8px_18px] border border-cyan-300/50 bg-neutral-950/90 px-3 py-2 text-sm font-bold text-cyan-100 shadow-xl backdrop-blur hover:bg-cyan-400/15"
+              >
+                Show Assets
+              </button>
             )}
 
             {/* Center - Stage */}
@@ -5334,7 +4684,7 @@ const App: React.FC = () => {
               }}
             >
               {!isPlaying && (
-                <div className="absolute left-4 top-4 z-[5100] flex items-center gap-1.5">
+                <div className="studio-stage-actions sticky top-0 z-[5100] mb-3 flex items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() =>
@@ -5403,7 +4753,7 @@ const App: React.FC = () => {
                     event.stopPropagation();
                     setRightSidebarWidth(320);
                   }}
-                  className="absolute right-4 top-4 z-[5200] rounded-[8px_18px_8px_18px] border border-pink-400/50 bg-neutral-950/90 px-3 py-2 font-comic text-sm font-bold text-pink-200 shadow-xl backdrop-blur hover:bg-pink-500/15"
+                  className="studio-show-inspector absolute left-4 top-20 z-[5200] rounded-[8px_18px_8px_18px] border border-pink-400/50 bg-neutral-950/90 px-3 py-2 font-comic text-sm font-bold text-pink-200 shadow-xl backdrop-blur hover:bg-pink-500/15"
                   title="Bring the Options / Layers panel back"
                 >
                   Show Inspector
@@ -5641,7 +4991,7 @@ const App: React.FC = () => {
                 )}
 
               <div
-                className={`relative mx-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 overflow-visible ${isPlaying ? "border-transparent" : "border-neutral-800 border"}`}
+                className={`studio-stage-frame relative mx-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 overflow-visible ${isPlaying ? "border-transparent" : "border-neutral-800 border"}`}
                 style={{
                   width: showDeviceFrame
                     ? deviceFrame!.outerWidth
@@ -5804,9 +5154,9 @@ const App: React.FC = () => {
                     outline: isPlaying
                       ? undefined
                       : editorMode === "ui_stage"
-                        ? "2px solid rgba(129,140,248,.95)"
-                        : "2px solid rgba(255,79,200,.95)",
-                    outlineOffset: "3px",
+                        ? "4px solid rgba(129,140,248,.98)"
+                        : "4px solid rgba(255,228,92,.98)",
+                    outlineOffset: "6px",
                     backgroundImage: project.globalSettings.snapToGrid
                       ? `linear-gradient(to right, #ffffff10 1px, transparent 1px), linear-gradient(to bottom, #ffffff10 1px, transparent 1px)`
                       : "none",
@@ -6189,7 +5539,7 @@ const App: React.FC = () => {
                                 !obj.isText && (
                                   <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                                     {(obj.isHitbox || obj.opacity === 0) && (
-                                      <span className="text-red-900/50 font-bold text-sm text-center leading-tight">
+                                      <span className="rounded border border-rose-400/60 bg-rose-950/80 px-2 py-1 text-center text-sm font-bold leading-tight text-rose-100 shadow-sm">
                                         {obj.opacity === 0 && !obj.isHitbox
                                           ? "GHOST"
                                           : "CLICK TARGET"}
@@ -6698,7 +6048,7 @@ const App: React.FC = () => {
                   !isPlaying &&
                   (project.uiMenus || [])
                     .filter((m) => m.isOpenByDefault)
-                    .map((uiMenu, menuIndex) => (
+                    .map((uiMenu) => (
                       <div
                         key={`ghost-fg-ui-${uiMenu.id}`}
                         className="absolute pointer-events-none select-none z-[500]"
@@ -9849,6 +9199,18 @@ const App: React.FC = () => {
                     >
                       <ZoomOut size={15} />
                     </button>
+                    <label className="flex min-w-[120px] flex-1 items-center px-1" title="Slide to zoom the canvas view">
+                      <span className="sr-only">Canvas zoom</span>
+                      <input
+                        type="range"
+                        min="15"
+                        max="150"
+                        step="5"
+                        value={Math.round(stageZoom * 100)}
+                        onChange={(event) => setStageZoom(Number(event.target.value) / 100)}
+                        className="studio-zoom-slider w-full accent-cyan-300"
+                      />
+                    </label>
                     <button
                       onClick={() => {
                         const mainEl = document.querySelector('.studio-stage-shell');
@@ -9906,7 +9268,7 @@ const App: React.FC = () => {
               }}
             >
               <div
-                className="absolute top-0 bottom-0 -left-[3px] w-[6px] cursor-col-resize z-[100] hover:bg-emerald-500/50"
+                className="studio-inspector-resize-handle absolute top-0 bottom-0 -left-[3px] w-[6px] cursor-col-resize z-[100] hover:bg-emerald-500/50"
                 onPointerDown={() =>
                   document.body.classList.add("resizing-right-sidebar")
                 }
@@ -9923,18 +9285,6 @@ const App: React.FC = () => {
                   className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${rightSidebarTab === "layers" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
                 >
                   <Layers size={14} /> Layers
-                </button>
-                <button
-                  onClick={() => setRightSidebarTab("prefabs")}
-                  className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${rightSidebarTab === "prefabs" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
-                >
-                  <Box size={14} /> Stamps
-                </button>
-                <button
-                  onClick={() => setRightSidebarTab("assets")}
-                  className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${rightSidebarTab === "assets" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
-                >
-                  <ImageIcon size={14} /> Assets
                 </button>
                 <button
                   type="button"
@@ -10408,7 +9758,7 @@ const App: React.FC = () => {
                 {rightSidebarTab === "properties" &&
                   (!selectedObject ? (
                     <div className="space-y-2">
-                      <div className="rounded-[8px_22px_8px_22px] border border-[#00ffcc]/20 bg-gradient-to-br from-[#00ffcc]/10 via-neutral-950 to-[#ff4fc8]/10 p-3 shadow-[0_12px_34px_rgba(0,0,0,0.2)]">
+                      <div className="studio-inspector-summary rounded-[8px_22px_8px_22px] border border-[#00ffcc]/20 bg-gradient-to-br from-[#00ffcc]/10 via-neutral-950 to-[#ff4fc8]/10 p-3 shadow-[0_12px_34px_rgba(0,0,0,0.2)]">
                         <div className="font-comic text-sm font-bold text-white">
                           Nothing selected
                         </div>
@@ -11945,7 +11295,7 @@ const App: React.FC = () => {
                     </div>
                   ) : (
                     <div className="space-y-2 pb-16">
-                      <div className="rounded-[8px_22px_8px_22px] border border-pink-400/30 bg-gradient-to-br from-pink-500/12 via-neutral-950 to-[#00ffcc]/10 p-3 shadow-[0_12px_34px_rgba(0,0,0,0.2)]">
+                      <div className="studio-inspector-summary rounded-[8px_22px_8px_22px] border border-pink-400/30 bg-gradient-to-br from-pink-500/12 via-neutral-950 to-[#00ffcc]/10 p-3 shadow-[0_12px_34px_rgba(0,0,0,0.2)]">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="font-comic text-sm font-bold text-pink-200 truncate">
@@ -18461,6 +17811,7 @@ const App: React.FC = () => {
           <AssetLibraryManager
             project={project}
             updateProject={(updates) => pushHistory({ ...project, ...updates })}
+            onEditImage={(assetId) => setEditingAssetId(assetId)}
             onPlaceAsset={(asset) => {
               handleInsertAssetToStage(asset);
               setEditorMode("stage");
@@ -19008,24 +18359,6 @@ const App: React.FC = () => {
           );
         })()}
 
-      {/* AI Sprite Generator Modal */}
-      {isAiModalOpen && (
-        <AISpriteModal
-          onClose={() => setIsAiModalOpen(false)}
-          onSave={(base64Image, generatedName) => {
-            const newAsset: Asset = {
-              id: uuidv4(),
-              type: "image",
-              category: "ai_generated",
-              src: base64Image,
-              name: generatedName,
-            };
-            setProject((p) => ({ ...p, assets: [newAsset, ...p.assets] }));
-            setIsAiModalOpen(false);
-          }}
-        />
-      )}
-
       {/* Image Editor Modal */}
       {editingAssetId && (
         <ImageEditorModal
@@ -19220,13 +18553,6 @@ const App: React.FC = () => {
         }
       />
 
-      {showAIAssistant && (
-        <AIAssistant
-          project={project}
-          updateProject={(updates) => setProject((p) => ({ ...p, ...updates }))}
-          onClose={() => setShowAIAssistant(false)}
-        />
-      )}
     </div>
   );
 };

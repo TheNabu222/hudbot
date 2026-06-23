@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ChevronLeft,
-  Image as ImageIcon,
   Lock,
   MapPin,
   MousePointerClick,
@@ -33,9 +32,16 @@ export function MapMaker({
     project.maps?.[0]?.id || null,
   );
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
-  const maps = project.maps || [];
+  const maps = (project.maps || []).map((map, index) => ({
+    id: map.id || `map-${index + 1}`,
+    name: map.name || `World Map ${index + 1}`,
+    backgroundSrc: map.backgroundSrc || null,
+    ...map,
+    nodes: Array.isArray(map.nodes) ? map.nodes : [],
+  }));
   const activeMap = maps.find((map) => map.id === activeMapId);
-  const editingNode = activeMap?.nodes.find(
+  const activeMapNodes = activeMap?.nodes || [];
+  const editingNode = activeMapNodes.find(
     (node) => node.id === editingNodeId,
   );
   const imageAssets = project.assets.filter((asset) => asset.type === "image");
@@ -88,20 +94,20 @@ export function MapMaker({
     if (!activeMap) return;
     const newNode: MapNode = {
       id: `node-${uuidv4().slice(0, 8)}`,
-      name: `Location ${activeMap.nodes.length + 1}`,
+      name: `Location ${activeMapNodes.length + 1}`,
       x,
       y,
       targetSceneId: null,
       unlockedByDefault: true,
     };
-    updateActiveMap({ nodes: [...activeMap.nodes, newNode] });
+    updateActiveMap({ nodes: [...activeMapNodes, newNode] });
     setEditingNodeId(newNode.id);
   };
 
   const updateNode = (id: string, updates: Partial<MapNode>) => {
     if (!activeMap) return;
     updateActiveMap({
-      nodes: activeMap.nodes.map((node) =>
+      nodes: activeMapNodes.map((node) =>
         node.id === id ? { ...node, ...updates } : node,
       ),
     });
@@ -110,7 +116,7 @@ export function MapMaker({
   const deleteNode = (id: string) => {
     if (!activeMap) return;
     updateActiveMap({
-      nodes: activeMap.nodes.filter((node) => node.id !== id),
+      nodes: activeMapNodes.filter((node) => node.id !== id),
     });
     setEditingNodeId(null);
   };
@@ -252,7 +258,7 @@ export function MapMaker({
             <div className="hidden items-center gap-3 border-l border-neutral-800 pl-4 text-[10px] text-neutral-500 lg:flex">
               <span>
                 <strong className="text-[#00ffcc]">
-                  {activeMap.nodes.length}
+                  {activeMapNodes.length}
                 </strong>{" "}
                 locations
               </span>
@@ -312,7 +318,7 @@ export function MapMaker({
                       )}
 
                       {!activeMap.backgroundSrc &&
-                        activeMap.nodes.length === 0 && (
+                        activeMapNodes.length === 0 && (
                           <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-8">
                             <div className="studio-empty-state max-w-sm rounded-[6px_18px_6px_18px] border border-pink-500/30 bg-[#080711]/90 p-5 text-center shadow-2xl backdrop-blur">
                               <Sparkles
@@ -335,7 +341,7 @@ export function MapMaker({
                           </div>
                         )}
 
-                      {activeMap.nodes.map((node) => {
+                      {activeMapNodes.map((node) => {
                         const isEditing = editingNodeId === node.id;
                         return (
                           <button

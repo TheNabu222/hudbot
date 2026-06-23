@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import ReactCrop, { Crop, PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { Asset } from '../types';
@@ -26,8 +26,6 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
 
   const [chromaKeyColor, setChromaKeyColor] = useState<string>('');
   const [chromaTolerance, setChromaTolerance] = useState<number>(30);
-
-  const [isPickingColor, setIsPickingColor] = useState(false);
 
   const getFilterString = () => {
     return `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturate}%) sepia(${sepia}%) hue-rotate(${hue}deg) grayscale(${grayscale}%) invert(${invert}%) blur(${blur}px)`;
