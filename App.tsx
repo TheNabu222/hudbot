@@ -5607,7 +5607,7 @@ const App: React.FC = () => {
                                     ? "default"
                                     : obj.cursorAssetId
                                       ? "none"
-                                      : obj.cursor
+                                      : obj.cursor || (obj.interaction && obj.interaction !== "none" ? "pointer" : "default")
                                   : obj.locked
                                     ? "default"
                                     : "move",
@@ -7152,14 +7152,22 @@ const App: React.FC = () => {
                                         ...prev,
                                         choice.completeQuestId!,
                                       ]);
-                                      const questName =
-                                        project.quests?.find(
-                                          (q) =>
-                                            q.id === choice.completeQuestId,
-                                        )?.name || "Quest";
-                                      setPreviewDialogue(
-                                        `Completed Quest: ${questName}`,
+                                      const completedQuest = project.quests?.find(
+                                        (q) => q.id === choice.completeQuestId,
                                       );
+                                      setPreviewDialogue(
+                                        `Completed Quest: ${completedQuest?.name || "Quest"}`,
+                                      );
+                                      // Apply quest rewards
+                                      completedQuest?.rewards?.forEach((reward) => {
+                                        if (reward.type === "give_item") {
+                                          setPlayerInventory((prev) => prev.includes(reward.targetId) ? prev : [...prev, reward.targetId]);
+                                        } else if (reward.type === "set_flag") {
+                                          setProject((p) => ({ ...p, gameFlags: [...(p.gameFlags || []), reward.targetId].filter((v, i, a) => a.indexOf(v) === i) }));
+                                        } else if (reward.type === "modify_status") {
+                                          setPlayerSkills((prev) => ({ ...prev, [reward.targetId]: Math.min(20, (prev[reward.targetId] || 0) + (reward.amount || 1)) }));
+                                        }
+                                      });
                                     }
 
                                     if (choice.giveItemId) {
@@ -7200,6 +7208,15 @@ const App: React.FC = () => {
                                         audio.volume = sound.volume ?? 1;
                                         audio.play().catch((e) => console.error(e));
                                       }
+                                    }
+
+                                    if (choice.grantSkillId && choice.grantSkillId !== "none") {
+                                      const amt = choice.grantSkillAmount || 1;
+                                      setPlayerSkills((prev) => ({
+                                        ...prev,
+                                        [choice.grantSkillId!]: Math.min(20, (prev[choice.grantSkillId!] || 0) + amt),
+                                      }));
+                                      setPreviewDialogue(`+${amt} ${choice.grantSkillId}!`);
                                     }
 
                                     if (choice.timeCost) {
@@ -15420,6 +15437,43 @@ const App: React.FC = () => {
                                         ))}
                                       </select>
                                     </div>
+                                  </div>
+
+                                  <div className="flex gap-2 mt-2">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-sm uppercase font-bold text-emerald-800">Grant Skill:</span>
+                                      <select
+                                        value={choice.grantSkillId || ""}
+                                        onChange={(e) => {
+                                          const v = e.target.value || undefined;
+                                          const newTrees = (project.dialogueTrees || []).map((t) => t.id === tree.id ? { ...t, nodes: (t.nodes || []).map((n) => n.id === node.id ? { ...n, choices: (n.choices || []).map((c, i) => i === cIdx ? { ...c, grantSkillId: v } : c) } : n) } : t);
+                                          pushHistory({ ...project, dialogueTrees: newTrees });
+                                        }}
+                                        className="bg-neutral-900 border border-neutral-800 rounded px-1 py-0.5 text-sm text-emerald-300"
+                                      >
+                                        <option value="">(None)</option>
+                                        {(project.globalSettings?.customSkills?.length
+                                          ? project.globalSettings.customSkills
+                                          : ["naturalist", "occultist", "scribal"]
+                                        ).map((s) => <option key={s} value={s}>{s}</option>)}
+                                      </select>
+                                    </div>
+                                    {choice.grantSkillId && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-sm uppercase font-bold text-emerald-800">Amount:</span>
+                                        <input
+                                          type="number"
+                                          min={1}
+                                          max={20}
+                                          value={choice.grantSkillAmount || 1}
+                                          onChange={(e) => {
+                                            const newTrees = (project.dialogueTrees || []).map((t) => t.id === tree.id ? { ...t, nodes: (t.nodes || []).map((n) => n.id === node.id ? { ...n, choices: (n.choices || []).map((c, i) => i === cIdx ? { ...c, grantSkillAmount: Number(e.target.value) } : c) } : n) } : t);
+                                            pushHistory({ ...project, dialogueTrees: newTrees });
+                                          }}
+                                          className="w-14 bg-neutral-900 border border-neutral-800 rounded px-1 py-0.5 text-sm text-emerald-300"
+                                        />
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               ))}

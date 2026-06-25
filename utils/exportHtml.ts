@@ -1124,14 +1124,95 @@ export function generateExportHtml(project: Project): string {
         }
       };
 
+      const applyQuestRewards = (questId) => {
+        const q = (gameData.quests || []).find(q => q.id === questId);
+        if (!q || !q.rewards) return;
+        q.rewards.forEach(reward => {
+          if (reward.type === 'give_item') {
+            if (reward.targetId && !state.inventory.includes(reward.targetId)) {
+              state.inventory.push(reward.targetId);
+              const item = (gameData.inventoryItems || []).find(i => i.id === reward.targetId);
+              showSimpleDialogue('Reward: ' + (item ? item.name : reward.targetId), 'System');
+            }
+          } else if (reward.type === 'set_flag') {
+            if (reward.targetId) state.flags[reward.targetId] = true;
+          } else if (reward.type === 'modify_status') {
+            if (reward.targetId) {
+              state.skills[reward.targetId] = Math.min(20, (state.skills[reward.targetId] || 0) + (reward.amount || 1));
+              updateSkillsUI();
+            }
+          }
+        });
+        saveGame();
+      };
+
       window.chooseDialogue = (choiceIdx) => {
         if (!activeDialogue) return;
         const choice = activeDialogue.node.choices[choiceIdx];
-        if (choice && choice.setGameFlag) {
+        if (!choice) return;
+
+        if (choice.setGameFlag) {
           state.flags[choice.setGameFlag] = true;
-          saveGame();
         }
-        if (choice && choice.nextNodeId) {
+        if (choice.startQuestId && !state.activeQuests.includes(choice.startQuestId) && !state.completedQuests.includes(choice.startQuestId)) {
+          state.activeQuests.push(choice.startQuestId);
+          const q = (gameData.quests || []).find(q => q.id === choice.startQuestId);
+          showSimpleDialogue('Quest Started: ' + (q ? q.name : choice.startQuestId), 'System');
+          buildQuestLog();
+        }
+        if (choice.completeQuestId && state.activeQuests.includes(choice.completeQuestId)) {
+          state.activeQuests = state.activeQuests.filter(id => id !== choice.completeQuestId);
+          state.completedQuests.push(choice.completeQuestId);
+          const q = (gameData.quests || []).find(q => q.id === choice.completeQuestId);
+          showSimpleDialogue('Quest Completed: ' + (q ? q.name : choice.completeQuestId), 'System');
+          applyQuestRewards(choice.completeQuestId);
+          buildQuestLog();
+        }
+        if (choice.giveItemId && !state.inventory.includes(choice.giveItemId)) {
+          state.inventory.push(choice.giveItemId);
+          const item = (gameData.inventoryItems || []).find(i => i.id === choice.giveItemId);
+          showSimpleDialogue('You received: ' + (item ? item.name : 'an item'), 'System');
+          updateInventoryUI();
+        }
+        if (choice.consumeItemId) {
+          const idx = state.inventory.indexOf(choice.consumeItemId);
+          if (idx !== -1) { state.inventory.splice(idx, 1); updateInventoryUI(); }
+        }
+        if (choice.grantSkillId && choice.grantSkillId !== 'none') {
+          const amt = choice.grantSkillAmount || 1;
+          state.skills[choice.grantSkillId] = Math.min(20, (state.skills[choice.grantSkillId] || 0) + amt);
+          showSimpleDialogue('+' + amt + ' ' + choice.grantSkillId + '!', 'System');
+          updateSkillsUI();
+        }
+        if (choice.needsEffect) {
+          for (const [key, val] of Object.entries(choice.needsEffect)) {
+            state.needs[key] = Math.max(0, Math.min(100, (state.needs[key] || 0) + val));
+          }
+          updateNeedsUI();
+        }
+        if (choice.reputationEffect && choice.reputationEffect.factionId) {
+          const fe = choice.reputationEffect;
+          state.relationships[fe.factionId] = Math.max(-100, Math.min(100, (state.relationships[fe.factionId] || 0) + fe.value));
+        }
+        if (choice.timeCost) {
+          state.time = ((state.time || 8) + choice.timeCost) % 24;
+        }
+        if (choice.playSoundAssetId) {
+          const snd = assets.find(a => a.id === choice.playSoundAssetId);
+          if (snd) { const a = new Audio(snd.src); a.volume = snd.volume ?? 1; a.play().catch(() => {}); }
+        }
+        saveGame();
+
+        if (choice.changeSceneId) {
+          closeDialogue();
+          document.querySelectorAll('.game-scene').forEach(el => el.style.display = 'none');
+          const targetScene = document.getElementById('scene-' + choice.changeSceneId);
+          if (targetScene) {
+            targetScene.style.display = 'block';
+            state.currentSceneId = choice.changeSceneId;
+            playBgm(targetScene.getAttribute('data-bgm') || null);
+          }
+        } else if (choice.nextNodeId) {
           showDialogueNode(activeDialogue.tree, choice.nextNodeId);
         } else {
           closeDialogue();
@@ -1472,6 +1553,7 @@ export function generateExportHtml(project: Project): string {
                state.completedQuests.push(data);
                const q = (gameData.quests || []).find(q => q.id === data);
                showSimpleDialogue("Quest Completed: " + (q ? q.name : data), "System");
+               applyQuestRewards(data);
                saveGame();
                buildQuestLog();
             }

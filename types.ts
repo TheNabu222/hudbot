@@ -165,6 +165,8 @@ export interface DialogueChoice {
   timeCost?: number;
   needsEffect?: Record<string, number>;
   reputationEffect?: { factionId: string; value: number };
+  grantSkillId?: string;
+  grantSkillAmount?: number;
 }
 export interface DialogueNode {
   id: string;
