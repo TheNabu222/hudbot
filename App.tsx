@@ -375,7 +375,7 @@ const App: React.FC = () => {
   const [isPublishMenuOpen, setIsPublishMenuOpen] = useState(false);
   const [isLibraryPaletteOpen, setIsLibraryPaletteOpen] = useState(true);
   const [libraryPaletteTab, setLibraryPaletteTab] = useState<
-    "assets" | "prefabs"
+    "assets" | "prefabs" | "theme"
   >("assets");
   const [studioTheme, setStudioTheme] = useState<"midnight" | "sunny">(() =>
     localStorage.getItem("cavebot_studio_theme") === "sunny"
@@ -4447,10 +4447,21 @@ const App: React.FC = () => {
                   </button>
                   <button
                     type="button"
+                    onClick={() => setLibraryPaletteTab("theme")}
+                    className={`flex-1 rounded-lg px-3 py-2 text-sm font-black ${
+                      libraryPaletteTab === "theme"
+                        ? "bg-indigo-400/15 text-indigo-100 ring-1 ring-indigo-300/40"
+                        : "text-neutral-300 hover:bg-neutral-900 hover:text-white"
+                    }`}
+                  >
+                    Theme
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setIsLibraryPaletteOpen(false)}
                     className="rounded-lg border border-neutral-800 bg-neutral-900 px-2 py-2 text-neutral-400 hover:text-white"
-                    title="Hide assets and stamps"
-                    aria-label="Hide assets and stamps"
+                    title="Hide panel"
+                    aria-label="Hide panel"
                   >
                     <X size={15} />
                   </button>
@@ -4490,6 +4501,38 @@ const App: React.FC = () => {
                           className="flex items-center justify-center gap-1.5 rounded border border-cyan-300/45 bg-cyan-400/10 px-2 py-2 text-sm font-bold text-cyan-100 hover:bg-cyan-400/20 disabled:opacity-50"
                         >
                           <FolderOpen size={14} /> Repo files
+                        </button>
+                      </div>
+                      <div className="flex gap-2">
+                        <label className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded border border-yellow-400/45 bg-yellow-500/10 px-2 py-2 text-sm font-bold text-yellow-100 hover:bg-yellow-500/20">
+                          <FolderOpen size={14} /> Add folder
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*,audio/*,video/*,.gif,.svg"
+                            className="hidden"
+                            ref={(el) => {
+                              if (el) el.setAttribute("webkitdirectory", "");
+                            }}
+                            onChange={(event) => {
+                              const files = Array.from(event.target.files || []);
+                              if (files.length) importFilesToLibrary(files);
+                              event.currentTarget.value = "";
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setProject((p) => ({
+                              ...stripDuplicatedAssetSources(p),
+                            }));
+                            showError("Duplicate base64 sources purged ✦");
+                          }}
+                          className="flex items-center justify-center gap-1.5 rounded border border-neutral-600 bg-neutral-800 px-2 py-2 text-sm font-bold text-neutral-300 hover:border-red-400/60 hover:text-red-200"
+                          title="Remove duplicate embedded base64 sources to reduce project file size"
+                        >
+                          Purge B64
                         </button>
                       </div>
                       <div className="relative">
@@ -4568,6 +4611,129 @@ const App: React.FC = () => {
                             No assets yet. Add files or load repo files.
                           </div>
                         )}
+                      </div>
+                    </div>
+                  ) : libraryPaletteTab === "theme" ? (
+                    <div className="flex flex-col gap-4">
+                      <div>
+                        <div className="text-base font-black text-white">
+                          Game Theme
+                        </div>
+                        <p className="mt-1 text-sm leading-relaxed text-neutral-300">
+                          Visual style applied to all exported UI elements.
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-3">
+                        <div>
+                          <label className="mb-1 block text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                            Accent / Primary Color
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={project.globalSettings.uiColorPrimary || "#00ffcc"}
+                              onChange={(e) =>
+                                setProject((p) => ({
+                                  ...p,
+                                  globalSettings: { ...p.globalSettings, uiColorPrimary: e.target.value },
+                                }))
+                              }
+                              className="h-8 w-8 cursor-pointer rounded border-none bg-neutral-800 p-0"
+                            />
+                            <span className="font-mono text-sm text-neutral-300">
+                              {project.globalSettings.uiColorPrimary || "#00ffcc"}
+                            </span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                            UI Background Color
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={project.globalSettings.uiColorBackground || "#08060d"}
+                              onChange={(e) =>
+                                setProject((p) => ({
+                                  ...p,
+                                  globalSettings: { ...p.globalSettings, uiColorBackground: e.target.value },
+                                }))
+                              }
+                              className="h-8 w-8 cursor-pointer rounded border-none bg-neutral-800 p-0"
+                            />
+                            <span className="font-mono text-sm text-neutral-300">
+                              {project.globalSettings.uiColorBackground || "#08060d"}
+                            </span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                            Secondary Color
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={project.globalSettings.uiColorSecondary || "#94a3b8"}
+                              onChange={(e) =>
+                                setProject((p) => ({
+                                  ...p,
+                                  globalSettings: { ...p.globalSettings, uiColorSecondary: e.target.value },
+                                }))
+                              }
+                              className="h-8 w-8 cursor-pointer rounded border-none bg-neutral-800 p-0"
+                            />
+                            <span className="font-mono text-sm text-neutral-300">
+                              {project.globalSettings.uiColorSecondary || "#94a3b8"}
+                            </span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                            UI Font
+                          </label>
+                          <select
+                            value={project.globalSettings.uiFontFamily || "sans-serif"}
+                            onChange={(e) =>
+                              setProject((p) => ({
+                                ...p,
+                                globalSettings: { ...p.globalSettings, uiFontFamily: e.target.value },
+                              }))
+                            }
+                            className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-white focus:border-indigo-400 focus:outline-none"
+                          >
+                            <option value="sans-serif">System Sans</option>
+                            <option value="serif">System Serif</option>
+                            <option value="'Comic Sans MS', 'Comic Sans', cursive">Comic Sans</option>
+                            <option value="Papyrus, fantasy">Papyrus</option>
+                            <option value="'Courier New', monospace">Courier (Terminal)</option>
+                            <option value="'VT323', monospace">VT323 (Pixel)</option>
+                            <option value="Cinzel, serif">Cinzel (Elegant)</option>
+                            <option value="Helvetica, Arial, sans-serif">Helvetica / Arial</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                            Corner Radius
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="range"
+                              min={0}
+                              max={24}
+                              value={project.globalSettings.uiBorderRadius ?? 8}
+                              onChange={(e) =>
+                                setProject((p) => ({
+                                  ...p,
+                                  globalSettings: { ...p.globalSettings, uiBorderRadius: Number(e.target.value) },
+                                }))
+                              }
+                              className="flex-1 accent-indigo-400"
+                            />
+                            <span className="w-8 text-right font-mono text-sm text-neutral-300">
+                              {project.globalSettings.uiBorderRadius ?? 8}px
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ) : (

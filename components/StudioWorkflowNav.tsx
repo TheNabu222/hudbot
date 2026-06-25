@@ -228,10 +228,6 @@ export const StudioWorkflowNav: React.FC<StudioWorkflowNavProps> = ({
         {!isPlaying && (
           <div className="studio-subtools" aria-label="Current phase tools">
             {subtools[activePhase]
-              .filter(
-                (tool) =>
-                  tool.mode !== "ui_stage" || editorMode === "ui_stage",
-              )
               .map((tool) => {
               const Icon = tool.icon;
               const isActive = editorMode === tool.mode;
