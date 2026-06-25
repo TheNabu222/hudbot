@@ -7302,7 +7302,7 @@ const App: React.FC = () => {
                   !["dialogue", "items", "scenes"].includes(editorMode)) && (
                   <>
                     {/* Needs Tracker */}
-                    {project.globalSettings.enableNeeds && (!hideEditorHud || isPlaying) && (
+                    {project.globalSettings.enableNeeds && !hideEditorHud && (
                       <div
                         onClick={() => {
                           if (didDragRef.current) return;
@@ -7415,7 +7415,7 @@ const App: React.FC = () => {
                     )}
  
                     {/* Skills Tracker */}
-                    {project.globalSettings.enableTTRPGStats && (!hideEditorHud || isPlaying) && (
+                    {project.globalSettings.enableTTRPGStats && !hideEditorHud && (
                       <div
                         onClick={() => {
                           if (didDragRef.current) return;
@@ -7446,7 +7446,7 @@ const App: React.FC = () => {
                             : {
                                 right:
                                   project.globalSettings.enableNeeds &&
-                                  (!hideEditorHud || isPlaying)
+                                  !hideEditorHud
                                     ? "180px"
                                     : "16px",
                               }),
@@ -7511,7 +7511,7 @@ const App: React.FC = () => {
                     )}
 
                     {/* HUD Button Bar */}
-                    {(!hideEditorHud || isPlaying) && (
+                    {!hideEditorHud && (
                       <div
                         onClick={() => {
                           if (didDragRef.current) return;

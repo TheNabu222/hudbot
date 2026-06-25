@@ -121,6 +121,7 @@ export function generateExportHtml(project: Project): string {
       transform-origin: center center;
       touch-action: none;
       background-color: rgba(255, 255, 255, 0.01);
+      pointer-events: auto;
     }
     .hitbox {
       /* Invisible in production, but needs slight opacity for Safari/iOS click detection */
