@@ -836,8 +836,9 @@ export function generateExportHtml(project: Project): string {
         const w = menu.width || project.globalSettings?.stageWidth || 800;
         const h = menu.height || project.globalSettings?.stageHeight || 600;
         const pe = menu.blocksClicks ? "auto" : "none";
+        const clickOutsideAttr = menu.closeOnClickOutside ? `data-close-on-outside="true"` : "";
         return `
-        <div id="ui-menu-${menu.id}" class="ui-menu-layer" style="display: ${menu.isOpenByDefault ? "block" : "none"}; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: ${w}px; height: ${h}px; pointer-events: ${pe}; overflow: visible; z-index: ${10000 + idx}; background-color: ${menu.backgroundColor || "transparent"}">
+        <div id="ui-menu-${menu.id}" class="ui-menu-layer" ${clickOutsideAttr} style="display: ${menu.isOpenByDefault ? "block" : "none"}; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: ${w}px; height: ${h}px; pointer-events: ${pe}; overflow: visible; z-index: ${10000 + idx}; background-color: ${menu.backgroundColor || "transparent"}">
           ${uiObjectsHtml}
         </div>
       `;
@@ -1008,6 +1009,17 @@ export function generateExportHtml(project: Project): string {
       };
       window.addEventListener('resize', resizeGame);
       resizeGame();
+
+      // Close-on-click-outside for UI menus
+      document.addEventListener('pointerdown', (e) => {
+        document.querySelectorAll('.ui-menu-layer[data-close-on-outside="true"]').forEach(menu => {
+          if (menu.style.display !== 'none' && !menu.contains(e.target)) {
+            menu.style.display = 'none';
+            const menuId = menu.id.replace('ui-menu-', '');
+            state.activeUiMenus = state.activeUiMenus.filter(id => id !== menuId);
+          }
+        });
+      });
 
       // Global BGM State
       let currentBgmAudio = null;
@@ -1561,8 +1573,35 @@ export function generateExportHtml(project: Project): string {
             if (data) {
               state.flags[data] = true;
               saveGame();
-              console.log("Story Event Flag Set:", data);
-              showSimpleDialogue("Story Event: " + data, "System");
+            }
+          } else if (interaction === 'clear_flag') {
+            if (data) {
+              delete state.flags[data];
+              saveGame();
+            }
+          } else if (interaction === 'toggle_flag') {
+            if (data) {
+              state.flags[data] = !state.flags[data];
+              saveGame();
+              updateGameFlagsUI();
+            }
+          } else if (interaction === 'show_object') {
+            if (data) {
+              const targetEl = document.getElementById(data);
+              if (targetEl) { targetEl.style.display = ''; targetEl.style.visibility = 'visible'; }
+            }
+          } else if (interaction === 'hide_object') {
+            if (data) {
+              const targetEl = document.getElementById(data);
+              if (targetEl) targetEl.style.visibility = 'hidden';
+            }
+          } else if (interaction === 'toggle_object') {
+            if (data) {
+              const targetEl = document.getElementById(data);
+              if (targetEl) {
+                const isHidden = targetEl.style.visibility === 'hidden' || targetEl.style.display === 'none';
+                targetEl.style.visibility = isHidden ? 'visible' : 'hidden';
+              }
             }
           } else if (interaction === 'scene_change') {
             document.querySelectorAll('.game-scene').forEach(el => el.style.display = 'none');
@@ -2148,7 +2187,7 @@ export function generateExportHtml(project: Project): string {
         <div id="game-transition" style="display: none; position: fixed; inset: 0; z-index: 99999; background: black; opacity: 0; pointer-events: none; transition: opacity 0.5s ease;"></div>
         
         ${
-          project.globalSettings?.hideDefaultInventoryBtn
+          (project.globalSettings?.hideAllDefaultHud || project.globalSettings?.hideDefaultInventoryBtn)
             ? ""
             : `
       <button id="inv-toggle-btn" onclick="toggleInventory()">
@@ -2159,7 +2198,7 @@ export function generateExportHtml(project: Project): string {
         }
 
         ${
-          (project.quests && project.quests.length > 0) && !project.globalSettings?.hideDefaultInventoryBtn
+          (project.quests && project.quests.length > 0) && !project.globalSettings?.hideAllDefaultHud && !project.globalSettings?.hideDefaultQuestLogBtn
             ? `
       <button id="quest-toggle-btn" onclick="toggleQuestLog()">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--ui-primary)"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
