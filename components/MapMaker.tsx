@@ -514,7 +514,7 @@ export function MapMaker({
                           className="w-full rounded border border-neutral-700 bg-black px-2 py-1.5"
                         >
                           <option value="">No flag selected</option>
-                          {project.gameFlags.map((flag) => (
+                          {(project.gameFlags || []).map((flag) => (
                             <option key={flag} value={flag}>
                               {flag}
                             </option>
