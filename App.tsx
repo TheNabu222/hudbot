@@ -445,7 +445,7 @@ const App: React.FC = () => {
     };
   }, [isPlaying, project.companions, playerFlags]);
   const [runtimeOverrides, setRuntimeOverrides] = useState<
-    Record<string, { x: number; y: number }>
+    Record<string, { x?: number; y?: number; hidden?: boolean }>
   >({});
   const [runtimeDraggingId, setRuntimeDraggingId] = useState<string | null>(
     null,
@@ -3366,8 +3366,32 @@ const App: React.FC = () => {
       if (!playerFlags.includes(obj.interactionData)) {
         setPlayerFlags((prev) => [...prev, obj.interactionData!]);
       }
-      // Show the event text every time they interact with this object!
-      setPreviewDialogue(obj.interactionData);
+    } else if (obj.interaction === "clear_flag" && obj.interactionData) {
+      setPlayerFlags((prev) => prev.filter((f) => f !== obj.interactionData));
+    } else if (obj.interaction === "toggle_flag" && obj.interactionData) {
+      setPlayerFlags((prev) =>
+        prev.includes(obj.interactionData!)
+          ? prev.filter((f) => f !== obj.interactionData)
+          : [...prev, obj.interactionData!],
+      );
+    } else if (obj.interaction === "show_object" && obj.interactionData) {
+      setRuntimeOverrides((prev) => ({
+        ...prev,
+        [obj.interactionData!]: { ...prev[obj.interactionData!], hidden: false },
+      }));
+    } else if (obj.interaction === "hide_object" && obj.interactionData) {
+      setRuntimeOverrides((prev) => ({
+        ...prev,
+        [obj.interactionData!]: { ...prev[obj.interactionData!], hidden: true },
+      }));
+    } else if (obj.interaction === "toggle_object" && obj.interactionData) {
+      setRuntimeOverrides((prev) => {
+        const cur = prev[obj.interactionData!];
+        return {
+          ...prev,
+          [obj.interactionData!]: { ...cur, hidden: !cur?.hidden },
+        };
+      });
     } else if (obj.interaction === "save_game") {
       const stateToSave = {
         version: 1,
@@ -5259,8 +5283,10 @@ const App: React.FC = () => {
                           const renderRot = phys ? phys.rotation : obj.rotation;
 
                           if (isPlaying && runtimeOverrides[obj.id]) {
-                            renderX = runtimeOverrides[obj.id].x;
-                            renderY = runtimeOverrides[obj.id].y;
+                            const ov = runtimeOverrides[obj.id];
+                            if (ov.x !== undefined) renderX = ov.x;
+                            if (ov.y !== undefined) renderY = ov.y;
+                            if (ov.hidden) return null;
                           }
 
                           const stageW =
@@ -6148,8 +6174,10 @@ const App: React.FC = () => {
                             const renderRot = obj.rotation;
 
                             if (isPlaying && runtimeOverrides[obj.id]) {
-                              renderX = runtimeOverrides[obj.id].x;
-                              renderY = runtimeOverrides[obj.id].y;
+                              const ov = runtimeOverrides[obj.id];
+                              if (ov.x !== undefined) renderX = ov.x;
+                              if (ov.y !== undefined) renderY = ov.y;
+                              if (ov.hidden) return null;
                             }
 
                             let animClass = "";
@@ -10883,6 +10911,26 @@ const App: React.FC = () => {
                             )}
                           </div>
 
+                          {/* Master HUD toggle */}
+                          <div className="flex flex-col gap-2 border-b border-neutral-800 pb-3 mb-1">
+                            <span className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Custom HUD Mode</span>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={!!project.globalSettings.hideAllDefaultHud}
+                                onChange={(e) =>
+                                  setProject((p) => ({
+                                    ...p,
+                                    globalSettings: { ...p.globalSettings, hideAllDefaultHud: e.target.checked },
+                                  }))
+                                }
+                                className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500"
+                              />
+                              <span className="text-sm text-neutral-300">Hide ALL default HUD buttons</span>
+                            </label>
+                            <p className="text-[11px] text-neutral-600 leading-snug">Use your own buttons/graphics via <strong className="text-neutral-400">open_ui</strong>, <strong className="text-neutral-400">toggle_inventory</strong>, <strong className="text-neutral-400">open_quest_log</strong>, etc. interactions on any scene object.</p>
+                          </div>
+
                           {/* Inventory */}
                           <div className="flex flex-col gap-1 border-b border-neutral-800 pb-2">
                               <span className="text-xs font-bold text-neutral-500 uppercase">
@@ -13289,8 +13337,16 @@ const App: React.FC = () => {
 
                                 <optgroup label="Story & Dialogues">
                                   <option value="dialogue">Start Conversation (Dialogue Tree)</option>
-                                  <option value="set_flag">Trigger Story Event (Flags)</option>
+                                  <option value="set_flag">Set Story Flag</option>
+                                  <option value="clear_flag">Clear Story Flag</option>
+                                  <option value="toggle_flag">Toggle Story Flag</option>
                                   <option value="skill_check">Skill Check (Attributes/Dice)</option>
+                                </optgroup>
+
+                                <optgroup label="Object Visibility">
+                                  <option value="show_object">Show Another Object</option>
+                                  <option value="hide_object">Hide Another Object</option>
+                                  <option value="toggle_object">Toggle Another Object</option>
                                 </optgroup>
 
                                 <optgroup label="Items & Inventory">
@@ -13562,10 +13618,10 @@ const App: React.FC = () => {
                           </div>
                         )}
 
-                        {selectedObject.interaction === "set_flag" && (
+                        {(selectedObject.interaction === "set_flag" || selectedObject.interaction === "clear_flag" || selectedObject.interaction === "toggle_flag") && (
                           <div>
                             <label className="text-sm text-neutral-500">
-                              Select Story Event
+                              {selectedObject.interaction === "set_flag" ? "Set Flag" : selectedObject.interaction === "clear_flag" ? "Clear Flag" : "Toggle Flag"}
                             </label>
                             <select
                               value={selectedObject.interactionData || ""}
@@ -13576,12 +13632,40 @@ const App: React.FC = () => {
                               }
                               className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
                             >
-                              <option value="">Select an event...</option>
+                              <option value="">Select a flag...</option>
                               {(project.gameFlags || []).map((f) => (
                                 <option key={f} value={f}>
                                   {f}
                                 </option>
                               ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {(selectedObject.interaction === "show_object" || selectedObject.interaction === "hide_object" || selectedObject.interaction === "toggle_object") && (
+                          <div>
+                            <label className="text-sm text-neutral-500">
+                              Target Object
+                            </label>
+                            <select
+                              value={selectedObject.interactionData || ""}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  interactionData: e.target.value,
+                                })
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                            >
+                              <option value="">Select object...</option>
+                              {(project.scenes.flatMap((s) => s.objects).concat(
+                                (project.uiMenus || []).flatMap((m) => m.objects)
+                              ))
+                                .filter((o) => o.id !== selectedObject.id)
+                                .map((o) => (
+                                  <option key={o.id} value={o.id}>
+                                    {o.name || o.id}
+                                  </option>
+                                ))}
                             </select>
                           </div>
                         )}
@@ -15808,6 +15892,27 @@ const App: React.FC = () => {
                       <LabelWithHelp
                         label="Block Clicks Below Screen UI"
                         helpText="If checked, clicks inside this UI map's bounds will not pass through to the game scene below. Make the width/height match the stage if you want to block the entire screen!"
+                      />
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={!!scene.closeOnClickOutside}
+                        onChange={(e) =>
+                          pushHistory({
+                            ...project,
+                            uiMenus: (project.uiMenus || []).map((s) =>
+                              s.id === scene.id
+                                ? { ...s, closeOnClickOutside: e.target.checked }
+                                : s,
+                            ),
+                          })
+                        }
+                        className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950"
+                      />
+                      <LabelWithHelp
+                        label="Close When Clicking Outside"
+                        helpText="Dismiss this panel automatically when the player clicks anywhere outside it — great for popup menus opened by custom buttons."
                       />
                     </label>
                   </div>

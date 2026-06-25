@@ -54,6 +54,11 @@ export type InteractionType =
   | "open_relationships"
   | "open_settings"
   | "set_flag"
+  | "clear_flag"
+  | "toggle_flag"
+  | "show_object"
+  | "hide_object"
+  | "toggle_object"
   | "play_cutscene"
   | "restart_scene"
   | "restart_game"
@@ -433,6 +438,7 @@ export interface Scene {
   objects: SceneObject[];
   isOpenByDefault?: boolean;
   blocksClicks?: boolean;
+  closeOnClickOutside?: boolean;
 }
 
 export interface QuestObjective {
@@ -537,6 +543,7 @@ export interface Project {
     dialogueMaxHeightPercent?: number; // default 90
     dialogueMaxWidthPx?: number; // default 672
     typewriterSpeed?: number;
+    hideAllDefaultHud?: boolean;
     hideDefaultInventoryBtn?: boolean;
     hideDefaultCraftingBtn?: boolean;
     hideDefaultQuestLogBtn?: boolean;
