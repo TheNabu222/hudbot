@@ -3857,7 +3857,8 @@ const App: React.FC = () => {
         backgroundColor: "transparent",
         objects: [],
         blocksClicks: false,
-        isOpenByDefault: true,
+        isOpenByDefault: false,
+        closeOnClickOutside: true,
       };
       pushHistory({
         ...project,
@@ -4503,6 +4504,16 @@ const App: React.FC = () => {
                           the canvas.
                         </p>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => fetchFromGitHub("", true)}
+                        disabled={isFetchingGithub}
+                        className="flex w-full items-center justify-center gap-2 rounded border border-cyan-400/60 bg-cyan-500/15 px-3 py-2.5 text-sm font-black text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-50"
+                        title="Re-scan your GitHub repo and refresh all linked assets"
+                      >
+                        <RefreshCw size={14} className={isFetchingGithub ? "animate-spin" : ""} />
+                        {isFetchingGithub ? "Refreshing library…" : "↺ Refresh Library"}
+                      </button>
                       <div className="grid grid-cols-2 gap-2">
                         <label className="flex cursor-pointer items-center justify-center gap-1.5 rounded border border-pink-400/45 bg-pink-500/10 px-2 py-2 text-sm font-bold text-pink-100 hover:bg-pink-500/20">
                           <Upload size={14} /> Add files
@@ -5282,6 +5293,18 @@ const App: React.FC = () => {
                       if (selectedInventoryItemId) {
                         setSelectedInventoryItemId(null);
                         setPreviewDialogue(null);
+                      }
+                      // Close any open UI menus that have closeOnClickOutside
+                      const clickTarget = e.target as HTMLElement;
+                      const isInsideUiMenu = clickTarget.closest(".ui-menu-layer-editor");
+                      if (!isInsideUiMenu) {
+                        const menusToClose = (project.uiMenus || [])
+                          .filter((m) => m.closeOnClickOutside && activeUiMenus.includes(m.id));
+                        if (menusToClose.length > 0) {
+                          setActiveUiMenus((prev) =>
+                            prev.filter((id) => !menusToClose.some((m) => m.id === id))
+                          );
+                        }
                       }
                       return;
                     }
@@ -6297,7 +6320,7 @@ const App: React.FC = () => {
                     return (
                       <div
                         key={`ui-${uiId}-${menuIndex}`}
-                        className={`absolute ${uiMenu.blocksClicks ? "pointer-events-auto" : "pointer-events-none"}`}
+                        className={`ui-menu-layer-editor absolute ${uiMenu.blocksClicks ? "pointer-events-auto" : "pointer-events-none"}`}
                         style={{
                           zIndex: 1000 + menuIndex,
                           backgroundColor: uiMenu.backgroundColor,
@@ -9920,6 +9943,7 @@ const App: React.FC = () => {
                         className="w-full rounded border border-neutral-700 bg-neutral-950 py-2 pl-8 pr-3 text-sm text-white outline-none focus:border-[#00ffcc]"
                       />
                     </div>
+                    <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar pr-0.5">
                     <div className="grid grid-cols-2 gap-2 pb-3">
                       {project.assets
                         .filter((asset) => {
@@ -9931,7 +9955,7 @@ const App: React.FC = () => {
                             ...(asset.tags || []),
                           ].some((value) => value.toLowerCase().includes(query));
                         })
-                        .slice(0, 80)
+                        .slice(0, 200)
                         .map((asset) => (
                           <div
                             key={asset.id}
@@ -9962,6 +9986,7 @@ const App: React.FC = () => {
                             </div>
                           </div>
                         ))}
+                    </div>
                     </div>
                   </div>
                 )}
@@ -15857,6 +15882,7 @@ const App: React.FC = () => {
                     backgroundColor: "transparent",
                     objects: [],
                     blocksClicks: false,
+                    closeOnClickOutside: true,
                   };
                   pushHistory({
                     ...project,

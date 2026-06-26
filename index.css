@@ -293,42 +293,47 @@ body,
     display: flex;
     min-width: 0;
     align-items: stretch;
-    justify-content: flex-end;
-    gap: 0.35rem;
+    justify-content: flex-start;
+    gap: 0.45rem;
     overflow-x: auto;
+    flex-wrap: nowrap;
   }
 
   .studio-subtool {
     display: flex;
     min-width: max-content;
     align-items: center;
-    gap: 0.45rem;
-    padding: 0.35rem 0.65rem;
-    border: 1px solid rgb(52 54 77 / 90%);
-    border-radius: 4px 11px 4px 11px;
-    color: #baa7d1;
+    gap: 0.55rem;
+    padding: 0.45rem 0.9rem;
+    border: 1.5px solid rgb(80 60 110 / 80%);
+    border-radius: 4px 12px 4px 12px;
+    color: #cbb8e0;
     text-align: left;
-    background: rgb(23 29 49 / 76%);
+    background: rgb(28 22 48 / 85%);
     transition: 140ms ease;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 30%);
   }
 
   .studio-subtool:hover {
-    border-color: rgb(0 255 204 / 45%);
+    border-color: rgb(0 255 204 / 55%);
     color: var(--studio-pearl);
+    background: rgb(0 255 204 / 8%);
   }
 
   .studio-subtool.is-active {
     border-color: var(--studio-cyan);
     color: var(--studio-pearl);
-    background: linear-gradient(135deg, rgb(0 255 204 / 14%), rgb(37 92 255 / 12%));
+    background: linear-gradient(135deg, rgb(0 255 204 / 18%), rgb(37 92 255 / 14%));
     box-shadow:
-      inset 0 0 12px rgb(0 255 204 / 6%),
-      0 0 10px rgb(0 255 204 / 9%);
+      inset 0 0 14px rgb(0 255 204 / 8%),
+      0 0 12px rgb(0 255 204 / 12%);
   }
 
   .studio-subtool > svg {
     flex: 0 0 auto;
     color: var(--studio-pink);
+    width: 16px;
+    height: 16px;
   }
 
   .studio-subtool.is-active > svg {
@@ -342,15 +347,16 @@ body,
 
   .studio-subtool strong {
     font-family: "Comic Sans MS", "Comic Sans", cursive;
-    font-size: 0.68rem;
-    line-height: 1.1;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    font-weight: 700;
   }
 
   .studio-subtool small {
-    color: #73627f;
+    color: #7d6890;
     font-family: "Courier New", Courier, monospace;
-    font-size: 0.52rem;
-    line-height: 1.1;
+    font-size: 0.55rem;
+    line-height: 1.2;
   }
 }
 
