@@ -125,7 +125,7 @@ export interface RuntimeGameState {
   collectedObjects: string[];
   activeUiMenus: string[];
   triggeredRuleIds: string[];
-  runtimePositions: Record<string, { x: number; y: number }>;
+  runtimePositions: Record<string, { x?: number; y?: number; hidden?: boolean }>;
   time: number;
   day: number;
 }
