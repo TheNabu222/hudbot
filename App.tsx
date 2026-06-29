@@ -90,6 +90,9 @@ import {
   LoreEntry,
   Faction,
   Companion,
+  Character,
+  RelationshipThreshold,
+  GiftPreference,
 } from "./types";
 import { generateExportHtml } from "./utils/exportHtml";
 import { TEMPLATES } from "./utils/templates";
@@ -470,7 +473,7 @@ const App: React.FC = () => {
   >(null);
   const [itemsTab, setItemsTab] = useState<"items" | "crafting">("items");
   const [rpgTab, setRpgTab] = useState<
-    "quests" | "stats" | "factions" | "lore" | "companions"
+    "quests" | "stats" | "characters" | "factions" | "lore" | "companions"
   >("quests");
   const [playerNeeds, setPlayerNeeds] = useState<Record<string, number>>(() => {
     const defNeeds: Record<string, number> = {};
@@ -8533,14 +8536,51 @@ const App: React.FC = () => {
                             </button>
                           </div>
                           <div className="p-6 overflow-y-auto space-y-4">
+                            {/* Characters */}
+                            {(project.characters || []).length > 0 && (
+                              <>
+                                <h3 className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: uiPrimary }}>Characters</h3>
+                                {project.characters!.map((char) => {
+                                  const affinity = playerFactions[char.id] ?? (char.defaultAffinity || 0);
+                                  const sortedThr = [...(char.thresholds || [])].sort((a, b) => b.value - a.value);
+                                  const activeStage = sortedThr.find((t) => affinity >= t.value);
+                                  const stageLabel = activeStage?.label ?? "Unknown";
+                                  const stageColor = activeStage?.color ?? uiPrimary;
+                                  const portrait = char.portraitAssetId ? project.assets.find((a) => a.id === char.portraitAssetId) : null;
+                                  return (
+                                    <div key={char.id} className="bg-black/20 p-3 rounded border flex gap-3 items-center" style={{ borderColor: `${uiPrimary}20` }}>
+                                      {portrait && (
+                                        <img src={portrait.src} className="w-10 h-10 rounded object-cover shrink-0" alt="" />
+                                      )}
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex justify-between items-center">
+                                          <span className="font-bold" style={{ color: uiPrimary }}>{char.name}</span>
+                                          <span className="text-xs font-bold px-2 py-0.5 rounded" style={{ backgroundColor: stageColor + "33", color: stageColor }}>{stageLabel}</span>
+                                        </div>
+                                        <div className="text-xs mt-1" style={{ color: uiSecondary }}>{char.relationshipTrackName || "Affinity"}: {affinity}</div>
+                                        <div className="mt-1.5 h-1.5 rounded-full bg-black/40 overflow-hidden">
+                                          <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(0, Math.min(100, (affinity + 100) / 2))}%`, backgroundColor: stageColor }} />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                                {(project.factions || []).length > 0 && (
+                                  <h3 className="text-xs font-bold uppercase tracking-widest mt-4 mb-2" style={{ color: uiPrimary }}>Factions</h3>
+                                )}
+                              </>
+                            )}
+                            {/* Factions */}
                             {!project.factions ||
                             project.factions.length === 0 ? (
+                              (project.characters || []).length === 0 && (
                               <p
                                 className="opacity-50 text-center italic"
                                 style={{ color: uiSecondary }}
                               >
                                 No known factions.
                               </p>
+                              )
                             ) : (
                               project.factions.map((faction) => {
                                 const affinity =
@@ -16178,6 +16218,12 @@ const App: React.FC = () => {
                     Skills & Needs
                   </button>
                   <button
+                    onClick={() => setRpgTab("characters")}
+                    className={`studio-tab ${rpgTab === "characters" ? "is-active" : ""}`}
+                  >
+                    Characters
+                  </button>
+                  <button
                     onClick={() => setRpgTab("factions")}
                     className={`studio-tab ${rpgTab === "factions" ? "is-active" : ""}`}
                   >
@@ -16490,6 +16536,347 @@ const App: React.FC = () => {
                           </div>
                         )}
                       </div>
+                    </div>
+                  </>
+                )}
+
+                {rpgTab === "characters" && (
+                  <>
+                    <div className="mt-8 flex items-center justify-between mb-2">
+                      <h2 className="text-xl font-bold text-cyan-400">Characters</h2>
+                      <button
+                        className="rounded border border-cyan-400/50 bg-cyan-500/10 px-3 py-1.5 font-comic text-xs font-bold text-cyan-200 hover:bg-cyan-500/20"
+                        onClick={() => {
+                          const newChar: Character = {
+                            id: uuidv4(),
+                            name: "New Character",
+                            description: "",
+                            relationshipTrackName: "Affinity",
+                            defaultAffinity: 0,
+                            thresholds: [
+                              { value: -100, label: "Hostile", color: "#ef4444" },
+                              { value: -30, label: "Unfriendly", color: "#f97316" },
+                              { value: -10, label: "Wary", color: "#eab308" },
+                              { value: 10, label: "Neutral", color: "#9ca3af" },
+                              { value: 30, label: "Friendly", color: "#22c55e" },
+                              { value: 60, label: "Trusted", color: "#00ffcc" },
+                            ],
+                            giftPreferences: [],
+                          };
+                          setProject((p) => ({
+                            ...p,
+                            characters: [...(p.characters || []), newChar],
+                          }));
+                        }}
+                      >
+                        + Add Character
+                      </button>
+                    </div>
+
+                    {(project.characters || []).length === 0 && (
+                      <p className="text-neutral-500 italic text-sm py-4">
+                        No characters yet. Add NPCs, creatures, and companions here to track relationships and gift preferences.
+                      </p>
+                    )}
+
+                    <div className="flex flex-col gap-4">
+                      {(project.characters || []).map((char) => {
+                        const portrait = char.portraitAssetId
+                          ? project.assets.find((a) => a.id === char.portraitAssetId)
+                          : null;
+                        return (
+                          <div
+                            key={char.id}
+                            className="rounded-lg border border-neutral-800 bg-neutral-900 p-4 flex flex-col gap-3"
+                          >
+                            <div className="flex gap-3 items-start">
+                              {/* Portrait */}
+                              <button
+                                type="button"
+                                className="w-16 h-16 rounded border border-neutral-700 bg-neutral-800 flex items-center justify-center shrink-0 overflow-hidden hover:border-cyan-400/50"
+                                onClick={() =>
+                                  setAssetPickerCb({
+                                    title: "Choose Portrait",
+                                    filterType: "image",
+                                    onSelect: (id) => {
+                                      setProject((p) => ({
+                                        ...p,
+                                        characters: (p.characters || []).map((c) =>
+                                          c.id === char.id ? { ...c, portraitAssetId: id } : c
+                                        ),
+                                      }));
+                                      setAssetPickerCb(null);
+                                    },
+                                  })
+                                }
+                                title="Set portrait"
+                              >
+                                {portrait ? (
+                                  <img src={portrait.src} className="w-full h-full object-cover" alt="" />
+                                ) : (
+                                  <span className="text-neutral-600 text-xs text-center leading-tight px-1">portrait</span>
+                                )}
+                              </button>
+
+                              <div className="flex-1 flex flex-col gap-2">
+                                <div className="flex gap-2 items-center">
+                                  <input
+                                    className="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm font-bold text-white outline-none focus:border-cyan-400"
+                                    value={char.name}
+                                    onChange={(e) =>
+                                      setProject((p) => ({
+                                        ...p,
+                                        characters: (p.characters || []).map((c) =>
+                                          c.id === char.id ? { ...c, name: e.target.value } : c
+                                        ),
+                                      }))
+                                    }
+                                    placeholder="Character name"
+                                  />
+                                  <button
+                                    className="text-neutral-600 hover:text-red-400 px-1"
+                                    onClick={() =>
+                                      setProject((p) => ({
+                                        ...p,
+                                        characters: (p.characters || []).filter((c) => c.id !== char.id),
+                                      }))
+                                    }
+                                    title="Delete character"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                                <input
+                                  className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs text-neutral-300 outline-none focus:border-cyan-400"
+                                  value={char.description || ""}
+                                  onChange={(e) =>
+                                    setProject((p) => ({
+                                      ...p,
+                                      characters: (p.characters || []).map((c) =>
+                                        c.id === char.id ? { ...c, description: e.target.value } : c
+                                      ),
+                                    }))
+                                  }
+                                  placeholder="Brief description or role…"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Relationship track */}
+                            <div className="flex gap-2 items-center">
+                              <label className="text-xs text-neutral-400 shrink-0">Track label:</label>
+                              <input
+                                className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs text-cyan-200 outline-none focus:border-cyan-400 w-32"
+                                value={char.relationshipTrackName || "Affinity"}
+                                onChange={(e) =>
+                                  setProject((p) => ({
+                                    ...p,
+                                    characters: (p.characters || []).map((c) =>
+                                      c.id === char.id ? { ...c, relationshipTrackName: e.target.value } : c
+                                    ),
+                                  }))
+                                }
+                                placeholder="Affinity"
+                              />
+                              <label className="text-xs text-neutral-400 shrink-0 ml-2">Default:</label>
+                              <input
+                                type="number"
+                                className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs text-neutral-200 outline-none focus:border-cyan-400 w-16"
+                                value={char.defaultAffinity ?? 0}
+                                onChange={(e) =>
+                                  setProject((p) => ({
+                                    ...p,
+                                    characters: (p.characters || []).map((c) =>
+                                      c.id === char.id ? { ...c, defaultAffinity: Number(e.target.value) } : c
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+
+                            {/* Thresholds */}
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[11px] font-bold uppercase tracking-widest text-neutral-500">Relationship Stages</span>
+                                <button
+                                  className="text-[10px] text-cyan-400 hover:text-cyan-200"
+                                  onClick={() =>
+                                    setProject((p) => ({
+                                      ...p,
+                                      characters: (p.characters || []).map((c) =>
+                                        c.id === char.id
+                                          ? { ...c, thresholds: [...(c.thresholds || []), { value: 50, label: "Stage" }] }
+                                          : c
+                                      ),
+                                    }))
+                                  }
+                                >
+                                  + add stage
+                                </button>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                {(char.thresholds || []).map((thr, ti) => (
+                                  <div key={ti} className="flex gap-2 items-center">
+                                    <input
+                                      type="number"
+                                      className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs w-16 outline-none"
+                                      value={thr.value}
+                                      onChange={(e) =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? { ...c, thresholds: (c.thresholds || []).map((t, i) => i === ti ? { ...t, value: Number(e.target.value) } : t) }
+                                              : c
+                                          ),
+                                        }))
+                                      }
+                                    />
+                                    <input
+                                      className="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs outline-none text-white"
+                                      value={thr.label}
+                                      onChange={(e) =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? { ...c, thresholds: (c.thresholds || []).map((t, i) => i === ti ? { ...t, label: e.target.value } : t) }
+                                              : c
+                                          ),
+                                        }))
+                                      }
+                                      placeholder="Label…"
+                                    />
+                                    <input
+                                      type="color"
+                                      className="w-6 h-6 rounded border-0 bg-transparent cursor-pointer"
+                                      value={thr.color || "#9ca3af"}
+                                      onChange={(e) =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? { ...c, thresholds: (c.thresholds || []).map((t, i) => i === ti ? { ...t, color: e.target.value } : t) }
+                                              : c
+                                          ),
+                                        }))
+                                      }
+                                    />
+                                    <button
+                                      className="text-neutral-600 hover:text-red-400"
+                                      onClick={() =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? { ...c, thresholds: (c.thresholds || []).filter((_, i) => i !== ti) }
+                                              : c
+                                          ),
+                                        }))
+                                      }
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Gift Preferences */}
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[11px] font-bold uppercase tracking-widest text-neutral-500">Gift Preferences</span>
+                                <button
+                                  className="text-[10px] text-pink-400 hover:text-pink-200"
+                                  onClick={() =>
+                                    setProject((p) => ({
+                                      ...p,
+                                      characters: (p.characters || []).map((c) =>
+                                        c.id === char.id
+                                          ? { ...c, giftPreferences: [...(c.giftPreferences || []), { itemId: "", change: 10, reactionText: "" }] }
+                                          : c
+                                      ),
+                                    }))
+                                  }
+                                >
+                                  + add preference
+                                </button>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                {(char.giftPreferences || []).map((gift, gi) => (
+                                  <div key={gi} className="flex gap-2 items-center">
+                                    <select
+                                      className="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs outline-none"
+                                      value={gift.itemId}
+                                      onChange={(e) =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? { ...c, giftPreferences: (c.giftPreferences || []).map((g, i) => i === gi ? { ...g, itemId: e.target.value } : g) }
+                                              : c
+                                          ),
+                                        }))
+                                      }
+                                    >
+                                      <option value="">— pick item —</option>
+                                      {project.inventoryItems.map((item) => (
+                                        <option key={item.id} value={item.id}>{item.name}</option>
+                                      ))}
+                                    </select>
+                                    <input
+                                      type="number"
+                                      className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs w-16 outline-none"
+                                      title="Relationship change"
+                                      value={gift.change}
+                                      onChange={(e) =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? { ...c, giftPreferences: (c.giftPreferences || []).map((g, i) => i === gi ? { ...g, change: Number(e.target.value) } : g) }
+                                              : c
+                                          ),
+                                        }))
+                                      }
+                                    />
+                                    <input
+                                      className="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs outline-none text-white"
+                                      value={gift.reactionText || ""}
+                                      placeholder="Reaction dialogue…"
+                                      onChange={(e) =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? { ...c, giftPreferences: (c.giftPreferences || []).map((g, i) => i === gi ? { ...g, reactionText: e.target.value } : g) }
+                                              : c
+                                          ),
+                                        }))
+                                      }
+                                    />
+                                    <button
+                                      className="text-neutral-600 hover:text-red-400"
+                                      onClick={() =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? { ...c, giftPreferences: (c.giftPreferences || []).filter((_, i) => i !== gi) }
+                                              : c
+                                          ),
+                                        }))
+                                      }
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </>
                 )}

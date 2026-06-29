@@ -65,6 +65,7 @@ export type InteractionType =
   | "toggle_fullscreen"
   | "toggle_mute"
   | "advance_day"
+  | "gift_item"
   | "exit_game";
 export type BlendMode =
   | "normal"
@@ -512,6 +513,30 @@ export interface Faction {
   defaultAffinity: number;
 }
 
+export interface RelationshipThreshold {
+  value: number;    // min value for this label (ascending)
+  label: string;    // e.g. "Stranger", "Acquaintance", "Friend", "Beloved"
+  color?: string;   // optional CSS color
+}
+
+export interface GiftPreference {
+  itemId: string;
+  change: number;          // relationship change amount (positive or negative)
+  reactionText?: string;   // dialogue line shown when gifted
+}
+
+export interface Character {
+  id: string;
+  name: string;
+  portraitAssetId?: string;
+  factionId?: string;
+  description?: string;
+  relationshipTrackName?: string;  // e.g. "Trust", "Affection" (defaults to "Affinity")
+  defaultAffinity?: number;
+  thresholds?: RelationshipThreshold[];
+  giftPreferences?: GiftPreference[];
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -529,6 +554,7 @@ export interface Project {
   loreEntries?: LoreEntry[];
   factions?: Faction[];
   companions?: Companion[];
+  characters?: Character[];
   prefabs?: SceneObject[];
   globalSettings: {
     useDayNightCycle: boolean;
