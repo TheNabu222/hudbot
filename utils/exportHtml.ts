@@ -968,6 +968,7 @@ export function generateExportHtml(project: Project): string {
       const gamePositioner = document.getElementById('game-positioner');
 
       if (state.currentSceneId) {
+        state.flags['visited_scene_' + state.currentSceneId] = true;
         document.querySelectorAll('.game-scene').forEach(el => {
           el.style.display = el.id === 'scene-' + state.currentSceneId ? 'block' : 'none';
         });
@@ -1067,6 +1068,8 @@ export function generateExportHtml(project: Project): string {
       window.startDialogue = (treeId) => {
         const tree = dialogueTrees.find(t => t.id === treeId);
         if (tree && tree.startNodeId) {
+          state.flags['talked_' + treeId] = true;
+          saveGame();
           showDialogueNode(tree, tree.startNodeId);
         }
       };
@@ -1312,14 +1315,16 @@ export function generateExportHtml(project: Project): string {
           ? `
         setInterval(() => {
           state.time += 0.1;
-          if (state.time >= 24) state.time = 0;
-          
+          if (state.time >= 24) {
+            state.time = 0;
+            state.day = (state.day || 1) + 1;
+            triggerDayReset();
+          }
+
           let filter = 'brightness(1)';
           if (state.time > 18 || state.time < 6) {
-            // Night
             filter = 'brightness(0.5) sepia(0.3) hue-rotate(180deg)';
           } else if (state.time > 16) {
-            // Sunset
             filter = 'brightness(0.8) sepia(0.5) hue-rotate(-20deg)';
           }
           document.documentElement.style.setProperty('--time-filter', filter);
@@ -1328,7 +1333,7 @@ export function generateExportHtml(project: Project): string {
           if (timeDisplay) {
             const h = Math.floor(state.time).toString().padStart(2, "0");
             const m = Math.floor((state.time % 1) * 60).toString().padStart(2, "0");
-            timeDisplay.innerText = h + ":" + m;
+            timeDisplay.innerText = 'Day ' + (state.day || 1) + ' · ' + h + ':' + m;
           }
         }, 1000);
       `
@@ -1603,12 +1608,20 @@ export function generateExportHtml(project: Project): string {
                 targetEl.style.visibility = isHidden ? 'visible' : 'hidden';
               }
             }
+          } else if (interaction === 'advance_day') {
+            state.day = (state.day || 1) + 1;
+            state.time = 8;
+            triggerDayReset();
+            const td = document.getElementById('time-display');
+            if (td) td.innerText = 'Day ' + state.day + ' · 08:00';
+            showSimpleDialogue('A new day begins. Day ' + state.day + '.', 'System');
           } else if (interaction === 'scene_change') {
             document.querySelectorAll('.game-scene').forEach(el => el.style.display = 'none');
             const targetScene = document.getElementById('scene-' + data);
             if (targetScene) {
               targetScene.style.display = 'block';
               state.currentSceneId = data;
+              state.flags['visited_scene_' + data] = true;
               playBgm(targetScene.getAttribute('data-bgm') || null);
             } else {
               dialogueBox.innerHTML = 'Error: Cannot load scene ' + data;
@@ -1918,6 +1931,20 @@ export function generateExportHtml(project: Project): string {
         }
       };
 
+      // Called at midnight each continuous cycle, or when advance_day fires
+      window.triggerDayReset = () => {
+        // Clear per-day flags (flags prefixed with "daily_")
+        Object.keys(state.flags).forEach(k => {
+          if (k.startsWith('daily_')) delete state.flags[k];
+        });
+        // Re-show objects that use the daily respawn pattern (data-daily-respawn attribute)
+        document.querySelectorAll('[data-daily-respawn="true"]').forEach(el => {
+          el.style.visibility = 'visible';
+          el.style.display = '';
+        });
+        saveGame();
+      };
+
       window.buildQuestLog = () => {
         const questList = document.getElementById('quest-list');
         if (!questList) return;
@@ -1945,8 +1972,11 @@ export function generateExportHtml(project: Project): string {
               html += \`<div style="font-size: 12px; font-weight: bold; text-transform: uppercase; color: var(--ui-primary); margin-bottom: 8px;">Objectives</div>\`;
               q.objectives.forEach(obj => {
                  let isDone = false;
-                 if (obj.type === 'custom_flag' && state.flags[obj.targetId]) isDone = true;
-                 if (obj.type === 'collect_item' && state.inventory.includes(obj.targetId)) isDone = true;
+                 if (obj.type === 'custom_flag') isDone = !!state.flags[obj.targetId];
+                 if (obj.type === 'collect_item') isDone = state.inventory.includes(obj.targetId);
+                 if (obj.type === 'reach_scene') isDone = !!state.flags['visited_scene_' + obj.targetId];
+                 if (obj.type === 'talk_to') isDone = !!state.flags['talked_' + obj.targetId];
+                 if (obj.type === 'skill_check') isDone = (state.skills[obj.targetId] || 0) >= (obj.requiredAmount || 1);
                  
                  html += \`<div style="margin-bottom: 4px; display: flex; align-items: center; gap: 8px; font-size: 13px;">
                     <div style="width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ui-primary); background: \${isDone ? 'var(--ui-primary)' : 'transparent'};"></div>

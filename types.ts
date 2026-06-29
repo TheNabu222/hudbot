@@ -64,6 +64,7 @@ export type InteractionType =
   | "restart_game"
   | "toggle_fullscreen"
   | "toggle_mute"
+  | "advance_day"
   | "exit_game";
 export type BlendMode =
   | "normal"

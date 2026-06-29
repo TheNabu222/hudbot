@@ -3322,6 +3322,14 @@ const App: React.FC = () => {
       // In a real implementation this would toggle a global volume state,
       // but without a global audio context we can just mock it or toggle a player flag
       setPreviewDialogue("Audio mute toggled.");
+    } else if (obj.interaction === "advance_day") {
+      setPlayerFlags((prev) => {
+        const next = { ...prev };
+        // clear daily_ flags
+        Object.keys(next).forEach((k) => { if (k.startsWith("daily_")) delete next[k]; });
+        return next;
+      });
+      setPreviewDialogue("A new day begins.");
     } else if (obj.interaction === "exit_game") {
       setIsPlaying(false);
     } else if (obj.interaction === "open_crafting") {
@@ -13595,6 +13603,7 @@ const App: React.FC = () => {
                                   <option value="load_game">Load Game State</option>
                                   <option value="restart_scene">Restart Current Region</option>
                                   <option value="restart_game">Restart Full Game</option>
+                                  <option value="advance_day">Advance to Next Day</option>
                                   <option value="toggle_fullscreen">Toggle Fullscreen</option>
                                   <option value="toggle_mute">Toggle Audio Mute</option>
                                   <option value="exit_game">Close Game Execution</option>
