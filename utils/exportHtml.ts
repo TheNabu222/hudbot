@@ -427,7 +427,7 @@ export function generateExportHtml(project: Project): string {
     }
     #inventory-overlay {
       display: none;
-      position: absolute;
+      position: fixed;
       inset: 0;
       background: rgba(0,0,0,0.6);
       pointer-events: auto;
@@ -2207,36 +2207,6 @@ export function generateExportHtml(project: Project): string {
             : ""
         }
 
-      <div id="inventory-overlay" onclick="toggleInventory()">
-        <div class="inventory-box" onclick="event.stopPropagation()">
-          <div class="inventory-header">
-            <h2>
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M8 21v-5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v5"/><path d="M8 10h8"/><path d="M8 14h8"/></svg>
-              Inventory
-            </h2>
-            <button class="close-btn" onclick="toggleInventory()">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
-          </div>
-          <div class="inventory-content">
-            <div id="inventory-list"></div>
-          </div>
-        </div>
-      </div>
-      
-      <div id="quest-overlay" onclick="toggleQuestLog()" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100000; padding: 20px;">
-        <div class="inventory-box" onclick="event.stopPropagation()" style="max-height: 80%; max-width: 600px; margin: auto;">
-          <div class="inventory-header">
-            <h2>Quest Log</h2>
-            <button class="close-btn" onclick="toggleQuestLog()">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
-          </div>
-          <div class="inventory-content" style="overflow-y: auto;">
-            <div id="quest-list"></div>
-          </div>
-        </div>
-      </div>
       
       ${project.globalSettings?.enableNeeds ? `<div id="needs-tracker">
         ${(project.globalSettings.customNeeds?.length ? project.globalSettings.customNeeds : ['rest', 'hunger', 'connection', 'spiritual', 'novelty']).map(need => 
@@ -2260,6 +2230,39 @@ export function generateExportHtml(project: Project): string {
   </div> <!-- Close game-layout-resizer -->
   ${project.globalSettings?.dialoguePosition === 'below' ? '<div id="dialogue-box"></div>' : ''}
   </div> <!-- Close scale-wrapper -->
+
+  <!-- Inventory and quest overlays live outside the scaled game space so they're never squished by device-frame transforms -->
+  <div id="inventory-overlay" onclick="toggleInventory()">
+    <div class="inventory-box" onclick="event.stopPropagation()">
+      <div class="inventory-header">
+        <h2>
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M8 21v-5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v5"/><path d="M8 10h8"/><path d="M8 14h8"/></svg>
+          Inventory
+        </h2>
+        <button class="close-btn" onclick="toggleInventory()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="inventory-content">
+        <div id="inventory-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="quest-overlay" onclick="toggleQuestLog()" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100000; padding: 20px;">
+    <div class="inventory-box" onclick="event.stopPropagation()" style="max-height: 80%; max-width: 600px; margin: auto;">
+      <div class="inventory-header">
+        <h2>Quest Log</h2>
+        <button class="close-btn" onclick="toggleQuestLog()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="inventory-content" style="overflow-y: auto;">
+        <div id="quest-list"></div>
+      </div>
+    </div>
+  </div>
+
   <script id="__GAME_DATA__" type="application/json">${JSON.stringify(strippedProject).split("</script>").join("<\\/script>").split("</SCRIPT>").join("<\\/script>")}</script>
   <script>${js}</script>
 </body>

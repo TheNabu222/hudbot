@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import ReactDOM from "react-dom";
 import { v4 as uuidv4 } from "uuid";
 import {
   Play,
@@ -7982,10 +7983,11 @@ const App: React.FC = () => {
                     )}
 
                     {/* Inventory Modal */}
-                    {isInventoryOpen && (
+                    {isInventoryOpen && ReactDOM.createPortal(
                       <div
-                        className="absolute inset-0 bg-black/60 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="fixed inset-0 bg-black/60 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
                         onClick={() => setIsInventoryOpen(false)}
+                        onPointerDown={(e) => e.stopPropagation()}
                       >
                         <div
                           className="max-w-3xl w-full max-h-[80%] flex flex-col shadow-2xl overflow-hidden border-2"
@@ -8306,13 +8308,15 @@ const App: React.FC = () => {
                             )}
                           </div>
                         </div>
-                      </div>
+                      </div>,
+                      document.body
                     )}
                     {/* Skills Modal */}
-                    {isSkillsOpen && (
+                    {isSkillsOpen && ReactDOM.createPortal(
                       <div
-                        className="absolute inset-0 bg-black/60 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="fixed inset-0 bg-black/60 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
                         onClick={() => setIsSkillsOpen(false)}
+                        onPointerDown={(e) => e.stopPropagation()}
                       >
                         <div
                           className="max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
@@ -8394,14 +8398,16 @@ const App: React.FC = () => {
                             )}
                           </div>
                         </div>
-                      </div>
+                      </div>,
+                      document.body
                     )}
 
                     {/* Almanac Modal */}
-                    {isAlmanacOpen && (
+                    {isAlmanacOpen && ReactDOM.createPortal(
                       <div
-                        className="absolute inset-0 bg-black/60 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="fixed inset-0 bg-black/60 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
                         onClick={() => setIsAlmanacOpen(false)}
+                        onPointerDown={(e) => e.stopPropagation()}
                       >
                         <div
                           className="max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
@@ -8476,14 +8482,16 @@ const App: React.FC = () => {
                             })()}
                           </div>
                         </div>
-                      </div>
+                      </div>,
+                      document.body
                     )}
 
                     {/* Relationships Modal */}
-                    {isRelationshipsOpen && (
+                    {isRelationshipsOpen && ReactDOM.createPortal(
                       <div
-                        className="absolute inset-0 bg-black/60 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="fixed inset-0 bg-black/60 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
                         onClick={() => setIsRelationshipsOpen(false)}
+                        onPointerDown={(e) => e.stopPropagation()}
                       >
                         <div
                           className="max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
@@ -8592,14 +8600,16 @@ const App: React.FC = () => {
                             )}
                           </div>
                         </div>
-                      </div>
+                      </div>,
+                      document.body
                     )}
 
                     {/* Settings Modal */}
-                    {isSettingsOpen && (
+                    {isSettingsOpen && ReactDOM.createPortal(
                       <div
-                        className="absolute inset-0 bg-black/80 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="fixed inset-0 bg-black/80 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
                         onClick={() => setIsSettingsOpen(false)}
+                        onPointerDown={(e) => e.stopPropagation()}
                       >
                         <div
                           className="max-w-md w-full flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
@@ -8700,14 +8710,16 @@ const App: React.FC = () => {
                             </button>
                           </div>
                         </div>
-                      </div>
+                      </div>,
+                      document.body
                     )}
 
                     {/* Crafting Modal */}
-                    {isCraftingOpen && (
+                    {isCraftingOpen && ReactDOM.createPortal(
                       <div
-                        className="absolute inset-0 bg-black/60 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="fixed inset-0 bg-black/60 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
                         onClick={() => setIsCraftingOpen(false)}
+                        onPointerDown={(e) => e.stopPropagation()}
                       >
                         <div
                           className="max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
@@ -9038,14 +9050,16 @@ const App: React.FC = () => {
                             </div>
                           </div>
                         </div>
-                      </div>
+                      </div>,
+                      document.body
                     )}
 
                     {/* Quest Log Modal */}
-                    {isQuestLogOpen && (
+                    {isQuestLogOpen && ReactDOM.createPortal(
                       <div
-                        className="absolute inset-0 bg-black/60 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="fixed inset-0 bg-black/60 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
                         onClick={() => setIsQuestLogOpen(false)}
+                        onPointerDown={(e) => e.stopPropagation()}
                       >
                         <div
                           className="max-w-3xl w-full max-h-[80%] flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
@@ -9226,7 +9240,8 @@ const App: React.FC = () => {
                             )}
                           </div>
                         </div>
-                      </div>
+                      </div>,
+                      document.body
                     )}
                   </>
                 )}
