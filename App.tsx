@@ -3872,6 +3872,58 @@ const App: React.FC = () => {
     deviceFrame?.outerHeight,
     deviceFrame?.outerWidth,
   ]);
+
+  // Auto-complete quests when all objectives are met and apply rewards
+  useEffect(() => {
+    if (!isPlaying) return;
+    const allQuests = project.quests || [];
+    const nowComplete: string[] = [];
+    activeQuests.forEach((qId) => {
+      if (completedQuests.includes(qId)) return;
+      const quest = allQuests.find((q) => q.id === qId);
+      if (!quest || !quest.objectives || quest.objectives.length === 0) return;
+      const allDone = quest.objectives.every((obj) => {
+        if (obj.type === "custom_flag" || obj.type === "talk_to")
+          return playerFlags.includes(obj.targetId);
+        if (obj.type === "collect_item")
+          return playerInventory.includes(obj.targetId);
+        if (obj.type === "reach_scene")
+          return project.currentSceneId === obj.targetId;
+        if (obj.type === "skill_check")
+          return (playerSkills[obj.targetId] || 0) >= (obj.requiredAmount || 1);
+        return false;
+      });
+      if (allDone) nowComplete.push(qId);
+    });
+    if (nowComplete.length === 0) return;
+    setActiveQuests((prev) => prev.filter((id) => !nowComplete.includes(id)));
+    setCompletedQuests((prev) => [...prev, ...nowComplete]);
+    // Apply rewards
+    nowComplete.forEach((qId) => {
+      const quest = allQuests.find((q) => q.id === qId);
+      if (!quest) return;
+      (quest.rewards || []).forEach((reward) => {
+        if (reward.type === "give_item") {
+          setPlayerInventory((prev) =>
+            prev.includes(reward.targetId) ? prev : [...prev, reward.targetId],
+          );
+        } else if (reward.type === "set_flag") {
+          setPlayerFlags((prev) =>
+            prev.includes(reward.targetId) ? prev : [...prev, reward.targetId],
+          );
+        } else if (reward.type === "modify_status") {
+          setPlayerNeeds((prev) => ({
+            ...prev,
+            [reward.targetId]: Math.max(
+              0,
+              Math.min(100, (prev[reward.targetId] ?? 50) + (reward.amount || 0)),
+            ),
+          }));
+        }
+      });
+    });
+  }, [isPlaying, activeQuests, completedQuests, playerFlags, playerInventory, playerSkills, project.currentSceneId, project.quests]);
+
   const openScreenControlsEditor = () => {
     const existingMenu =
       (project.uiMenus || []).find(
@@ -7625,7 +7677,7 @@ const App: React.FC = () => {
                     )}
 
                     {/* HUD Button Bar */}
-                    {!hideEditorHud && (
+                    {!hideEditorHud && !project.globalSettings.hideAllDefaultHud && (
                       <div
                         onClick={() => {
                           if (didDragRef.current) return;
@@ -9202,7 +9254,7 @@ const App: React.FC = () => {
                                     .length;
                                   (quest.objectives || []).forEach((obj) => {
                                     if (
-                                      obj.type === "custom_flag" &&
+                                      (obj.type === "custom_flag" || obj.type === "talk_to") &&
                                       playerFlags.includes(obj.targetId)
                                     )
                                       completedObjs++;
@@ -9214,6 +9266,11 @@ const App: React.FC = () => {
                                     if (
                                       obj.type === "reach_scene" &&
                                       project.currentSceneId === obj.targetId
+                                    )
+                                      completedObjs++;
+                                    if (
+                                      obj.type === "skill_check" &&
+                                      (playerSkills[obj.targetId] || 0) >= (obj.requiredAmount || 1)
                                     )
                                       completedObjs++;
                                   });
@@ -9258,7 +9315,7 @@ const App: React.FC = () => {
                                           {quest.objectives.map((obj) => {
                                             let isObjDone = false;
                                             if (
-                                              obj.type === "custom_flag" &&
+                                              (obj.type === "custom_flag" || obj.type === "talk_to") &&
                                               playerFlags.includes(obj.targetId)
                                             )
                                               isObjDone = true;
@@ -9273,6 +9330,11 @@ const App: React.FC = () => {
                                               obj.type === "reach_scene" &&
                                               project.currentSceneId ===
                                                 obj.targetId
+                                            )
+                                              isObjDone = true;
+                                            if (
+                                              obj.type === "skill_check" &&
+                                              (playerSkills[obj.targetId] || 0) >= (obj.requiredAmount || 1)
                                             )
                                               isObjDone = true;
                                             return (

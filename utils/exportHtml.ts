@@ -1153,11 +1153,42 @@ export function generateExportHtml(project: Project): string {
             if (reward.targetId) state.flags[reward.targetId] = true;
           } else if (reward.type === 'modify_status') {
             if (reward.targetId) {
-              state.skills[reward.targetId] = Math.min(20, (state.skills[reward.targetId] || 0) + (reward.amount || 1));
-              updateSkillsUI();
+              if (reward.targetId in state.needs) {
+                state.needs[reward.targetId] = Math.max(0, Math.min(100, (state.needs[reward.targetId] || 0) + (reward.amount || 0)));
+                updateNeedsUI();
+              } else {
+                state.skills[reward.targetId] = Math.min(20, (state.skills[reward.targetId] || 0) + (reward.amount || 1));
+                updateSkillsUI();
+              }
             }
           }
         });
+        saveGame();
+      };
+
+      const checkQuestAutoComplete = () => {
+        const toComplete = [];
+        state.activeQuests.forEach(qId => {
+          const q = (gameData.quests || []).find(q => q.id === qId);
+          if (!q || !q.objectives || q.objectives.length === 0) return;
+          const allDone = q.objectives.every(obj => {
+            if (obj.type === 'custom_flag' || obj.type === 'talk_to') return !!state.flags[obj.targetId];
+            if (obj.type === 'collect_item') return state.inventory.includes(obj.targetId);
+            if (obj.type === 'reach_scene') return state.currentSceneId === obj.targetId || !!state.flags['visited_scene_' + obj.targetId];
+            if (obj.type === 'skill_check') return (state.skills[obj.targetId] || 0) >= (obj.requiredAmount || 1);
+            return false;
+          });
+          if (allDone) toComplete.push(qId);
+        });
+        if (toComplete.length === 0) return;
+        toComplete.forEach(qId => {
+          state.activeQuests = state.activeQuests.filter(id => id !== qId);
+          state.completedQuests.push(qId);
+          const q = (gameData.quests || []).find(q => q.id === qId);
+          showSimpleDialogue('Quest Completed: ' + (q ? q.name : qId), 'System');
+          applyQuestRewards(qId);
+        });
+        buildQuestLog();
         saveGame();
       };
 
@@ -1198,6 +1229,7 @@ export function generateExportHtml(project: Project): string {
           state.skills[choice.grantSkillId] = Math.min(20, (state.skills[choice.grantSkillId] || 0) + amt);
           showSimpleDialogue('+' + amt + ' ' + choice.grantSkillId + '!', 'System');
           updateSkillsUI();
+          checkQuestAutoComplete();
         }
         if (choice.needsEffect) {
           for (const [key, val] of Object.entries(choice.needsEffect)) {
@@ -1225,7 +1257,9 @@ export function generateExportHtml(project: Project): string {
           if (targetScene) {
             targetScene.style.display = 'block';
             state.currentSceneId = choice.changeSceneId;
+            state.flags['visited_scene_' + choice.changeSceneId] = true;
             playBgm(targetScene.getAttribute('data-bgm') || null);
+            checkQuestAutoComplete();
           }
         } else if (choice.nextNodeId) {
           showDialogueNode(activeDialogue.tree, choice.nextNodeId);
@@ -1488,6 +1522,7 @@ export function generateExportHtml(project: Project): string {
             state.skills[grantSkill] = Math.min(20, (state.skills[grantSkill] || 0) + amount);
             showSimpleDialogue(\`Gained +\${amount} \${grantSkill}!\`, "System");
             updateSkillsUI();
+            checkQuestAutoComplete();
             saveGame();
           }
 
@@ -1512,6 +1547,8 @@ export function generateExportHtml(project: Project): string {
             if (giveItemId && !state.inventory.includes(giveItemId)) {
               state.inventory.push(giveItemId);
               showSimpleDialogue("You obtained an item!", "System");
+              updateInventoryUI();
+              checkQuestAutoComplete();
             }
             if (interaction === 'collect') {
               obj.style.display = 'none';
@@ -1577,6 +1614,7 @@ export function generateExportHtml(project: Project): string {
           } else if (interaction === 'set_flag') {
             if (data) {
               state.flags[data] = true;
+              checkQuestAutoComplete();
               saveGame();
             }
           } else if (interaction === 'clear_flag') {
@@ -1623,6 +1661,8 @@ export function generateExportHtml(project: Project): string {
               state.currentSceneId = data;
               state.flags['visited_scene_' + data] = true;
               playBgm(targetScene.getAttribute('data-bgm') || null);
+              checkQuestAutoComplete();
+              saveGame();
             } else {
               dialogueBox.innerHTML = 'Error: Cannot load scene ' + data;
               dialogueBox.style.display = 'block';
@@ -2140,10 +2180,9 @@ export function generateExportHtml(project: Project): string {
               html += \`<div style="font-size: 12px; font-weight: bold; text-transform: uppercase; color: var(--ui-primary); margin-bottom: 8px;">Objectives</div>\`;
               q.objectives.forEach(obj => {
                  let isDone = false;
-                 if (obj.type === 'custom_flag') isDone = !!state.flags[obj.targetId];
+                 if (obj.type === 'custom_flag' || obj.type === 'talk_to') isDone = !!state.flags[obj.targetId];
                  if (obj.type === 'collect_item') isDone = state.inventory.includes(obj.targetId);
-                 if (obj.type === 'reach_scene') isDone = !!state.flags['visited_scene_' + obj.targetId];
-                 if (obj.type === 'talk_to') isDone = !!state.flags['talked_' + obj.targetId];
+                 if (obj.type === 'reach_scene') isDone = state.currentSceneId === obj.targetId || !!state.flags['visited_scene_' + obj.targetId];
                  if (obj.type === 'skill_check') isDone = (state.skills[obj.targetId] || 0) >= (obj.requiredAmount || 1);
                  
                  html += \`<div style="margin-bottom: 4px; display: flex; align-items: center; gap: 8px; font-size: 13px;">
