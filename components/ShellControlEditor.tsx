@@ -95,6 +95,31 @@ const shellDestinations: Array<{
     label: "Settings",
     detail: "Open player settings",
   },
+  {
+    interaction: "save_game",
+    label: "Save Game",
+    detail: "Save the current game state",
+  },
+  {
+    interaction: "advance_day",
+    label: "Advance Day",
+    detail: "Move to the next in-game day",
+  },
+  {
+    interaction: "toggle_fullscreen",
+    label: "Fullscreen",
+    detail: "Toggle browser fullscreen",
+  },
+  {
+    interaction: "toggle_mute",
+    label: "Mute / Unmute",
+    detail: "Toggle all game audio",
+  },
+  {
+    interaction: "restart_game",
+    label: "Restart Game",
+    detail: "Wipe save and restart from the beginning",
+  },
 ];
 
 export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
@@ -650,9 +675,9 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
                   </div>
                 </div>
 
-                <details className="rounded border border-neutral-700 bg-neutral-950/60">
+                <details open className="rounded border border-neutral-700 bg-neutral-950/60">
                   <summary className="cursor-pointer px-3 py-2 font-comic text-xs font-bold text-neutral-300 hover:text-white">
-                    Advanced: stack sounds, conditions, travel, and other actions
+                    Stack additional actions (sounds, conditions, scene change, dialogue…)
                   </summary>
                   <div className="border-t border-neutral-700 p-3">
                     <ClickResponseEditor

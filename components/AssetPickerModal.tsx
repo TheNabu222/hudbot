@@ -105,8 +105,8 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
   const folders = Array.from(subfolders).filter(Boolean).sort();
 
   return (
-    <div className="asset-picker-backdrop fixed inset-0 bg-black/80 z-[20000] flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="asset-picker-dialog bg-neutral-900 border border-neutral-600 rounded-lg max-w-5xl w-full h-[84vh] flex flex-col shadow-2xl overflow-hidden">
+    <div className="asset-picker-backdrop fixed inset-0 z-[20000]" onClick={onClose}>
+      <div className="asset-picker-dialog fixed right-0 top-0 h-full w-[480px] max-w-[92vw] bg-neutral-900 border-l border-neutral-600 flex flex-col shadow-[-8px_0_40px_rgba(0,0,0,.6)] overflow-hidden" onClick={e => e.stopPropagation()}>
         
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 bg-neutral-950 p-4">
@@ -199,7 +199,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
             <div className="flex-1 overflow-y-auto custom-scrollbar">
               {/* Folders */}
               {activeBin !== 'all' && activeBin !== 'recent' && activeBin !== 'canvas' && !assetSearch && folders.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
                   {folders.map(sub => (
                     <button 
                       key={sub}
@@ -218,7 +218,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
               )}
 
               {/* Assets */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 pb-12">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pb-12">
                 {visibleAssets.map(asset => (
                   <div 
                     key={asset.id}
@@ -230,7 +230,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                   >
                     <div 
                       onClick={() => onSelect(asset.id)}
-                      className="asset-thumbnail h-32 flex items-center justify-center p-2 relative rounded-t-lg cursor-pointer overflow-hidden bg-[linear-gradient(135deg,rgba(0,255,204,0.07),rgba(255,79,200,0.08)),#070812]"
+                      className="asset-thumbnail h-24 flex items-center justify-center p-2 relative rounded-t-lg cursor-pointer overflow-hidden bg-[linear-gradient(135deg,rgba(0,255,204,0.07),rgba(255,79,200,0.08)),#070812]"
                     >
                       {asset.type === 'audio' ? (
                         <Music size={32} className="text-emerald-500 group-hover:scale-110 transition-transform" />

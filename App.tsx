@@ -2985,12 +2985,16 @@ const App: React.FC = () => {
           quickEditDragging.startPos.y + (e.clientY - quickEditDragging.startY),
       });
     };
-    const handlePointerUp = () => setQuickEditDragging(null);
+    const stopDrag = () => setQuickEditDragging(null);
     window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointerup", stopDrag);
+    window.addEventListener("pointercancel", stopDrag);
+    window.addEventListener("blur", stopDrag);
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointerup", stopDrag);
+      window.removeEventListener("pointercancel", stopDrag);
+      window.removeEventListener("blur", stopDrag);
     };
   }, [quickEditDragging]);
 
@@ -2999,7 +3003,7 @@ const App: React.FC = () => {
     const handlePointerMove = (e: PointerEvent) => {
       if (document.body.classList.contains("resizing-left-sidebar")) {
         setLeftSidebarWidth((w) => {
-          const newWidth = e.clientX; // Left sidebar width is approximately the clientX
+          const newWidth = e.clientX;
           if (newWidth < 120) return 0;
           if (w === 0 && newWidth > 30) return 256;
           return Math.max(0, Math.min(800, newWidth));
@@ -3013,15 +3017,19 @@ const App: React.FC = () => {
         });
       }
     };
-    const handlePointerUp = () => {
+    const stopResize = () => {
       document.body.classList.remove("resizing-left-sidebar");
       document.body.classList.remove("resizing-right-sidebar");
     };
     window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+    window.addEventListener("blur", stopResize);
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+      window.removeEventListener("blur", stopResize);
     };
   }, []);
 
@@ -3807,6 +3815,20 @@ const App: React.FC = () => {
     coordinateScene.width || project.globalSettings.stageWidth || 800;
   const logicalStageHeight =
     coordinateScene.height || project.globalSettings.stageHeight || 600;
+  const deviceFrameUniformScale = showDeviceFrame
+    ? Math.min(
+        deviceFrame!.screen.width / logicalStageWidth,
+        deviceFrame!.screen.height / logicalStageHeight,
+      )
+    : 1;
+  const deviceFrameStageLeft = showDeviceFrame
+    ? deviceFrame!.screen.x +
+      (deviceFrame!.screen.width - logicalStageWidth * deviceFrameUniformScale) / 2
+    : 0;
+  const deviceFrameStageTop = showDeviceFrame
+    ? deviceFrame!.screen.y +
+      (deviceFrame!.screen.height - logicalStageHeight * deviceFrameUniformScale) / 2
+    : 0;
   const selectedHudConfig = selectedHudWidget
     ? getHudWidgetConfig(selectedHudWidget)
     : null;
@@ -5310,12 +5332,12 @@ const App: React.FC = () => {
                       <div
                         className="absolute pointer-events-none select-none opacity-80 z-0 ring-1 ring-neutral-700/50"
                         style={{
-                          left: showDeviceFrame ? deviceFrame!.screen.x : 0,
-                          top: showDeviceFrame ? deviceFrame!.screen.y : 0,
+                          left: showDeviceFrame ? deviceFrameStageLeft : 0,
+                          top: showDeviceFrame ? deviceFrameStageTop : 0,
                           width: logicalStageWidth,
                           height: logicalStageHeight,
                           transform: showDeviceFrame
-                            ? `scale(${deviceFrame!.screen.width / logicalStageWidth}, ${deviceFrame!.screen.height / logicalStageHeight})`
+                            ? `scale(${deviceFrameUniformScale})`
                             : undefined,
                           transformOrigin: "top left",
                           backgroundColor: bgScene.backgroundColor,
@@ -5422,6 +5444,14 @@ const App: React.FC = () => {
                       );
                     } catch (err) {}
                   }}
+                  onPointerCancel={(e) => {
+                    handleObjectPointerUp(e as unknown as React.PointerEvent);
+                    setDraggingId(null);
+                    setResizingId(null);
+                    setRotatingId(null);
+                    setSelectionBox(null);
+                    setSelectionStart(null);
+                  }}
                   onContextMenu={(e) => {
                     if (isPlaying) {
                       if (selectedInventoryItemId) {
@@ -5443,12 +5473,12 @@ const App: React.FC = () => {
                   }}
                   className={`studio-canvas-stage absolute shadow-2xl transition-all overflow-visible ${editorMode === "ui_stage" ? "ring-4 ring-indigo-500/70 shadow-[0_0_30px_rgba(99,102,241,0.2)]" : "ring-4 ring-pink-500 shadow-[0_0_40px_rgba(0,0,0,0.5)] z-10"}`}
                   style={{
-                    left: showDeviceFrame ? deviceFrame!.screen.x : 0,
-                    top: showDeviceFrame ? deviceFrame!.screen.y : 0,
+                    left: showDeviceFrame ? deviceFrameStageLeft : 0,
+                    top: showDeviceFrame ? deviceFrameStageTop : 0,
                     width: logicalStageWidth,
                     height: logicalStageHeight,
                     transform: showDeviceFrame
-                      ? `scale(${deviceFrame!.screen.width / logicalStageWidth}, ${deviceFrame!.screen.height / logicalStageHeight})`
+                      ? `scale(${deviceFrameUniformScale})`
                       : undefined,
                     transformOrigin: "top left",
                     backgroundColor: currentScene.backgroundColor,
