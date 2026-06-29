@@ -417,6 +417,7 @@ const App: React.FC = () => {
   >(null);
   const [collectedObjects, setCollectedObjects] = useState<string[]>([]);
   const [activeUiMenus, setActiveUiMenus] = useState<string[]>([]);
+  const [gameDay, setGameDay] = useState<number>(1);
   const [activeDialogue, setActiveDialogue] = useState<{
     treeId: string;
     nodeId: string;
@@ -2812,6 +2813,7 @@ const App: React.FC = () => {
       customSkills.forEach((skill) => (defaultSkills[skill] = 1));
       setPlayerSkills(defaultSkills);
       setGameTime(8);
+      setGameDay(1);
     } else {
       setPlayerInventory([]);
       setCollectedObjects([]);
@@ -3067,6 +3069,7 @@ const App: React.FC = () => {
         ],
         runtimePositions: { ...runtimeOverrides },
         time: gameTime,
+        day: gameDay,
       });
       if (
         !evaluateRuleConditions(
@@ -3326,12 +3329,9 @@ const App: React.FC = () => {
       // but without a global audio context we can just mock it or toggle a player flag
       setPreviewDialogue("Audio mute toggled.");
     } else if (obj.interaction === "advance_day") {
-      setPlayerFlags((prev) => {
-        const next = { ...prev };
-        // clear daily_ flags
-        Object.keys(next).forEach((k) => { if (k.startsWith("daily_")) delete next[k]; });
-        return next;
-      });
+      setPlayerFlags((prev) => prev.filter((f) => !f.startsWith("daily_")));
+      setGameDay((prev) => prev + 1);
+      setGameTime(6); // reset to morning
       setPreviewDialogue("A new day begins.");
     } else if (obj.interaction === "gift_item") {
       const charId = obj.interactionData;
@@ -3433,7 +3433,7 @@ const App: React.FC = () => {
         inventory: playerInventory,
         needs: playerNeeds,
         time: gameTime,
-        day: 1,
+        day: gameDay,
         skills: playerSkills,
         collectedObjects: collectedObjects,
         flags: playerFlags,
@@ -3460,6 +3460,7 @@ const App: React.FC = () => {
           if (parsed.inventory) setPlayerInventory(parsed.inventory);
           if (parsed.needs) setPlayerNeeds(parsed.needs);
           if (parsed.time) setGameTime(parsed.time);
+          if (parsed.day) setGameDay(parsed.day);
           if (parsed.skills) setPlayerSkills(parsed.skills);
           if (parsed.collectedObjects)
             setCollectedObjects(parsed.collectedObjects);
@@ -3579,6 +3580,7 @@ const App: React.FC = () => {
         triggeredRuleIds: [...triggeredResponseIds],
         runtimePositions: { ...runtimeOverrides },
         time: gameTime,
+        day: gameDay,
       });
 
       obj.clickResponses.forEach((response) => {
@@ -7557,7 +7559,7 @@ const App: React.FC = () => {
                               color: "#e5e5e5",
                             }}
                           >
-                            <span style={{ color: uiPrimary }}>TIME</span>
+                            <span style={{ color: uiPrimary }}>DAY {gameDay}</span>
                             <span>
                               {Math.floor(gameTime).toString().padStart(2, "0")}
                               :
