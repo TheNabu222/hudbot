@@ -11661,35 +11661,27 @@ const App: React.FC = () => {
                       </div>
                       <Accordion title="Identity & Setup" defaultOpen={true}>
                         <div className="space-y-4">
-                          {/* Object Preview Visualizer Sandbox */}
-                          {!selectedObject.isHitbox && !selectedObject.isText && !selectedObject.isScript && selectedObject.src && (
-                            <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-2 flex flex-col items-center justify-center relative overflow-hidden group">
-                               {project.assets.find(a => a.src === selectedObject.src)?.type === 'video' ? (
-                                 <video src={selectedObject.src} controls className="max-w-full max-h-32 object-contain rounded drop-shadow-md" />
-                               ) : project.assets.find(a => a.src === selectedObject.src)?.type === 'audio' ? (
-                                 <div className="flex flex-col items-center justify-center py-4 w-full relative">
-                                   <Music size={32} className="text-emerald-500 mb-2" />
-                                   <audio src={selectedObject.src} controls className="w-full h-8" />
-                                 </div>
-                               ) : (
-                                 <img src={selectedObject.src} className="max-w-full max-h-32 object-contain rounded drop-shadow-lg" />
-                               )}
-                               <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button
-                                    onClick={() => setAssetPickerCb({
-                                      filterType: undefined,
-                                      onSelect: (id) => {
-                                          const asset = project.assets.find(a => a.id === id);
-                                          if (asset) updateObject(selectedObject.id, { src: asset.src, ...(selectedObject.isUiElement ? {} : {width: asset.type === 'video' ? 320 : 100, height: asset.type === 'video' ? 180 : 100}) });
-                                      }
-                                    })}
-                                    className="bg-black/50 hover:bg-black/80 backdrop-blur text-white p-1.5 rounded-full outline-none transition-colors"
-                                    title="Swap Asset"
-                                  >
-                                     <RefreshCw size={14} />
-                                  </button>
-                               </div>
-                            </div>
+                          {/* Object asset slot — unified with AssetInspectorSlot */}
+                          {!selectedObject.isHitbox && !selectedObject.isText && !selectedObject.isScript && (
+                            <AssetInspectorSlot
+                              label="Object asset"
+                              asset={project.assets.find(a => a.src === selectedObject.src) || null}
+                              emptyLabel="No asset assigned"
+                              chooseLabel="Choose asset"
+                              previewShape={project.assets.find(a => a.src === selectedObject.src)?.type === 'video' ? 'wide' : 'square'}
+                              onChoose={() => setAssetPickerCb({
+                                filterType: undefined,
+                                onSelect: (id) => {
+                                  const asset = project.assets.find(a => a.id === id);
+                                  if (asset) updateObject(selectedObject.id, {
+                                    src: asset.src,
+                                    ...(selectedObject.isUiElement ? {} : { width: asset.type === 'video' ? 320 : 100, height: asset.type === 'video' ? 180 : 100 }),
+                                  });
+                                  setAssetPickerCb(null);
+                                },
+                              })}
+                              onClear={selectedObject.src ? () => updateObject(selectedObject.id, { src: "" }) : undefined}
+                            />
                           )}
 
                           <div className="space-y-3">
@@ -14303,25 +14295,22 @@ const App: React.FC = () => {
                         </div>
 
                         {selectedObject.interaction === "run_script" && (
-                          <div>
-                            <label className="text-sm text-neutral-500">
-                              Script Asset
-                            </label>
-                            <button
-                                onClick={() => setAssetPickerCb({
-                                  onSelect: (id) => updateObject(selectedObject.id, { scriptAssetId: id }),
-                                  filterType: "script"
-                                })}
-                                className="w-full bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 hover:border-neutral-500 rounded px-3 py-2 text-sm flex items-center justify-between transition-colors mt-1"
-                              >
-                                <span className="text-neutral-300 truncate pr-2">
-                                  {selectedObject.scriptAssetId
-                                    ? project.assets.find((a) => a.id === selectedObject.scriptAssetId)?.name || "Unknown Script"
-                                    : "Select a script..."}
-                                </span>
-                                <FileCode size={16} className="text-neutral-500" />
-                            </button>
-                          </div>
+                          <AssetInspectorSlot
+                            label="Script asset"
+                            description="A .js file from your library that runs when this object is clicked."
+                            asset={project.assets.find((a) => a.id === selectedObject.scriptAssetId) || null}
+                            emptyLabel="No script chosen"
+                            chooseLabel="Choose script"
+                            compact
+                            onChoose={() => setAssetPickerCb({
+                              filterType: "script",
+                              onSelect: (id) => {
+                                updateObject(selectedObject.id, { scriptAssetId: id });
+                                setAssetPickerCb(null);
+                              },
+                            })}
+                            onClear={selectedObject.scriptAssetId ? () => updateObject(selectedObject.id, { scriptAssetId: undefined }) : undefined}
+                          />
                         )}
 
                         {["link", "skill_check"].includes(
@@ -18024,47 +18013,32 @@ const App: React.FC = () => {
                             />
                           </div>
                           <div>
-                            <LabelWithHelp
+                            <AssetInspectorSlot
                               label="Use Sound"
-                              helpText="Sound to play."
-                              className="text-sm uppercase font-bold text-neutral-500"
-                            />
-                            <button
-                                onClick={() => setAssetPickerCb({
-                                  onSelect: (id) => {
-                                    pushHistory({
-                                      ...project,
-                                      inventoryItems: project.inventoryItems.map((i) =>
-                                        i.id === item.id ? { ...i, useSoundAssetId: id } : i
-                                      ),
-                                    });
-                                  },
-                                  filterType: "audio"
-                                })}
-                                className="w-full bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 hover:border-neutral-500 rounded px-3 py-2 text-sm flex items-center justify-between transition-colors mt-1"
-                              >
-                                <span className="text-neutral-300 truncate pr-2">
-                                  {item.useSoundAssetId
-                                    ? project.assets.find((a) => a.id === item.useSoundAssetId)?.name || "Unknown Audio"
-                                    : "None"}
-                                </span>
-                                <Music size={16} className="text-neutral-500" />
-                            </button>
-                            {item.useSoundAssetId && (
-                              <button 
-                                onClick={() => {
+                              description="Audio clip played when the player uses this item."
+                              asset={project.assets.find((a) => a.id === item.useSoundAssetId) || null}
+                              emptyLabel="No sound on use"
+                              chooseLabel="Choose audio"
+                              compact
+                              onChoose={() => setAssetPickerCb({
+                                filterType: "audio",
+                                onSelect: (id) => {
                                   pushHistory({
                                     ...project,
                                     inventoryItems: project.inventoryItems.map((i) =>
-                                      i.id === item.id ? { ...i, useSoundAssetId: undefined } : i
+                                      i.id === item.id ? { ...i, useSoundAssetId: id } : i
                                     ),
                                   });
-                                }}
-                                className="text-xs text-red-400 hover:text-red-300 mt-1"
-                              >
-                                Clear Sound
-                              </button>
-                            )}
+                                  setAssetPickerCb(null);
+                                },
+                              })}
+                              onClear={item.useSoundAssetId ? () => pushHistory({
+                                ...project,
+                                inventoryItems: project.inventoryItems.map((i) =>
+                                  i.id === item.id ? { ...i, useSoundAssetId: undefined } : i
+                                ),
+                              }) : undefined}
+                            />
                           </div>
                           <div className="pt-2 border-t border-neutral-800">
                             <div className="flex justify-between items-center mb-1">
