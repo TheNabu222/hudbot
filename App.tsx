@@ -16704,14 +16704,15 @@ const App: React.FC = () => {
                             key={char.id}
                             className="rounded-lg border border-neutral-800 bg-neutral-900 p-4 flex flex-col gap-3"
                           >
-                            <div className="flex gap-3 items-start">
-                              {/* Portrait */}
-                              <button
-                                type="button"
-                                className="w-16 h-16 rounded border border-neutral-700 bg-neutral-800 flex items-center justify-center shrink-0 overflow-hidden hover:border-cyan-400/50"
-                                onClick={() =>
+                            <div className="flex flex-col gap-3">
+                              <AssetInspectorSlot
+                                label="Portrait"
+                                asset={portrait || null}
+                                emptyLabel="No portrait"
+                                chooseLabel="Choose image"
+                                compact
+                                onChoose={() =>
                                   setAssetPickerCb({
-                                    title: "Choose Portrait",
                                     filterType: "image",
                                     onSelect: (id) => {
                                       setProject((p) => ({
@@ -16724,15 +16725,14 @@ const App: React.FC = () => {
                                     },
                                   })
                                 }
-                                title="Set portrait"
-                              >
-                                {portrait ? (
-                                  <img src={portrait.src} className="w-full h-full object-cover" alt="" />
-                                ) : (
-                                  <span className="text-neutral-600 text-xs text-center leading-tight px-1">portrait</span>
-                                )}
-                              </button>
-
+                                onClear={char.portraitAssetId ? () =>
+                                  setProject((p) => ({
+                                    ...p,
+                                    characters: (p.characters || []).map((c) =>
+                                      c.id === char.id ? { ...c, portraitAssetId: undefined } : c
+                                    ),
+                                  })) : undefined}
+                              />
                               <div className="flex-1 flex flex-col gap-2">
                                 <div className="flex gap-2 items-center">
                                   <input
