@@ -6354,16 +6354,28 @@ const App: React.FC = () => {
                     return (
                       <div
                         key={`ui-${uiId}-${menuIndex}`}
-                        className={`ui-menu-layer-editor absolute ${uiMenu.blocksClicks ? "pointer-events-auto" : "pointer-events-none"}`}
+                        className="ui-menu-layer-editor absolute pointer-events-none"
                         style={{
                           zIndex: 1000 + menuIndex,
-                          backgroundColor: uiMenu.backgroundColor,
                           inset: 0,
                           width: logicalStageWidth,
                           height: logicalStageHeight,
                           overflow: "visible",
                         }}
                       >
+                        {/* Background fill + click blocker when this UI blocks scene interaction */}
+                        {uiMenu.blocksClicks && (
+                          <div
+                            className="absolute inset-0 pointer-events-auto"
+                            style={{ backgroundColor: uiMenu.backgroundColor }}
+                          />
+                        )}
+                        {!uiMenu.blocksClicks && uiMenu.backgroundColor && (
+                          <div
+                            className="absolute inset-0 pointer-events-none"
+                            style={{ backgroundColor: uiMenu.backgroundColor }}
+                          />
+                        )}
                         {uiMenu.objects
                           .sort((a, b) => a.zIndex - b.zIndex)
                           .map((obj) => {
@@ -6491,7 +6503,7 @@ const App: React.FC = () => {
                                   mixBlendMode: obj.blendMode || "normal",
                                   pointerEvents: obj.ignoreClicks
                                     ? "none"
-                                    : undefined,
+                                    : "auto",
                                 }}
                               >
                                 {obj.isUiElement &&
@@ -18624,6 +18636,7 @@ const App: React.FC = () => {
         {editorMode !== "stage" &&
           editorMode !== "ui_stage" &&
           editorMode !== "assets" &&
+          editorMode !== "map_maker" &&
           showFeatureAssetDock && (
             <AssetQuickDock
               assets={project.assets}
@@ -18640,6 +18653,7 @@ const App: React.FC = () => {
         {editorMode !== "stage" &&
           editorMode !== "ui_stage" &&
           editorMode !== "assets" &&
+          editorMode !== "map_maker" &&
           !showFeatureAssetDock && (
             <button
               type="button"
