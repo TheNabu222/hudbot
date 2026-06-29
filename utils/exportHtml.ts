@@ -1687,6 +1687,37 @@ export function generateExportHtml(project: Project): string {
             toggleQuestLog();
           } else if (interaction === 'open_map') {
             toggleMap();
+          } else if (interaction === 'open_relationships') {
+            toggleRelationships();
+          } else if (interaction === 'open_skills') {
+            toggleSkills();
+          } else if (interaction === 'open_almanac') {
+            toggleAlmanac();
+          } else if (interaction === 'gift_item') {
+            const charId = data;
+            if (!charId) { showSimpleDialogue('Nothing to gift here.', 'System'); break; }
+            if (!selectedInventoryItemId) {
+              showSimpleDialogue('Open your inventory and select an item to give first.', 'System');
+              break;
+            }
+            const characters = gameData.characters || [];
+            const char = characters.find(c => c.id === charId);
+            if (!char) { showSimpleDialogue('No one to give it to.', 'System'); break; }
+            const pref = (char.giftPreferences || []).find(p => p.itemId === selectedInventoryItemId);
+            const itemDef = inventoryItems.find(i => i.id === selectedInventoryItemId);
+            const itemName = itemDef ? itemDef.name : selectedInventoryItemId;
+            if (pref) {
+              state.relationships[charId] = Math.max(-100, Math.min(100, (state.relationships[charId] || (char.defaultAffinity || 0)) + pref.change));
+              const reaction = pref.reactionText || (pref.change > 0 ? char.name + ' smiles. "Thank you."' : char.name + ' frowns. "I don\'t want this."');
+              state.inventory = state.inventory.filter(id => id !== selectedInventoryItemId);
+              selectedInventoryItemId = null;
+              updateInventoryUI();
+              saveGame();
+              showSimpleDialogue(reaction, char.name);
+            } else {
+              const msg = char.name + ' does not seem interested in ' + itemName + '.';
+              showSimpleDialogue(msg, char.name);
+            }
           } else if (interaction === 'play_cutscene') {
             const videoAssetId = data;
             const scriptAssetId = obj.getAttribute('data-script-src');
@@ -1845,8 +1876,145 @@ export function generateExportHtml(project: Project): string {
         toggleMap();
       };
 
+      window.toggleRelationships = () => {
+        const overlay = document.getElementById('relationships-overlay');
+        if (!overlay) return;
+        if (overlay.style.display === 'flex') {
+          overlay.style.display = 'none';
+        } else {
+          overlay.style.display = 'flex';
+          buildRelationshipsPanel();
+        }
+      };
+
+      window.buildRelationshipsPanel = () => {
+        const list = document.getElementById('relationships-list');
+        if (!list) return;
+        const characters = gameData.characters || [];
+        const factions = gameData.factions || [];
+        if (characters.length === 0 && factions.length === 0) {
+          list.innerHTML = '<div style="text-align:center;padding:40px;opacity:0.5;">No relationships recorded yet.</div>';
+          return;
+        }
+        let html = '<div style="display:flex;flex-direction:column;gap:12px;padding:16px;">';
+        characters.forEach(char => {
+          const value = state.relationships[char.id] ?? (char.defaultAffinity || 0);
+          const thresholds = (char.thresholds || []).slice().sort((a,b) => a.value - b.value);
+          let stageLabel = 'Unknown';
+          let stageColor = 'var(--ui-primary)';
+          for (const t of thresholds) { if (value >= t.value) { stageLabel = t.label; stageColor = t.color || 'var(--ui-primary)'; } }
+          const pct = Math.round(((value + 100) / 200) * 100);
+          const portraitAsset = char.portraitAssetId ? (gameData.assets || []).find(a => a.id === char.portraitAssetId) : null;
+          const portraitSrc = portraitAsset ? portraitAsset.src : null;
+          html += \`<div style="padding:12px;border:1px solid \${stageColor}40;border-radius:8px;display:flex;gap:12px;align-items:center;">
+            \${portraitSrc ? '<img src="' + portraitSrc + '" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid ' + stageColor + '40;" />' : '<div style="width:48px;height:48px;border-radius:6px;border:1px solid ' + stageColor + '40;display:flex;align-items:center;justify-content:center;font-size:20px;">👤</div>'}
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:bold;font-size:14px;">\${char.name}</div>
+              <div style="font-size:11px;color:\${stageColor};text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">\${stageLabel}</div>
+              <div style="height:6px;border-radius:3px;background:rgba(255,255,255,0.1);overflow:hidden;">
+                <div style="height:100%;width:\${pct}%;background:\${stageColor};border-radius:3px;transition:width 0.3s;"></div>
+              </div>
+            </div>
+          </div>\`;
+        });
+        if (factions.length > 0) {
+          html += '<div style="font-size:11px;font-weight:bold;text-transform:uppercase;color:var(--ui-primary);opacity:0.7;padding:8px 0 4px 0;">Factions</div>';
+          factions.forEach(faction => {
+            const value = state.relationships[faction.id] ?? 0;
+            const pct = Math.round(((value + 100) / 200) * 100);
+            const clr = value >= 50 ? '#00ffcc' : value >= 0 ? '#7ec8e3' : value >= -50 ? '#e3a87e' : '#e35c5c';
+            const label = value >= 50 ? 'Allied' : value >= 10 ? 'Friendly' : value >= -10 ? 'Neutral' : value >= -50 ? 'Unfriendly' : 'Hostile';
+            html += \`<div style="padding:10px 12px;border:1px solid \${clr}40;border-radius:8px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span style="font-weight:bold;font-size:14px;">\${faction.name}</span>
+                <span style="font-size:12px;color:\${clr};">\${label}</span>
+              </div>
+              <div style="height:6px;border-radius:3px;background:rgba(255,255,255,0.1);overflow:hidden;">
+                <div style="height:100%;width:\${pct}%;background:\${clr};border-radius:3px;"></div>
+              </div>
+            </div>\`;
+          });
+        }
+        html += '</div>';
+        list.innerHTML = html;
+      };
+
+      window.toggleSkills = () => {
+        const overlay = document.getElementById('skills-overlay');
+        if (!overlay) return;
+        if (overlay.style.display === 'flex') {
+          overlay.style.display = 'none';
+        } else {
+          overlay.style.display = 'flex';
+          buildSkillsPanel();
+        }
+      };
+
+      window.buildSkillsPanel = () => {
+        const list = document.getElementById('skills-list');
+        if (!list) return;
+        const skills = globalSettings.customSkills && globalSettings.customSkills.length > 0
+          ? globalSettings.customSkills
+          : Object.keys(state.skills);
+        if (skills.length === 0) {
+          list.innerHTML = '<div style="text-align:center;padding:40px;opacity:0.5;">No skills tracked yet.</div>';
+          return;
+        }
+        let html = '<div style="display:flex;flex-direction:column;gap:10px;padding:16px;">';
+        skills.forEach(skill => {
+          const level = state.skills[skill] || 0;
+          const pct = Math.round((level / 20) * 100);
+          html += \`<div style="padding:10px 12px;border:1px solid var(--ui-primary)30;border-radius:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <span style="font-size:14px;text-transform:capitalize;">\${skill}</span>
+              <span style="font-size:13px;color:var(--ui-primary);font-weight:bold;">\${level} / 20</span>
+            </div>
+            <div style="height:6px;border-radius:3px;background:rgba(255,255,255,0.1);overflow:hidden;">
+              <div style="height:100%;width:\${pct}%;background:var(--ui-primary);border-radius:3px;"></div>
+            </div>
+          </div>\`;
+        });
+        html += '</div>';
+        list.innerHTML = html;
+      };
+
+      window.toggleAlmanac = () => {
+        const overlay = document.getElementById('almanac-overlay');
+        if (!overlay) return;
+        if (overlay.style.display === 'flex') {
+          overlay.style.display = 'none';
+        } else {
+          overlay.style.display = 'flex';
+          buildAlmanacPanel();
+        }
+      };
+
+      window.buildAlmanacPanel = () => {
+        const list = document.getElementById('almanac-list');
+        if (!list) return;
+        const entries = (gameData.loreEntries || []).filter(e => !e.requiredFlagId || state.flags[e.requiredFlagId]);
+        if (entries.length === 0) {
+          list.innerHTML = '<div style="text-align:center;padding:40px;opacity:0.5;">Nothing recorded yet.</div>';
+          return;
+        }
+        let html = '<div style="display:flex;flex-direction:column;gap:12px;padding:16px;">';
+        const byCategory = {};
+        entries.forEach(e => { const cat = e.category || 'General'; if (!byCategory[cat]) byCategory[cat] = []; byCategory[cat].push(e); });
+        Object.entries(byCategory).forEach(([cat, items]) => {
+          html += '<div style="font-size:11px;font-weight:bold;text-transform:uppercase;color:var(--ui-primary);opacity:0.7;padding:4px 0;">' + cat + '</div>';
+          items.forEach(entry => {
+            html += \`<div style="padding:12px;border:1px solid var(--ui-primary)30;border-radius:8px;">
+              <div style="font-weight:bold;font-size:14px;margin-bottom:6px;color:var(--ui-primary);">\${entry.title}</div>
+              <div style="font-size:13px;opacity:0.85;line-height:1.5;white-space:pre-wrap;">\${entry.content}</div>
+            </div>\`;
+          });
+        });
+        html += '</div>';
+        list.innerHTML = html;
+      };
+
       let selectedInventoryItemId = null;
-      
+
       window.handleInventoryItemClick = (itemId) => {
         const itemDef = inventoryItems.find(i => i.id === itemId);
         if (!itemDef) return;
@@ -2289,6 +2457,43 @@ export function generateExportHtml(project: Project): string {
       </div>
       <div class="inventory-content" style="overflow-y: auto;">
         <div id="quest-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Relationships, Skills, Almanac overlays — outside scaled game space -->
+  <div id="relationships-overlay" onclick="toggleRelationships()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:100000;align-items:center;justify-content:center;padding:32px;">
+    <div class="inventory-box" onclick="event.stopPropagation()" style="max-width:500px;">
+      <div class="inventory-header">
+        <h2>Relationships</h2>
+        <button class="close-btn" onclick="toggleRelationships()">✕</button>
+      </div>
+      <div class="inventory-content" style="overflow-y:auto;max-height:70vh;">
+        <div id="relationships-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="skills-overlay" onclick="toggleSkills()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:100000;align-items:center;justify-content:center;padding:32px;">
+    <div class="inventory-box" onclick="event.stopPropagation()" style="max-width:500px;">
+      <div class="inventory-header">
+        <h2>Skills</h2>
+        <button class="close-btn" onclick="toggleSkills()">✕</button>
+      </div>
+      <div class="inventory-content" style="overflow-y:auto;max-height:70vh;">
+        <div id="skills-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="almanac-overlay" onclick="toggleAlmanac()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:100000;align-items:center;justify-content:center;padding:32px;">
+    <div class="inventory-box" onclick="event.stopPropagation()" style="max-width:600px;">
+      <div class="inventory-header">
+        <h2>Almanac</h2>
+        <button class="close-btn" onclick="toggleAlmanac()">✕</button>
+      </div>
+      <div class="inventory-content" style="overflow-y:auto;max-height:70vh;">
+        <div id="almanac-list"></div>
       </div>
     </div>
   </div>

@@ -3333,6 +3333,28 @@ const App: React.FC = () => {
         return next;
       });
       setPreviewDialogue("A new day begins.");
+    } else if (obj.interaction === "gift_item") {
+      const charId = obj.interactionData;
+      const char = (project.characters || []).find((c) => c.id === charId);
+      if (!charId || !char) {
+        setPreviewDialogue("No character configured for this interaction.");
+      } else if (!selectedInventoryItemId) {
+        setPreviewDialogue("Select an item in your inventory first.");
+      } else {
+        const pref = (char.giftPreferences || []).find((p) => p.itemId === selectedInventoryItemId);
+        if (pref) {
+          setPlayerFactions((prev) => ({
+            ...prev,
+            [charId]: Math.max(-100, Math.min(100, (prev[charId] ?? (char.defaultAffinity || 0)) + pref.change)),
+          }));
+          setPlayerInventory((prev) => prev.filter((id) => id !== selectedInventoryItemId));
+          setSelectedInventoryItemId(null);
+          setPreviewDialogue(pref.reactionText || (pref.change > 0 ? `${char.name} smiles. "Thank you."` : `${char.name} frowns. "I don't want this."`));
+        } else {
+          const itemDef = project.inventoryItems?.find((i) => i.id === selectedInventoryItemId);
+          setPreviewDialogue(`${char.name} doesn't seem interested in ${itemDef?.name || "that"}.`);
+        }
+      }
     } else if (obj.interaction === "exit_game") {
       setIsPlaying(false);
     } else if (obj.interaction === "open_crafting") {
@@ -13628,6 +13650,7 @@ const App: React.FC = () => {
                                   <option value="toggle_inventory">Toggle Built-in Inventory</option>
                                   <option value="open_skills">Open Skills Menu</option>
                                   <option value="open_settings">Open Player Settings</option>
+                                  <option value="gift_item">Give Selected Item to Character</option>
                                 </optgroup>
 
                                 <optgroup label="Media & Code">
@@ -13922,6 +13945,33 @@ const App: React.FC = () => {
                                   </option>
                                 ))}
                             </select>
+                          </div>
+                        )}
+
+                        {selectedObject.interaction === "gift_item" && (
+                          <div>
+                            <label className="text-sm text-neutral-500">
+                              Target Character (receives the gift)
+                            </label>
+                            <select
+                              value={selectedObject.interactionData || ""}
+                              onChange={(e) =>
+                                updateObject(selectedObject.id, {
+                                  interactionData: e.target.value,
+                                })
+                              }
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1 focus:border-emerald-500 focus:outline-none"
+                            >
+                              <option value="">Select a character...</option>
+                              {(project.characters || []).map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.name}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="text-[10px] text-neutral-600 mt-1">
+                              Player must select an item in inventory first. Gift preferences are configured in the Characters tab.
+                            </p>
                           </div>
                         )}
 
