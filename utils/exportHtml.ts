@@ -66,12 +66,20 @@ export function generateExportHtml(project: Project): string {
   const hasDeviceFrame = !!(deviceFrame && deviceFrameAsset);
   const layoutWidth = hasDeviceFrame ? deviceFrame.outerWidth : boundW;
   const layoutHeight = hasDeviceFrame ? deviceFrame.outerHeight : boundH;
-  const deviceScreenScaleX = hasDeviceFrame
-    ? deviceFrame.screen.width / exportWidth
+  const deviceScreenScale = hasDeviceFrame
+    ? Math.min(
+        deviceFrame.screen.width / exportWidth,
+        deviceFrame.screen.height / exportHeight,
+      )
     : 1;
-  const deviceScreenScaleY = hasDeviceFrame
-    ? deviceFrame.screen.height / exportHeight
-    : 1;
+  const deviceScreenLeft = hasDeviceFrame
+    ? deviceFrame.screen.x +
+      (deviceFrame.screen.width - exportWidth * deviceScreenScale) / 2
+    : offsetX;
+  const deviceScreenTop = hasDeviceFrame
+    ? deviceFrame.screen.y +
+      (deviceFrame.screen.height - exportHeight * deviceScreenScale) / 2
+    : offsetY;
 
   const css = `
     :root {
@@ -98,12 +106,34 @@ export function generateExportHtml(project: Project): string {
       margin: 0;
       padding: 0;
       background-color: #1a1a1a;
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
       min-height: 100vh;
       font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
       color: #f5f5f5;
+    }
+    #scale-wrapper {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background-color: #1a1a1a;
+    }
+    #game-layout-resizer {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+    #game-positioner {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: ${layoutWidth}px;
+      height: ${layoutHeight}px;
+      transform-origin: center center;
+      will-change: transform;
     }
     #game-container {
       position: relative;
@@ -864,6 +894,26 @@ export function generateExportHtml(project: Project): string {
     const globalSettings = gameData.globalSettings || {};
     let activeDialogue = null;
 
+    const buildAudioSrc = (asset) => {
+      if (!asset || !asset.src) return "";
+      return asset.src + (asset.trimStart || asset.trimEnd
+        ? '#t=' + (asset.trimStart || 0) + (asset.trimEnd ? ',' + asset.trimEnd : '')
+        : '');
+    };
+
+    const applyAssetVolume = (audio, asset) => {
+      audio.volume = Math.max(0, Math.min(1, asset?.volume ?? 1));
+      return audio;
+    };
+
+    const playAudioAsset = (asset) => {
+      const src = buildAudioSrc(asset);
+      if (!src) return null;
+      const audio = applyAssetVolume(new Audio(src), asset);
+      audio.play().catch(e => console.warn("Audio play failed", e));
+      return audio;
+    };
+
     const animatedCursor = document.getElementById('animated-game-cursor');
     const globalCursorAssetId = globalSettings.customCursorAssetId || '';
     const findCursorAsset = (assetId) => assets.find(asset => asset.id === assetId);
@@ -986,7 +1036,6 @@ export function generateExportHtml(project: Project): string {
       
       // Scale game to fit screen
       const scaleWrapper = document.getElementById('scale-wrapper');
-      const layoutResizer = document.getElementById('game-layout-resizer');
       
       let currentScale = 1;
       const resizeGame = () => {
@@ -999,14 +1048,18 @@ export function generateExportHtml(project: Project): string {
         // Approximate a comfortable vertical limit if dialogue is below
         const maxGameH = globalSettings.dialoguePosition === 'below' ? Math.max(0, winH - 240) : winH;
         
-        currentScale = Math.min(winW / gameW, maxGameH / gameH);
-        gamePositioner.style.transform = 'scale(' + currentScale + ')';
-        gamePositioner.style.transformOrigin = 'top left';
-        
-        if (layoutResizer) {
-            layoutResizer.style.width = (gameW * currentScale) + 'px';
-            layoutResizer.style.height = (gameH * currentScale) + 'px';
-        }
+        const viewportPadding = 16;
+        currentScale = Math.max(
+          0.05,
+          Math.min(
+            1,
+            (winW - viewportPadding * 2) / gameW,
+            (maxGameH - viewportPadding * 2) / gameH,
+          ),
+        );
+        gamePositioner.style.transform =
+          'translate(-50%, -50%) scale(' + currentScale + ')';
+        gamePositioner.style.transformOrigin = 'center center';
       };
       window.addEventListener('resize', resizeGame);
       resizeGame();
@@ -1045,7 +1098,7 @@ export function generateExportHtml(project: Project): string {
 
         const bgmAsset = assets.find(a => a.id === assetId);
         if (bgmAsset && bgmAsset.src) {
-           currentBgmAudio = new Audio(bgmAsset.src);
+           currentBgmAudio = applyAssetVolume(new Audio(buildAudioSrc(bgmAsset)), bgmAsset);
            currentBgmAudio.loop = true;
            currentBgmAudio.play().catch(e => console.warn("BGM play failed. User interaction needed:", e));
            currentBgmAssetId = assetId;
@@ -1568,8 +1621,7 @@ export function generateExportHtml(project: Project): string {
           } else if (interaction === 'sound') {
             const soundAsset = assets.find(a => a.id === data);
             if (soundAsset) {
-              const audio = new Audio(soundAsset.src);
-              audio.play().catch(e => console.warn("SFX play failed", e));
+              playAudioAsset(soundAsset);
             }
           } else if (interaction === 'link') {
             window.open(data, '_blank');
@@ -2115,7 +2167,7 @@ export function generateExportHtml(project: Project): string {
         if (itemDef.useSoundAssetId) {
            const sound = assets.find(a => a.id === itemDef.useSoundAssetId);
            if (sound) {
-               new Audio(sound.src).play().catch(e => console.error(e));
+               playAudioAsset(sound);
            }
         }
         
@@ -2397,12 +2449,12 @@ export function generateExportHtml(project: Project): string {
 </head>
 <body>
   <img id="animated-game-cursor" alt="" aria-hidden="true" />
-  <div id="scale-wrapper" style="width: 100vw; height: 100vh; display: flex; flex-direction: ${project.globalSettings?.dialoguePosition === 'below' ? 'column' : 'row'}; justify-content: center; align-items: center; overflow: hidden; background-color: #1a1a1a;">
-    <div id="game-layout-resizer" style="position: relative; flex-shrink: 0; display: flex; justify-content: center; align-items: flex-start;">
-      <div id="game-positioner" style="position: absolute; left: 0; top: 0; width: ${layoutWidth}px; height: ${layoutHeight}px;">
+  <div id="scale-wrapper">
+    <div id="game-layout-resizer">
+      <div id="game-positioner">
         ${deviceFrameHtml}
         ${deviceControlsHtml}
-        <div id="game-coordinate-space" style="position: absolute; left: ${hasDeviceFrame ? deviceFrame!.screen.x : offsetX}px; top: ${hasDeviceFrame ? deviceFrame!.screen.y : offsetY}px; width: ${exportWidth}px; height: ${exportHeight}px; transform: scale(${deviceScreenScaleX}, ${deviceScreenScaleY}); transform-origin: top left;">
+        <div id="game-coordinate-space" style="position: absolute; left: ${deviceScreenLeft}px; top: ${deviceScreenTop}px; width: ${exportWidth}px; height: ${exportHeight}px; transform: scale(${deviceScreenScale}); transform-origin: top left;">
         ${hudHtml}
         <div id="game-container" style="position: absolute; inset: 0; overflow: hidden; width: 100%; height: 100%;">
           ${scenesHtml}

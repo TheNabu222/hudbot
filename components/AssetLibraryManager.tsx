@@ -4,6 +4,13 @@ import { Project, Asset } from "../types";
 import { v4 as uuidv4 } from "uuid";
 import { StudioFeatureHeader } from "./StudioFeatureHeader";
 
+const getLibraryAssetActionLabel = (asset: Pick<Asset, "type">) => {
+  if (asset.type === "audio") return "Add sound cue";
+  if (asset.type === "video") return "Add video cue";
+  if (asset.type === "script") return "Add script";
+  return "Place in room";
+};
+
 interface AssetLibraryManagerProps {
   project: Project;
   updateProject: (updates: Partial<Project>) => void;
@@ -321,16 +328,16 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-8 gap-6">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-5">
             {visibleAssets.map((asset) => (
               <div
                 key={asset.id}
-                className={`studio-card group relative bg-neutral-900 border rounded-xl overflow-hidden flex flex-col shadow-lg transition-transform hover:-translate-y-1 hover:shadow-xl ${
+                className={`studio-card group relative flex min-h-[440px] flex-col overflow-hidden rounded-2xl border bg-neutral-900 shadow-lg transition-transform hover:-translate-y-1 hover:shadow-xl ${
                   selectedAssetIds.has(asset.id) ? "border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)]" : "border-neutral-800/80 hover:border-indigo-500/50"
                 }`}
               >
                 <div 
-                   className="aspect-square min-h-40 flex items-center justify-center p-3 relative bg-[linear-gradient(135deg,rgba(0,255,204,0.08),rgba(255,79,200,0.08)),#070812] cursor-pointer"
+                   className="relative flex h-48 cursor-pointer items-center justify-center bg-[linear-gradient(135deg,rgba(0,255,204,0.08),rgba(255,79,200,0.08)),#070812] p-3"
                    onClick={() => {
                       const newSet = new Set(selectedAssetIds);
                       if (newSet.has(asset.id)) newSet.delete(asset.id);
@@ -353,7 +360,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                      <CheckSquare size={16} />
                   </button>
                   {asset.type === "image" ? (
-                    <img src={asset.src} alt={asset.name} className="h-full w-full object-contain pointer-events-none drop-shadow-md" loading="lazy" />
+                    <img src={asset.src} alt={asset.name} className="pointer-events-none h-full w-full object-contain drop-shadow-md" loading="lazy" />
                   ) : asset.type === "audio" ? (
                     <div className="flex flex-col items-center justify-center pointer-events-none text-indigo-400 w-full h-full relative">
                       <Music size={40} className="mb-2 opacity-80" />
@@ -409,7 +416,17 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                     </button>
                   )}
                 </div>
-                <div className="bg-neutral-900 p-3 flex flex-col flex-1 border-t border-neutral-800 space-y-2">
+                <div className="flex flex-1 flex-col space-y-3 border-t border-neutral-800 bg-neutral-900 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="rounded-full border border-neutral-700 bg-neutral-950 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-neutral-300">
+                      {asset.type}
+                    </span>
+                    {asset.category && (
+                      <span className="truncate text-[10px] text-neutral-500" title={asset.category}>
+                        {asset.category}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={asset.name}
@@ -418,7 +435,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                         assets: project.assets.map((a) => (a.id === asset.id ? { ...a, name: e.target.value } : a)),
                       });
                     }}
-                    className="bg-neutral-950/50 border border-transparent focus:border-indigo-500 rounded px-2 py-1 text-sm text-white font-semibold outline-none w-full transition-colors"
+                    className="w-full rounded-lg border border-transparent bg-neutral-950/50 px-2 py-1.5 text-sm font-bold text-white outline-none transition-colors focus:border-indigo-500"
                     placeholder="Asset Name"
                   />
                   <textarea 
@@ -428,7 +445,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                          assets: project.assets.map(a => a.id === asset.id ? { ...a, description: e.target.value } : a)
                        });
                      }}
-                     className="bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-300 outline-none focus:border-indigo-500 flex-1 min-h-[3rem] resize-none"
+                     className="min-h-[4.25rem] resize-none rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-300 outline-none focus:border-indigo-500"
                      placeholder="Notes/Description..."
                   />
                   <input 
@@ -439,7 +456,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                           assets: project.assets.map(a => a.id === asset.id ? { ...a, tags: newTags } : a)
                         });
                      }}
-                     className="bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-indigo-400 font-mono outline-none focus:border-indigo-500 w-full"
+                     className="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 font-mono text-xs text-indigo-300 outline-none focus:border-indigo-500"
                      placeholder="tags, separated, by, commas"
                   />
                   
@@ -462,10 +479,10 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                     <button
                       type="button"
                       onClick={() => onPlaceAsset(asset)}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-[4px_12px_4px_12px] border border-[#00a896]/50 bg-[#00ffcc]/20 px-2 py-1.5 font-comic text-[11px] font-bold text-[#00675d] shadow-sm hover:bg-[#00ffcc]/30 dark:border-[#00ffcc]/45 dark:bg-[#00ffcc]/10 dark:text-[#00ffcc] dark:hover:bg-[#00ffcc]/20"
+                      className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-[#00a896]/50 bg-[#00ffcc]/20 px-3 py-2 font-comic text-sm font-bold text-[#00675d] shadow-sm hover:bg-[#00ffcc]/30 dark:border-[#00ffcc]/45 dark:bg-[#00ffcc]/10 dark:text-[#00ffcc] dark:hover:bg-[#00ffcc]/20"
                     >
                       <Plus size={13} />
-                      Place in current room
+                      {getLibraryAssetActionLabel(asset)}
                     </button>
                   )}
 

@@ -242,7 +242,7 @@ export const StudioWorkflowNav: React.FC<StudioWorkflowNavProps> = ({
                   <Icon size={15} />
                   <span>
                     <strong>{tool.label}</strong>
-                    <small>{tool.note}</small>
+                    <small>{isActive ? "Editing now" : tool.note}</small>
                   </span>
                 </button>
               );

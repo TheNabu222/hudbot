@@ -23,6 +23,9 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
   const [grayscale, setGrayscale] = useState(0);
   const [invert, setInvert] = useState(0);
   const [blur, setBlur] = useState(0);
+  const [sharpen, setSharpen] = useState(0);
+  const [upscale, setUpscale] = useState(1);
+  const [crispPixels, setCrispPixels] = useState(false);
 
   const [chromaKeyColor, setChromaKeyColor] = useState<string>('');
   const [chromaTolerance, setChromaTolerance] = useState<number>(30);
@@ -61,7 +64,33 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
     ctx.putImageData(imageData, 0, 0);
   };
 
-  const handleSave = async () => {
+  const applySharpen = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    if (sharpen <= 0) return;
+
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const source = new Uint8ClampedArray(imageData.data);
+    const data = imageData.data;
+    const amount = sharpen / 100;
+
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = (y * width + x) * 4;
+        for (let channel = 0; channel < 3; channel += 1) {
+          const center = source[index + channel];
+          const top = source[((y - 1) * width + x) * 4 + channel];
+          const bottom = source[((y + 1) * width + x) * 4 + channel];
+          const left = source[(y * width + x - 1) * 4 + channel];
+          const right = source[(y * width + x + 1) * 4 + channel];
+          const sharpened = center + (center * 4 - top - bottom - left - right) * amount;
+          data[index + channel] = Math.max(0, Math.min(255, sharpened));
+        }
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+  };
+
+  const renderEditedImage = () => {
     if (!imgRef.current) return;
     const image = imgRef.current;
     const canvas = document.createElement('canvas');
@@ -78,10 +107,16 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
       cropHeight = completedCrop.height * scaleY;
     }
 
-    canvas.width = cropWidth;
-    canvas.height = cropHeight;
+    const outputScale = Math.max(1, upscale);
+    const outputWidth = Math.max(1, Math.round(cropWidth * outputScale));
+    const outputHeight = Math.max(1, Math.round(cropHeight * outputScale));
+
+    canvas.width = outputWidth;
+    canvas.height = outputHeight;
 
     ctx.filter = getFilterString();
+    ctx.imageSmoothingEnabled = !crispPixels;
+    ctx.imageSmoothingQuality = 'high';
 
     ctx.drawImage(
       image,
@@ -91,65 +126,31 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
       cropHeight,
       0,
       0,
-      cropWidth,
-      cropHeight
+      outputWidth,
+      outputHeight
     );
     
-    applyChromaKey(ctx, cropWidth, cropHeight);
+    applyChromaKey(ctx, outputWidth, outputHeight);
+    applySharpen(ctx, outputWidth, outputHeight);
 
+    return canvas;
+  };
+
+  const saveEditedImage = (isNew: boolean) => {
+    const canvas = renderEditedImage();
+    if (!canvas) return;
     try {
       const base64Image = canvas.toDataURL('image/png');
-      onSave(base64Image, false);
+      onSave(base64Image, isNew);
     } catch (e) {
       setErrorMsg("Error saving image. If it's an external URL, it might have CORS restrictions that prevent editing. Try re-uploading the image directly.");
       console.error(e);
     }
   };
 
-  const handleSaveAsNew = async () => {
-    if (!imgRef.current) return;
-    const image = imgRef.current;
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  const handleSave = async () => saveEditedImage(false);
 
-    let cropX = 0, cropY = 0, cropWidth = image.naturalWidth, cropHeight = image.naturalHeight;
-    if (completedCrop && completedCrop.width > 0 && completedCrop.height > 0) {
-      const scaleX = image.naturalWidth / image.width;
-      const scaleY = image.naturalHeight / image.height;
-      cropX = completedCrop.x * scaleX;
-      cropY = completedCrop.y * scaleY;
-      cropWidth = completedCrop.width * scaleX;
-      cropHeight = completedCrop.height * scaleY;
-    }
-
-    canvas.width = cropWidth;
-    canvas.height = cropHeight;
-
-    ctx.filter = getFilterString();
-
-    ctx.drawImage(
-      image,
-      cropX,
-      cropY,
-      cropWidth,
-      cropHeight,
-      0,
-      0,
-      cropWidth,
-      cropHeight
-    );
-    
-    applyChromaKey(ctx, cropWidth, cropHeight);
-
-    try {
-      const base64Image = canvas.toDataURL('image/png');
-      onSave(base64Image, true);
-    } catch (e) {
-      setErrorMsg("Error saving image. If it's an external URL, it might have CORS restrictions that prevent editing. Try re-uploading the image directly.");
-      console.error(e);
-    }
-  };
+  const handleSaveAsNew = async () => saveEditedImage(true);
 
   return (
     <div className="image-editor-modal fixed inset-0 z-[30000] flex items-center justify-center bg-black/90 p-3 md:p-4">
@@ -185,6 +186,54 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
           </div>
 
           <div className="space-y-6 flex-1">
+            <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-3">
+              <h3 className="text-sm font-bold text-emerald-200">Quality Repair</h3>
+              <p className="mt-1 text-xs leading-relaxed text-neutral-300">
+                These are baked into the saved asset. Use Save as New first if you want a safe copy.
+              </p>
+
+              <div className="mt-4">
+                <div className="flex justify-between mb-1">
+                  <label className="text-sm text-neutral-300">Upscale</label>
+                  <span className="text-xs text-neutral-400">{upscale}×</span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="4"
+                  step="1"
+                  value={upscale}
+                  onChange={e => setUpscale(Number(e.target.value))}
+                  className="w-full accent-emerald-500"
+                />
+              </div>
+
+              <div className="mt-4">
+                <div className="flex justify-between mb-1">
+                  <label className="text-sm text-neutral-300">Sharpen</label>
+                  <span className="text-xs text-neutral-400">{sharpen}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="200"
+                  value={sharpen}
+                  onChange={e => setSharpen(Number(e.target.value))}
+                  className="w-full accent-emerald-500"
+                />
+              </div>
+
+              <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs font-bold text-neutral-200">
+                <input
+                  type="checkbox"
+                  checked={crispPixels}
+                  onChange={e => setCrispPixels(e.target.checked)}
+                  className="accent-emerald-500"
+                />
+                Crisp pixels / no smoothing
+              </label>
+            </div>
+
             <div>
               <div className="flex justify-between mb-1">
                 <label className="text-sm text-neutral-400">Brightness</label>
@@ -293,7 +342,15 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
                   setContrast(100);
                   setSaturate(100);
                   setSepia(0);
+                  setHue(0);
+                  setGrayscale(0);
+                  setInvert(0);
+                  setBlur(0);
+                  setSharpen(0);
+                  setUpscale(1);
+                  setCrispPixels(false);
                   setCrop(undefined);
+                  setCompletedCrop(undefined);
                   setChromaKeyColor('');
                 }} 
                 className="w-full text-xs text-neutral-400 hover:text-white"
