@@ -171,7 +171,11 @@ export interface DialogueChoice {
   requiredSkillValue?: number;
   timeCost?: number;
   needsEffect?: Record<string, number>;
-  reputationEffect?: { factionId: string; value: number };
+  reputationEffect?: {
+    factionId?: string;
+    characterId?: string;
+    value: number;
+  };
   grantSkillId?: string;
   grantSkillAmount?: number;
 }
@@ -283,6 +287,7 @@ export interface SceneObject {
   // Relationship Systems
   parentObjectId?: string;
   affinityId?: string;
+  characterId?: string;
 
   interaction: InteractionType;
   interactionData?: string;

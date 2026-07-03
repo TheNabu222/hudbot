@@ -102,6 +102,10 @@ import {
   createRuntimeGameState,
   evaluateRuleConditions,
 } from "./utils/runtimeRules";
+import {
+  buildRelationshipTargets,
+  isQuestObjectiveComplete,
+} from "./utils/questObjectives";
 import { MapMaker } from "./components/MapMaker";
 import { AssetPickerModal } from "./components/AssetPickerModal";
 import { AssetLibraryManager } from "./components/AssetLibraryManager";
@@ -431,6 +435,9 @@ const App: React.FC = () => {
   const [activeTreeId, setActiveTreeId] = useState<string | null>(null);
   const [playerInventory, setPlayerInventory] = useState<string[]>([]);
   const [playerFlags, setPlayerFlags] = useState<string[]>([]);
+  const [playerTalkCounts, setPlayerTalkCounts] = useState<
+    Record<string, number>
+  >({});
   const [activeQuests, setActiveQuests] = useState<string[]>([]);
   const [completedQuests, setCompletedQuests] = useState<string[]>([]);
   const [selectedInventoryItemId, setSelectedInventoryItemId] = useState<
@@ -2947,11 +2954,20 @@ const App: React.FC = () => {
       setPlayerInventory([]);
       setCollectedObjects([]);
       setPlayerFlags([]);
+      setPlayerTalkCounts({});
       setActiveQuests(
         project.quests?.filter((q) => q.autoStart).map((q) => q.id) || [],
       );
       setCompletedQuests([]);
       setTriggeredResponseIds(new Set());
+      const defaultFactions: Record<string, number> = {};
+      (project.factions || []).forEach((faction) => {
+        defaultFactions[faction.id] = faction.defaultAffinity ?? 0;
+      });
+      (project.characters || []).forEach((character) => {
+        defaultFactions[character.id] = character.defaultAffinity ?? 0;
+      });
+      setPlayerFactions(defaultFactions);
       const defaultNeeds: Record<string, number> = {};
       const customNeeds = project.globalSettings?.customNeeds?.length
         ? project.globalSettings.customNeeds
@@ -3361,6 +3377,15 @@ const App: React.FC = () => {
           (t) => t.id === obj.dialogueTreeId,
         );
         if (tree && tree.startNodeId) {
+          setPlayerTalkCounts((prev) => ({
+            ...prev,
+            [tree.id]: (prev[tree.id] || 0) + 1,
+          }));
+          setPlayerFlags((prev) =>
+            prev.includes(`talked_${tree.id}`)
+              ? prev
+              : [...prev, `talked_${tree.id}`],
+          );
           setActiveDialogue({ treeId: tree.id, nodeId: tree.startNodeId });
         }
       } else if (obj.interactionData) {
@@ -4073,17 +4098,15 @@ const App: React.FC = () => {
       if (completedQuests.includes(qId)) return;
       const quest = allQuests.find((q) => q.id === qId);
       if (!quest || !quest.objectives || quest.objectives.length === 0) return;
-      const allDone = quest.objectives.every((obj) => {
-        if (obj.type === "custom_flag" || obj.type === "talk_to")
-          return playerFlags.includes(obj.targetId);
-        if (obj.type === "collect_item")
-          return playerInventory.includes(obj.targetId);
-        if (obj.type === "reach_scene")
-          return project.currentSceneId === obj.targetId;
-        if (obj.type === "skill_check")
-          return (playerSkills[obj.targetId] || 0) >= (obj.requiredAmount || 1);
-        return false;
-      });
+      const allDone = quest.objectives.every((obj) =>
+        isQuestObjectiveComplete(obj, {
+          playerFlags,
+          playerInventory,
+          currentSceneId: project.currentSceneId,
+          playerSkills,
+          playerTalkCounts,
+        }),
+      );
       if (allDone) nowComplete.push(qId);
     });
     if (nowComplete.length === 0) return;
@@ -4113,7 +4136,7 @@ const App: React.FC = () => {
         }
       });
     });
-  }, [isPlaying, activeQuests, completedQuests, playerFlags, playerInventory, playerSkills, project.currentSceneId, project.quests]);
+  }, [isPlaying, activeQuests, completedQuests, playerFlags, playerInventory, playerSkills, playerTalkCounts, project.currentSceneId, project.quests]);
 
   const openScreenControlsEditor = () => {
     const existingMenu =
@@ -7594,12 +7617,23 @@ const App: React.FC = () => {
                                       setGameTime((prev) => (prev + (choice.timeCost || 0)) % 24);
                                     }
 
-                                    if (choice.reputationEffect && choice.reputationEffect.factionId) {
+                                    if (choice.reputationEffect) {
                                       const effect = choice.reputationEffect;
-                                      setPlayerFactions((prev) => ({
-                                        ...prev,
-                                        [effect.factionId]: Math.max(-100, Math.min(100, (prev[effect.factionId] || 0) + effect.value))
-                                      }));
+                                      const targetId =
+                                        effect.characterId || effect.factionId;
+                                      if (targetId) {
+                                        setPlayerFactions((prev) => ({
+                                          ...prev,
+                                          [targetId]: Math.max(
+                                            -100,
+                                            Math.min(
+                                              100,
+                                              (prev[targetId] || 0) +
+                                                effect.value,
+                                            ),
+                                          ),
+                                        }));
+                                      }
                                     }
 
                                     if (choice.needsEffect) {
@@ -9473,25 +9507,16 @@ const App: React.FC = () => {
                                     .length;
                                   (quest.objectives || []).forEach((obj) => {
                                     if (
-                                      (obj.type === "custom_flag" || obj.type === "talk_to") &&
-                                      playerFlags.includes(obj.targetId)
-                                    )
+                                      isQuestObjectiveComplete(obj, {
+                                        playerFlags,
+                                        playerInventory,
+                                        currentSceneId: project.currentSceneId,
+                                        playerSkills,
+                                        playerTalkCounts,
+                                      })
+                                    ) {
                                       completedObjs++;
-                                    if (
-                                      obj.type === "collect_item" &&
-                                      playerInventory.includes(obj.targetId)
-                                    )
-                                      completedObjs++;
-                                    if (
-                                      obj.type === "reach_scene" &&
-                                      project.currentSceneId === obj.targetId
-                                    )
-                                      completedObjs++;
-                                    if (
-                                      obj.type === "skill_check" &&
-                                      (playerSkills[obj.targetId] || 0) >= (obj.requiredAmount || 1)
-                                    )
-                                      completedObjs++;
+                                    }
                                   });
                                   const isCompleted =
                                     totalObjs > 0 && completedObjs >= totalObjs;
@@ -9532,30 +9557,17 @@ const App: React.FC = () => {
                                             Objectives
                                           </div>
                                           {quest.objectives.map((obj) => {
-                                            let isObjDone = false;
-                                            if (
-                                              (obj.type === "custom_flag" || obj.type === "talk_to") &&
-                                              playerFlags.includes(obj.targetId)
-                                            )
-                                              isObjDone = true;
-                                            if (
-                                              obj.type === "collect_item" &&
-                                              playerInventory.includes(
-                                                obj.targetId,
-                                              )
-                                            )
-                                              isObjDone = true;
-                                            if (
-                                              obj.type === "reach_scene" &&
-                                              project.currentSceneId ===
-                                                obj.targetId
-                                            )
-                                              isObjDone = true;
-                                            if (
-                                              obj.type === "skill_check" &&
-                                              (playerSkills[obj.targetId] || 0) >= (obj.requiredAmount || 1)
-                                            )
-                                              isObjDone = true;
+                                            const isObjDone = isQuestObjectiveComplete(
+                                              obj,
+                                              {
+                                                playerFlags,
+                                                playerInventory,
+                                                currentSceneId:
+                                                  project.currentSceneId,
+                                                playerSkills,
+                                                playerTalkCounts,
+                                              },
+                                            );
                                             return (
                                               <div
                                                 key={obj.id}
@@ -14001,9 +14013,14 @@ const App: React.FC = () => {
                                           "novelty",
                                         ]
                                   }
-                                  relationshipIds={(
-                                    project.factions || []
-                                  ).map((faction) => faction.id)}
+                                  relationshipIds={buildRelationshipTargets(
+                                    project.characters || [],
+                                    project.factions || [],
+                                  ).map((target) => target.id)}
+                                  relationshipTargets={buildRelationshipTargets(
+                                    project.characters || [],
+                                    project.factions || [],
+                                  )}
                                   onChange={(updates) =>
                                     updateObject(selectedObject.id, updates)
                                   }
@@ -14037,9 +14054,10 @@ const App: React.FC = () => {
                                     "novelty",
                                   ]
                             }
-                            relationshipIds={(project.factions || []).map(
-                              (faction) => faction.id,
-                            )}
+                            relationshipIds={buildRelationshipTargets(
+                              project.characters || [],
+                              project.factions || [],
+                            ).map((target) => target.id)}
                             onChange={(clickResponses) =>
                               updateObject(selectedObject.id, {
                                 clickResponses,
@@ -14282,6 +14300,31 @@ const App: React.FC = () => {
                                 {(project.dialogueTrees || []).map((t) => (
                                   <option key={t.id} value={t.id}>
                                     {t.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="text-sm text-neutral-500">
+                                Linked Character (roster)
+                              </label>
+                              <select
+                                value={selectedObject.characterId || ""}
+                                onChange={(e) =>
+                                  updateObject(selectedObject.id, {
+                                    characterId: e.target.value || undefined,
+                                    affinityId:
+                                      e.target.value ||
+                                      selectedObject.affinityId,
+                                  })
+                                }
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm mt-1"
+                              >
+                                <option value="">No linked character</option>
+                                {(project.characters || []).map((character) => (
+                                  <option key={character.id} value={character.id}>
+                                    {character.name}
                                   </option>
                                 ))}
                               </select>
@@ -15987,6 +16030,156 @@ const App: React.FC = () => {
                                       </div>
                                     )}
                                   </div>
+
+                                  <div className="flex flex-wrap gap-2 mt-2">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-sm uppercase font-bold text-emerald-800">
+                                        Relationship:
+                                      </span>
+                                      <select
+                                        value={
+                                          choice.reputationEffect?.characterId ||
+                                          choice.reputationEffect?.factionId ||
+                                          ""
+                                        }
+                                        onChange={(e) => {
+                                          const targetId = e.target.value;
+                                          const isCharacter = (
+                                            project.characters || []
+                                          ).some(
+                                            (character) =>
+                                              character.id === targetId,
+                                          );
+                                          const newTrees = (
+                                            project.dialogueTrees || []
+                                          ).map((t) =>
+                                            t.id === tree.id
+                                              ? {
+                                                  ...t,
+                                                  nodes: (t.nodes || []).map(
+                                                    (n) =>
+                                                      n.id === node.id
+                                                        ? {
+                                                            ...n,
+                                                            choices: (
+                                                              n.choices || []
+                                                            ).map((c, i) =>
+                                                              i === cIdx
+                                                                ? {
+                                                                    ...c,
+                                                                    reputationEffect:
+                                                                      targetId
+                                                                        ? {
+                                                                            characterId:
+                                                                              isCharacter
+                                                                                ? targetId
+                                                                                : undefined,
+                                                                            factionId:
+                                                                              isCharacter
+                                                                                ? undefined
+                                                                                : targetId,
+                                                                            value:
+                                                                              c.reputationEffect
+                                                                                ?.value ||
+                                                                              5,
+                                                                          }
+                                                                        : undefined,
+                                                                  }
+                                                                : c,
+                                                            ),
+                                                          }
+                                                        : n,
+                                                  ),
+                                                }
+                                              : t,
+                                          );
+                                          pushHistory({
+                                            ...project,
+                                            dialogueTrees: newTrees,
+                                          });
+                                        }}
+                                        className="bg-neutral-900 border border-neutral-800 rounded px-1 py-0.5 text-sm text-emerald-300"
+                                      >
+                                        <option value="">(None)</option>
+                                        {(project.characters || []).map(
+                                          (character) => (
+                                            <option
+                                              key={character.id}
+                                              value={character.id}
+                                            >
+                                              {character.name}
+                                            </option>
+                                          ),
+                                        )}
+                                        {(project.factions || []).map(
+                                          (faction) => (
+                                            <option
+                                              key={faction.id}
+                                              value={faction.id}
+                                            >
+                                              {faction.name} (faction)
+                                            </option>
+                                          ),
+                                        )}
+                                      </select>
+                                    </div>
+                                    {choice.reputationEffect && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-sm uppercase font-bold text-emerald-800">
+                                          Change:
+                                        </span>
+                                        <input
+                                          type="number"
+                                          value={
+                                            choice.reputationEffect.value ?? 5
+                                          }
+                                          onChange={(e) => {
+                                            const value = Number(
+                                              e.target.value,
+                                            );
+                                            const newTrees = (
+                                              project.dialogueTrees || []
+                                            ).map((t) =>
+                                              t.id === tree.id
+                                                ? {
+                                                    ...t,
+                                                    nodes: (t.nodes || []).map(
+                                                      (n) =>
+                                                        n.id === node.id
+                                                          ? {
+                                                              ...n,
+                                                              choices: (
+                                                                n.choices || []
+                                                              ).map((c, i) =>
+                                                                i === cIdx
+                                                                  ? {
+                                                                      ...c,
+                                                                      reputationEffect:
+                                                                        c.reputationEffect
+                                                                          ? {
+                                                                              ...c.reputationEffect,
+                                                                              value,
+                                                                            }
+                                                                          : undefined,
+                                                                    }
+                                                                  : c,
+                                                              ),
+                                                            }
+                                                          : n,
+                                                    ),
+                                                  }
+                                                : t,
+                                            );
+                                            pushHistory({
+                                              ...project,
+                                              dialogueTrees: newTrees,
+                                            });
+                                          }}
+                                          className="w-16 bg-neutral-900 border border-neutral-800 rounded px-1 py-0.5 text-sm text-emerald-300"
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               ))}
                               <button
@@ -17578,6 +17771,28 @@ const App: React.FC = () => {
                                   placeholder="Quest details..."
                                 />
                               </div>
+                              <label className="flex items-center gap-2 text-sm text-neutral-300">
+                                <input
+                                  type="checkbox"
+                                  checked={!!quest.autoStart}
+                                  onChange={(e) => {
+                                    const updated = (project.quests || []).map(
+                                      (q) =>
+                                        q.id === quest.id
+                                          ? {
+                                              ...q,
+                                              autoStart: e.target.checked,
+                                            }
+                                          : q,
+                                    );
+                                    pushHistory({
+                                      ...project,
+                                      quests: updated,
+                                    });
+                                  }}
+                                />
+                                Start automatically when the player begins Play
+                              </label>
                             </div>
                             <button
                               onClick={() => {
@@ -17593,6 +17808,209 @@ const App: React.FC = () => {
                             >
                               <Trash2 size={16} />
                             </button>
+                          </div>
+
+                          <div>
+                            <div className="flex justify-between items-center mb-4">
+                              <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-wider">
+                                Rewards
+                              </h3>
+                              <button
+                                onClick={() => {
+                                  const updated = (project.quests || []).map(
+                                    (q) =>
+                                      q.id === quest.id
+                                        ? {
+                                            ...q,
+                                            rewards: [
+                                              ...(q.rewards || []),
+                                              {
+                                                type: "set_flag" as const,
+                                                targetId: "",
+                                              },
+                                            ],
+                                          }
+                                        : q,
+                                  );
+                                  pushHistory({ ...project, quests: updated });
+                                }}
+                                className="text-emerald-400 text-sm hover:text-emerald-300 font-bold flex items-center gap-1"
+                              >
+                                + Add Reward
+                              </button>
+                            </div>
+                            <div className="space-y-2">
+                              {(quest.rewards || []).map((reward, rewardIdx) => (
+                                <div
+                                  key={`${quest.id}-reward-${rewardIdx}`}
+                                  className="grid grid-cols-[1fr_1fr_auto] gap-2 rounded border border-neutral-800 bg-neutral-950 p-3"
+                                >
+                                  <select
+                                    value={reward.type}
+                                    onChange={(e) => {
+                                      const updated = (project.quests || []).map(
+                                        (q) =>
+                                          q.id === quest.id
+                                            ? {
+                                                ...q,
+                                                rewards: (q.rewards || []).map(
+                                                  (candidate, idx) =>
+                                                    idx === rewardIdx
+                                                      ? {
+                                                          ...candidate,
+                                                          type: e.target
+                                                            .value as typeof reward.type,
+                                                        }
+                                                      : candidate,
+                                                ),
+                                              }
+                                            : q,
+                                      );
+                                      pushHistory({
+                                        ...project,
+                                        quests: updated,
+                                      });
+                                    }}
+                                    className="bg-neutral-900 border border-neutral-800 text-sm rounded px-2 py-1"
+                                  >
+                                    <option value="set_flag">Set story flag</option>
+                                    <option value="give_item">Give item</option>
+                                    <option value="modify_status">
+                                      Change need or skill
+                                    </option>
+                                  </select>
+                                  <select
+                                    value={reward.targetId}
+                                    onChange={(e) => {
+                                      const updated = (project.quests || []).map(
+                                        (q) =>
+                                          q.id === quest.id
+                                            ? {
+                                                ...q,
+                                                rewards: (q.rewards || []).map(
+                                                  (candidate, idx) =>
+                                                    idx === rewardIdx
+                                                      ? {
+                                                          ...candidate,
+                                                          targetId:
+                                                            e.target.value,
+                                                        }
+                                                      : candidate,
+                                                ),
+                                              }
+                                            : q,
+                                      );
+                                      pushHistory({
+                                        ...project,
+                                        quests: updated,
+                                      });
+                                    }}
+                                    className="bg-neutral-900 border border-neutral-800 text-sm rounded px-2 py-1"
+                                  >
+                                    <option value="">Select target...</option>
+                                    {reward.type === "give_item" &&
+                                      (project.inventoryItems || []).map(
+                                        (item) => (
+                                          <option key={item.id} value={item.id}>
+                                            {item.name}
+                                          </option>
+                                        ),
+                                      )}
+                                    {reward.type === "set_flag" &&
+                                      (project.gameFlags || []).map((flag) => (
+                                        <option key={flag} value={flag}>
+                                          {flag}
+                                        </option>
+                                      ))}
+                                    {reward.type === "modify_status" && (
+                                      <>
+                                        {(
+                                          project.globalSettings.customNeeds ||
+                                          []
+                                        ).map((need) => (
+                                          <option key={need} value={need}>
+                                            Need: {need}
+                                          </option>
+                                        ))}
+                                        {(
+                                          project.globalSettings.customSkills ||
+                                          []
+                                        ).map((skill) => (
+                                          <option key={skill} value={skill}>
+                                            Skill: {skill}
+                                          </option>
+                                        ))}
+                                      </>
+                                    )}
+                                  </select>
+                                  <button
+                                    onClick={() => {
+                                      const updated = (project.quests || []).map(
+                                        (q) =>
+                                          q.id === quest.id
+                                            ? {
+                                                ...q,
+                                                rewards: (
+                                                  q.rewards || []
+                                                ).filter(
+                                                  (_, idx) =>
+                                                    idx !== rewardIdx,
+                                                ),
+                                              }
+                                            : q,
+                                      );
+                                      pushHistory({
+                                        ...project,
+                                        quests: updated,
+                                      });
+                                    }}
+                                    className="text-red-400 hover:text-red-300"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                  {reward.type === "modify_status" && (
+                                    <input
+                                      type="number"
+                                      value={reward.amount ?? 1}
+                                      onChange={(e) => {
+                                        const updated = (
+                                          project.quests || []
+                                        ).map((q) =>
+                                          q.id === quest.id
+                                            ? {
+                                                ...q,
+                                                rewards: (q.rewards || []).map(
+                                                  (candidate, idx) =>
+                                                    idx === rewardIdx
+                                                      ? {
+                                                          ...candidate,
+                                                          amount: Number(
+                                                            e.target.value,
+                                                          ),
+                                                        }
+                                                      : candidate,
+                                                ),
+                                              }
+                                            : q,
+                                        );
+                                        pushHistory({
+                                          ...project,
+                                          quests: updated,
+                                        });
+                                      }}
+                                      className="col-span-3 bg-neutral-900 border border-neutral-800 text-sm rounded px-2 py-1"
+                                      placeholder="Amount (+/-)"
+                                    />
+                                  )}
+                                </div>
+                              ))}
+                              {(quest.rewards || []).length === 0 && (
+                                <p className="text-sm text-neutral-500 italic">
+                                  No rewards yet. Add a story flag, item, or stat
+                                  change when this quest completes.
+                                </p>
+                              )}
+                            </div>
                           </div>
 
                           <div>
@@ -17695,11 +18113,17 @@ const App: React.FC = () => {
                                         <option value="custom_flag">
                                           Story Event Triggered
                                         </option>
+                                        <option value="talk_to">
+                                          Talk / Interact (dialogue tree)
+                                        </option>
                                         <option value="collect_item">
                                           Collect Item
                                         </option>
                                         <option value="reach_scene">
                                           Reach Scene
+                                        </option>
+                                        <option value="skill_check">
+                                          Skill Level Reached
                                         </option>
                                       </select>
                                     </div>
@@ -17707,7 +18131,7 @@ const App: React.FC = () => {
                                       <LabelWithHelp
                                         label="Target"
                                         className="uppercase block mb-1"
-                                        helpText="Which specific item, scene, or event triggers completion."
+                                        helpText="Which dialogue tree, item, scene, skill, or event completes this objective."
                                       />
                                       {obj.type === "custom_flag" && (
                                         <select
@@ -17833,8 +18257,145 @@ const App: React.FC = () => {
                                           ))}
                                         </select>
                                       )}
+                                      {obj.type === "talk_to" && (
+                                        <select
+                                          value={obj.targetId}
+                                          onChange={(e) => {
+                                            const updated = (
+                                              project.quests || []
+                                            ).map((q) =>
+                                              q.id === quest.id
+                                                ? {
+                                                    ...q,
+                                                    objectives:
+                                                      q.objectives.map((o) =>
+                                                        o.id === obj.id
+                                                          ? {
+                                                              ...o,
+                                                              targetId:
+                                                                e.target.value,
+                                                            }
+                                                          : o,
+                                                      ),
+                                                  }
+                                                : q,
+                                            );
+                                            pushHistory({
+                                              ...project,
+                                              quests: updated,
+                                            });
+                                          }}
+                                          className="w-full bg-neutral-900 border border-neutral-800 text-sm rounded px-2 py-1"
+                                        >
+                                          <option value="">
+                                            Select Dialogue Tree...
+                                          </option>
+                                          {(project.dialogueTrees || []).map(
+                                            (tree) => (
+                                              <option
+                                                key={tree.id}
+                                                value={tree.id}
+                                              >
+                                                {tree.name}
+                                              </option>
+                                            ),
+                                          )}
+                                        </select>
+                                      )}
+                                      {obj.type === "skill_check" && (
+                                        <select
+                                          value={obj.targetId}
+                                          onChange={(e) => {
+                                            const updated = (
+                                              project.quests || []
+                                            ).map((q) =>
+                                              q.id === quest.id
+                                                ? {
+                                                    ...q,
+                                                    objectives:
+                                                      q.objectives.map((o) =>
+                                                        o.id === obj.id
+                                                          ? {
+                                                              ...o,
+                                                              targetId:
+                                                                e.target.value,
+                                                            }
+                                                          : o,
+                                                      ),
+                                                  }
+                                                : q,
+                                            );
+                                            pushHistory({
+                                              ...project,
+                                              quests: updated,
+                                            });
+                                          }}
+                                          className="w-full bg-neutral-900 border border-neutral-800 text-sm rounded px-2 py-1"
+                                        >
+                                          <option value="">
+                                            Select Skill...
+                                          </option>
+                                          {(
+                                            project.globalSettings
+                                              .customSkills || [
+                                              "naturalist",
+                                              "occultist",
+                                              "scribal",
+                                              "martial",
+                                              "crafter",
+                                            ]
+                                          ).map((skill) => (
+                                            <option key={skill} value={skill}>
+                                              {skill}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      )}
                                     </div>
                                   </div>
+                                  {(obj.type === "talk_to" ||
+                                    obj.type === "skill_check") && (
+                                    <div className="mt-2">
+                                      <LabelWithHelp
+                                        label="Required Count / Level"
+                                        className="uppercase block mb-1"
+                                        helpText="For talk objectives: how many conversations. For skills: minimum level."
+                                      />
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        value={obj.requiredAmount || 1}
+                                        onChange={(e) => {
+                                          const updated = (
+                                            project.quests || []
+                                          ).map((q) =>
+                                            q.id === quest.id
+                                              ? {
+                                                  ...q,
+                                                  objectives: q.objectives.map(
+                                                    (o) =>
+                                                      o.id === obj.id
+                                                        ? {
+                                                            ...o,
+                                                            requiredAmount:
+                                                              Number(
+                                                                e.target.value,
+                                                              ) || 1,
+                                                          }
+                                                        : o,
+                                                  ),
+                                                }
+                                              : q,
+                                          );
+                                          pushHistory({
+                                            ...project,
+                                            quests: updated,
+                                          });
+                                        }}
+                                        className="w-full bg-neutral-900 border border-neutral-800 text-sm rounded px-2 py-1"
+                                      />
+                                    </div>
+                                  )}
                                   <div className="mt-2">
                                     <LabelWithHelp
                                       label="Player-facing Description"

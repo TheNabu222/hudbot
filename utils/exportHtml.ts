@@ -970,6 +970,7 @@ export function generateExportHtml(project: Project): string {
       skills: defaultSkills,
       inventory: [],
       flags: {},
+      talkCounts: {},
       relationships: {},
       activeQuests: gameData.quests?.filter(q => q.autoStart).map(q => q.id) || [],
       completedQuests: [],
@@ -992,6 +993,7 @@ export function generateExportHtml(project: Project): string {
     state.collectedObjects = state.collectedObjects || [];
     state.activeUiMenus = state.activeUiMenus || [];
     state.relationships = state.relationships || {};
+    state.talkCounts = state.talkCounts || {};
     state.runtimePositions = state.runtimePositions || {};
 
     let saveGame = () => {
@@ -1121,8 +1123,10 @@ export function generateExportHtml(project: Project): string {
       window.startDialogue = (treeId) => {
         const tree = dialogueTrees.find(t => t.id === treeId);
         if (tree && tree.startNodeId) {
+          state.talkCounts[treeId] = (state.talkCounts[treeId] || 0) + 1;
           state.flags['talked_' + treeId] = true;
           saveGame();
+          checkQuestAutoComplete();
           showDialogueNode(tree, tree.startNodeId);
         }
       };
@@ -1225,7 +1229,8 @@ export function generateExportHtml(project: Project): string {
           const q = (gameData.quests || []).find(q => q.id === qId);
           if (!q || !q.objectives || q.objectives.length === 0) return;
           const allDone = q.objectives.every(obj => {
-            if (obj.type === 'custom_flag' || obj.type === 'talk_to') return !!state.flags[obj.targetId];
+            if (obj.type === 'custom_flag') return !!state.flags[obj.targetId];
+            if (obj.type === 'talk_to') return (state.talkCounts[obj.targetId] || 0) >= (obj.requiredAmount || 1);
             if (obj.type === 'collect_item') return state.inventory.includes(obj.targetId);
             if (obj.type === 'reach_scene') return state.currentSceneId === obj.targetId || !!state.flags['visited_scene_' + obj.targetId];
             if (obj.type === 'skill_check') return (state.skills[obj.targetId] || 0) >= (obj.requiredAmount || 1);
@@ -1290,9 +1295,12 @@ export function generateExportHtml(project: Project): string {
           }
           updateNeedsUI();
         }
-        if (choice.reputationEffect && choice.reputationEffect.factionId) {
+        if (choice.reputationEffect) {
           const fe = choice.reputationEffect;
-          state.relationships[fe.factionId] = Math.max(-100, Math.min(100, (state.relationships[fe.factionId] || 0) + fe.value));
+          const relationshipTarget = fe.characterId || fe.factionId;
+          if (relationshipTarget) {
+            state.relationships[relationshipTarget] = Math.max(-100, Math.min(100, (state.relationships[relationshipTarget] || 0) + fe.value));
+          }
         }
         if (choice.timeCost) {
           state.time = ((state.time || 8) + choice.timeCost) % 24;
@@ -2232,7 +2240,8 @@ export function generateExportHtml(project: Project): string {
               html += \`<div style="font-size: 12px; font-weight: bold; text-transform: uppercase; color: var(--ui-primary); margin-bottom: 8px;">Objectives</div>\`;
               q.objectives.forEach(obj => {
                  let isDone = false;
-                 if (obj.type === 'custom_flag' || obj.type === 'talk_to') isDone = !!state.flags[obj.targetId];
+                 if (obj.type === 'custom_flag') isDone = !!state.flags[obj.targetId];
+                 if (obj.type === 'talk_to') isDone = (state.talkCounts[obj.targetId] || 0) >= (obj.requiredAmount || 1);
                  if (obj.type === 'collect_item') isDone = state.inventory.includes(obj.targetId);
                  if (obj.type === 'reach_scene') isDone = state.currentSceneId === obj.targetId || !!state.flags['visited_scene_' + obj.targetId];
                  if (obj.type === 'skill_check') isDone = (state.skills[obj.targetId] || 0) >= (obj.requiredAmount || 1);

@@ -16,6 +16,7 @@ interface RuleConditionEditorProps {
   skillIds: string[];
   needIds: string[];
   relationshipIds: string[];
+  relationshipTargets?: Array<{ id: string; label: string }>;
   onChange: (updates: {
     conditions?: RuleCondition[];
     conditionMode?: "all" | "any";
@@ -34,6 +35,7 @@ export const RuleConditionEditor: React.FC<RuleConditionEditorProps> = ({
   skillIds,
   needIds,
   relationshipIds,
+  relationshipTargets,
   onChange,
   title = "Only do this if…",
 }) => {
@@ -47,8 +49,10 @@ export const RuleConditionEditor: React.FC<RuleConditionEditorProps> = ({
       return quests.map((quest) => ({ id: quest.id, label: quest.name }));
     if (type === "skill") return skillIds.map((id) => ({ id, label: id }));
     if (type === "need") return needIds.map((id) => ({ id, label: id }));
-    if (type === "relationship")
+    if (type === "relationship") {
+      if (relationshipTargets?.length) return relationshipTargets;
       return relationshipIds.map((id) => ({ id, label: id }));
+    }
     return [{ id: "clock", label: "Current time" }];
   };
 
