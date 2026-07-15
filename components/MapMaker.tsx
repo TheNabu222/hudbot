@@ -41,6 +41,10 @@ export function MapMaker({
   }));
   const activeMap = maps.find((map) => map.id === activeMapId);
   const activeMapNodes = activeMap?.nodes || [];
+  const activeMapFit = activeMap?.backgroundFit || "contain";
+  const activeMapScale = activeMap?.backgroundScale ?? 1;
+  const activeMapOffsetX = activeMap?.backgroundOffsetX ?? 0;
+  const activeMapOffsetY = activeMap?.backgroundOffsetY ?? 0;
   const editingNode = activeMapNodes.find(
     (node) => node.id === editingNodeId,
   );
@@ -65,6 +69,10 @@ export function MapMaker({
       id: `map-${uuidv4().slice(0, 8)}`,
       name: `World Map ${maps.length + 1}`,
       backgroundSrc: null,
+      backgroundFit: "contain",
+      backgroundScale: 1,
+      backgroundOffsetX: 0,
+      backgroundOffsetY: 0,
       nodes: [],
     };
     updateProject({ maps: [...maps, newMap] });
@@ -255,6 +263,87 @@ export function MapMaker({
               />
             </div>
 
+            <div className="grid min-w-[260px] max-w-md flex-1 grid-cols-2 gap-2 rounded border border-neutral-800 bg-black/30 p-2">
+              <label className="col-span-2 text-[9px] font-bold uppercase tracking-[0.16em] text-neutral-500">
+                Artwork placement
+              </label>
+              <select
+                value={activeMapFit}
+                onChange={(event) =>
+                  updateActiveMap({
+                    backgroundFit: event.target.value as FastTravelMap["backgroundFit"],
+                  })
+                }
+                className="col-span-2 rounded border border-neutral-700 bg-black/50 px-2 py-1 text-[11px] text-neutral-100 outline-none focus:border-[#00ffcc]/70"
+              >
+                <option value="contain">Fit whole image</option>
+                <option value="cover">Fill screen/crop edges</option>
+                <option value="fill">Stretch to screen</option>
+              </select>
+              <label className="text-[10px] text-neutral-400">
+                Zoom
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2"
+                  step="0.01"
+                  value={activeMapScale}
+                  onChange={(event) =>
+                    updateActiveMap({
+                      backgroundScale: Number(event.target.value),
+                    })
+                  }
+                  className="mt-1 w-full accent-[#00ffcc]"
+                />
+              </label>
+              <label className="text-[10px] text-neutral-400">
+                Pan X
+                <input
+                  type="range"
+                  min="-50"
+                  max="50"
+                  step="1"
+                  value={activeMapOffsetX}
+                  onChange={(event) =>
+                    updateActiveMap({
+                      backgroundOffsetX: Number(event.target.value),
+                    })
+                  }
+                  className="mt-1 w-full accent-pink-400"
+                />
+              </label>
+              <label className="text-[10px] text-neutral-400">
+                Pan Y
+                <input
+                  type="range"
+                  min="-50"
+                  max="50"
+                  step="1"
+                  value={activeMapOffsetY}
+                  onChange={(event) =>
+                    updateActiveMap({
+                      backgroundOffsetY: Number(event.target.value),
+                    })
+                  }
+                  className="mt-1 w-full accent-pink-400"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() =>
+                  updateActiveMap({
+                    backgroundFit: "contain",
+                    backgroundScale: 1,
+                    backgroundOffsetX: 0,
+                    backgroundOffsetY: 0,
+                  })
+                }
+                className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-[10px] font-bold text-neutral-300 hover:border-[#00ffcc]/50 hover:text-[#00ffcc]"
+              >
+                Reset
+              </button>
+            </div>
+
             <div className="hidden items-center gap-3 border-l border-neutral-800 pl-4 text-[10px] text-neutral-500 lg:flex">
               <span>
                 <strong className="text-[#00ffcc]">
@@ -313,7 +402,13 @@ export function MapMaker({
                         <img
                           src={activeMap.backgroundSrc}
                           alt={`${activeMap.name} background`}
-                          className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+                          className="pointer-events-none absolute inset-0 h-full w-full"
+                          style={{
+                            objectFit:
+                              activeMapFit === "fill" ? "fill" : activeMapFit,
+                            transform: `translate(${activeMapOffsetX}%, ${activeMapOffsetY}%) scale(${activeMapScale})`,
+                            transformOrigin: "center",
+                          }}
                         />
                       )}
 
@@ -359,25 +454,25 @@ export function MapMaker({
                             <span
                               className={`flex h-11 w-11 items-center justify-center rounded-full border-2 shadow-xl transition ${
                                 isEditing
-                                  ? "scale-110 border-[#00ffcc] bg-[#00ffcc]/20 text-[#00ffcc] shadow-[0_0_24px_rgba(0,255,204,0.28)]"
-                                  : "border-pink-400/70 bg-[#120d1d]/95 text-pink-300 group-hover:scale-110 group-hover:border-pink-300"
+                                  ? "scale-110 border-[#00ffcc] bg-[#00ffcc]/20 text-[#00ffcc] opacity-95 shadow-[0_0_24px_rgba(0,255,204,0.28)]"
+                                  : "border-pink-400/70 bg-[#120d1d]/35 text-pink-300 opacity-45 group-hover:scale-110 group-hover:border-pink-300 group-hover:opacity-95 group-focus-visible:opacity-95"
                               }`}
                             >
                               {node.iconSrc ? (
                                 <img
                                   src={node.iconSrc}
                                   alt=""
-                                  className="h-8 w-8 object-contain drop-shadow"
+                                  className="h-8 w-8 object-contain opacity-80 drop-shadow"
                                 />
                               ) : (
-                                <MapPin size={23} />
+                                <MapPin size={23} className="opacity-80" />
                               )}
                             </span>
                             <span
-                              className={`mt-1 max-w-36 truncate rounded border px-2 py-1 font-comic text-[10px] font-bold shadow-xl ${
+                              className={`pointer-events-none mt-1 max-w-36 truncate rounded border px-2 py-1 font-comic text-[10px] font-bold shadow-xl transition-opacity ${
                                 isEditing
-                                  ? "border-[#00ffcc]/60 bg-[#071411] text-white"
-                                  : "border-pink-500/30 bg-[#080711]/95 text-pink-100"
+                                  ? "border-[#00ffcc]/60 bg-[#071411] text-white opacity-100"
+                                  : "border-pink-500/30 bg-[#080711]/95 text-pink-100 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
                               }`}
                             >
                               {node.name}

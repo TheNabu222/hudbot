@@ -11,6 +11,12 @@ const getLibraryAssetActionLabel = (asset: Pick<Asset, "type">) => {
   return "Place in room";
 };
 
+const normalizeCategoryName = (value: string) =>
+  value.trim().replace(/\s+/g, " ");
+
+const isReservedCategory = (value: string) =>
+  ["", "all", "favorites", "root"].includes(value.toLowerCase());
+
 interface AssetLibraryManagerProps {
   project: Project;
   updateProject: (updates: Partial<Project>) => void;
@@ -45,6 +51,10 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
     if (!files) return;
 
     const newAssets: Asset[] = [];
+    const uploadCategory =
+      activeCategory === "all" || activeCategory === "favorites"
+        ? "root"
+        : activeCategory;
     const readPromises = Array.from(files).map(
       (file) =>
         new Promise<void>((resolve, reject) => {
@@ -62,7 +72,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                 type,
                 name: file.name.replace(/\.[^/.]+$/, ""),
                 src: result,
-                category: activeCategory === "all" ? "root" : activeCategory,
+                category: uploadCategory,
               });
             }
             resolve();
@@ -79,8 +89,24 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
   };
 
   const categories = Array.from(
-    new Set(project.assets.map((a) => a.category).filter((c) => c && c !== "root"))
-  );
+    new Set([
+      ...(project.assetCategories || []),
+      ...project.assets
+        .map((a) => a.category)
+        .filter((c): c is string => Boolean(c && c !== "root")),
+    ]),
+  ).sort((a, b) => a.localeCompare(b));
+
+  const createCategory = (rawValue: string) => {
+    const newCategory = normalizeCategoryName(rawValue);
+    if (isReservedCategory(newCategory)) return;
+    updateProject({
+      assetCategories: Array.from(
+        new Set([...(project.assetCategories || []), newCategory]),
+      ).sort((a, b) => a.localeCompare(b)),
+    });
+    setActiveCategory(newCategory);
+  };
 
   const filteredAssets = project.assets.filter((a) => {
     if (activeCategory === "favorites" && !a.isFavorite) return false;
@@ -105,7 +131,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
       message:
         "Clear the whole file collection? Placed canvas objects stay where they are, but the Collect library starts fresh.",
       onConfirm: () => {
-        updateProject({ assets: [] });
+        updateProject({ assets: [], assetCategories: [] });
         setSelectedAssetIds(new Set());
         setActiveCategory("all");
       },
@@ -202,9 +228,7 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                  setPromptDialog({
                    isOpen: true,
                    message: "Enter new category name:",
-                   onSubmit: (newCat) => {
-                     if (newCat) setActiveCategory(newCat);
-                   }
+                   onSubmit: createCategory,
                  });
                }}
                className="w-full text-left px-3 py-2 text-sm text-neutral-500 hover:text-emerald-400"
@@ -542,8 +566,14 @@ export const AssetLibraryManager: React.FC<AssetLibraryManagerProps> = ({
                <div className="w-24 h-24 border-2 border-dashed border-neutral-700 rounded-full flex items-center justify-center mb-6 bg-neutral-950/50">
                  <ImageIcon size={32} className="opacity-40" />
                </div>
-               <h3 className="text-xl font-bold text-neutral-300 mb-2">No files found</h3>
-               <p className="text-sm opacity-70 max-w-sm text-center mb-6">Your file library is looking a little empty. Upload images, audio, or video files to get started.</p>
+               <h3 className="text-xl font-bold text-neutral-300 mb-2">
+                 {activeCategory === "all"
+                   ? "No files found"
+                   : `No files in ${activeCategory}`}
+               </h3>
+               <p className="text-sm opacity-70 max-w-sm text-center mb-6">
+                 Upload images, audio, or video files and they will land in the active category.
+               </p>
                <button 
                  onClick={() => uploadInputRef.current?.click()}
                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg shadow-lg flex items-center gap-2 transition-all hover:-translate-y-0.5"

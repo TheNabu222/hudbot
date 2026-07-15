@@ -19,33 +19,49 @@ interface DeviceFrameOverlayProps {
   calibration: DeviceFrameCalibration;
   imageSrc: string;
   className?: string;
+  screenInset?: number;
 }
 
 export const DeviceFrameOverlay: React.FC<DeviceFrameOverlayProps> = ({
   calibration,
   imageSrc,
   className = "",
+  screenInset = 0,
 }) => {
   const { outerWidth, outerHeight, screen } = calibration;
+  const inset = Math.max(
+    0,
+    Math.min(
+      screenInset,
+      Math.floor(screen.width / 2),
+      Math.floor(screen.height / 2),
+    ),
+  );
+  const aperture = {
+    x: screen.x + inset,
+    y: screen.y + inset,
+    width: Math.max(1, screen.width - inset * 2),
+    height: Math.max(1, screen.height - inset * 2),
+  };
   const slices = [
-    { x: 0, y: 0, width: outerWidth, height: screen.y },
+    { x: 0, y: 0, width: outerWidth, height: aperture.y },
     {
       x: 0,
-      y: screen.y,
-      width: screen.x,
-      height: screen.height,
+      y: aperture.y,
+      width: aperture.x,
+      height: aperture.height,
     },
     {
-      x: screen.x + screen.width,
-      y: screen.y,
-      width: outerWidth - screen.x - screen.width,
-      height: screen.height,
+      x: aperture.x + aperture.width,
+      y: aperture.y,
+      width: outerWidth - aperture.x - aperture.width,
+      height: aperture.height,
     },
     {
       x: 0,
-      y: screen.y + screen.height,
+      y: aperture.y + aperture.height,
       width: outerWidth,
-      height: outerHeight - screen.y - screen.height,
+      height: outerHeight - aperture.y - aperture.height,
     },
   ].filter((slice) => slice.width > 0 && slice.height > 0);
 

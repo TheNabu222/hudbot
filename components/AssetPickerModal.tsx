@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Folder, Image as ImageIcon, Music, Search, X, Video, Star, Info, Wand2, Upload } from 'lucide-react';
 import { Asset } from '../types';
 
@@ -41,10 +41,11 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
   isLoadingRepository = false,
   onUploadFiles,
 }) => {
+  const initialVisibleAssets = 24;
   const [activeBin, setActiveBin] = useState<string>('all');
   const [assetSearch, setAssetSearch] = useState('');
   const [editingInfoId, setEditingInfoId] = useState<string | null>(null);
-  const [visibleCount, setVisibleCount] = useState(60);
+  const [visibleCount, setVisibleCount] = useState(initialVisibleAssets);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -55,58 +56,87 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
   }, [onClose]);
 
   useEffect(() => {
-    setVisibleCount(60);
+    setVisibleCount(initialVisibleAssets);
   }, [activeBin, assetSearch, filterType]);
 
-  const filteredAssets = assets.filter(a => {
-    if (filterType && a.type !== filterType) return false;
-    if (assetSearch) {
-      if (a.name.toLowerCase().includes(assetSearch.toLowerCase())) return true;
-      if (a.description && a.description.toLowerCase().includes(assetSearch.toLowerCase())) return true;
-      if (a.tags && a.tags.some(t => t.toLowerCase().includes(assetSearch.toLowerCase()))) return true;
-      return false;
-    }
-    if (activeBin === 'all') return true;
-    if (activeBin === 'favorites') return a.isFavorite;
-    if (activeBin === 'recent') return recentAssetIds.includes(a.id);
-    if (activeBin === 'canvas') return canvasAssetIds.includes(a.id);
-    const cat = a.category === 'root' ? '' : a.category;
-    return cat === activeBin;
-  });
-
-  // Sort recent assets to maintain order
-  if (activeBin === 'recent' && !assetSearch) {
-    filteredAssets.sort((a, b) => {
-      const idxA = recentAssetIds.indexOf(a.id);
-      const idxB = recentAssetIds.indexOf(b.id);
-      return idxA - idxB;
+  const filteredAssets = useMemo(() => {
+    const search = assetSearch.trim().toLowerCase();
+    const recentIds = new Set(recentAssetIds);
+    const canvasIds = new Set(canvasAssetIds);
+    const matches = assets.filter(a => {
+      if (filterType && a.type !== filterType) return false;
+      if (search) {
+        if (a.name.toLowerCase().includes(search)) return true;
+        if (a.description && a.description.toLowerCase().includes(search)) return true;
+        if (a.tags && a.tags.some(t => t.toLowerCase().includes(search))) return true;
+        return false;
+      }
+      if (activeBin === 'all') return true;
+      if (activeBin === 'favorites') return a.isFavorite;
+      if (activeBin === 'recent') return recentIds.has(a.id);
+      if (activeBin === 'canvas') return canvasIds.has(a.id);
+      const cat = a.category === 'root' ? '' : a.category;
+      return cat === activeBin;
     });
-  }
+
+    if (activeBin === 'recent' && !search) {
+      matches.sort((a, b) => recentAssetIds.indexOf(a.id) - recentAssetIds.indexOf(b.id));
+    }
+    return matches;
+  }, [activeBin, assetSearch, assets, canvasAssetIds, filterType, recentAssetIds]);
+
   const visibleAssets = filteredAssets.slice(0, visibleCount);
 
-  const allCategories = Array.from(new Set<string>(assets.filter(a => !filterType || a.type === filterType).map(a => a.category || '')));
-  const subfolders = new Set<string>();
-  allCategories.forEach(cat => {
-    if (activeBin === '') {
-      if (cat && cat !== 'root') subfolders.add(cat.split('/')[0]);
-    } else if (cat.startsWith(activeBin + '/')) {
-      const remaining = cat.substring(activeBin.length + 1);
-      if (remaining) subfolders.add(remaining.split('/')[0]);
+  const folders = useMemo(() => {
+    if (
+      assetSearch ||
+      activeBin === 'all' ||
+      activeBin === 'recent' ||
+      activeBin === 'favorites' ||
+      activeBin === 'canvas'
+    ) {
+      return [];
     }
-  });
-  repositoryFolders.forEach(path => {
-    if (activeBin === '') {
-      if (path) subfolders.add(path.split('/')[0]);
-    } else if (path.startsWith(activeBin + '/')) {
-      const remaining = path.substring(activeBin.length + 1);
-      if (remaining) subfolders.add(remaining.split('/')[0]);
-    }
-  });
-  const folders = Array.from(subfolders).filter(Boolean).sort();
+    const subfolders = new Set<string>();
+    assets.forEach(asset => {
+      if (filterType && asset.type !== filterType) return;
+      const cat = asset.category || '';
+      if (activeBin === '') {
+        if (cat && cat !== 'root') subfolders.add(cat.split('/')[0]);
+      } else if (cat.startsWith(activeBin + '/')) {
+        const remaining = cat.substring(activeBin.length + 1);
+        if (remaining) subfolders.add(remaining.split('/')[0]);
+      }
+    });
+    repositoryFolders.forEach(path => {
+      if (activeBin === '') {
+        if (path) subfolders.add(path.split('/')[0]);
+      } else if (path.startsWith(activeBin + '/')) {
+        const remaining = path.substring(activeBin.length + 1);
+        if (remaining) subfolders.add(remaining.split('/')[0]);
+      }
+    });
+    return Array.from(subfolders).filter(Boolean).sort();
+  }, [activeBin, assetSearch, assets, filterType, repositoryFolders]);
 
   return (
-    <div className="asset-picker-backdrop fixed inset-0 bg-black/80 z-[20000] flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="asset-picker-dialog bg-neutral-900 border border-neutral-600 rounded-lg max-w-5xl w-full h-[84vh] flex flex-col shadow-2xl overflow-hidden">
+    <div
+      className="asset-picker-backdrop fixed inset-0 z-[70000] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) event.stopPropagation();
+      }}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
+    >
+      <div
+        className="asset-picker-dialog flex h-[84vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-neutral-600 bg-neutral-900 shadow-2xl"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+      >
         
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 bg-neutral-950 p-4">
@@ -237,7 +267,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                       ) : asset.type === 'video' ? (
                         <video src={asset.src} className="h-full w-full object-contain pointer-events-none relative z-10" muted />
                       ) : (
-                        <img src={asset.src} alt={asset.name} className="h-full w-full object-contain pointer-events-none transition-transform group-hover:scale-105 relative z-10" loading="lazy" />
+                        <img src={asset.src} alt={asset.name} className="h-full w-full object-contain pointer-events-none transition-transform group-hover:scale-105 relative z-10" loading="lazy" decoding="async" />
                       )}
                       {onToggleFavorite && (
                          <div 
@@ -357,10 +387,10 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
                 <div className="flex justify-center pb-8">
                   <button
                     type="button"
-                    onClick={() => setVisibleCount((count) => count + 60)}
+                    onClick={() => setVisibleCount((count) => count + initialVisibleAssets)}
                     className="rounded border border-neutral-700 bg-neutral-800 px-4 py-2 font-comic text-xs font-bold text-neutral-300 hover:border-[#00ffcc]/50 hover:text-[#00ffcc]"
                   >
-                    Show 60 more ({filteredAssets.length - visibleAssets.length} remaining)
+                    Show {initialVisibleAssets} more ({filteredAssets.length - visibleAssets.length} remaining)
                   </button>
                 </div>
               )}

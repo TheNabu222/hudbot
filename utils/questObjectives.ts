@@ -34,7 +34,7 @@ export function isQuestObjectiveComplete(
 
 export function buildRelationshipTargets(
   characters: Array<{ id: string; name: string }> = [],
-  factions: Array<{ id: string; name: string }> = [],
+  factions: Array<{ id: string; name: string; role?: string; reputationLabel?: string }> = [],
 ): Array<{ id: string; label: string }> {
   return [
     ...characters.map((character) => ({
@@ -43,7 +43,7 @@ export function buildRelationshipTargets(
     })),
     ...factions.map((faction) => ({
       id: faction.id,
-      label: `${faction.name} (faction)`,
+      label: `${faction.name} (${faction.reputationLabel || faction.role || "group"})`,
     })),
   ];
 }

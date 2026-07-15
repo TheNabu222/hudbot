@@ -4,14 +4,21 @@ import {
   ArrowUp,
   Backpack,
   BookOpen,
+  Eye,
+  EyeOff,
   Flag,
   Gift,
+  Hammer,
   Link,
   MapPin,
   MessageSquare,
   Music,
   Plus,
+  RotateCw,
+  Save,
+  Settings,
   Trash2,
+  Users,
   Video,
   Wand2,
   X,
@@ -19,6 +26,7 @@ import {
 import {
   Asset,
   ClickResponse,
+  Character,
   DialogueTree,
   InteractionType,
   InventoryItem,
@@ -26,6 +34,7 @@ import {
   RuleCondition,
   RuleConditionType,
   Scene,
+  SceneObject,
 } from "../types";
 
 interface ClickResponseEditorProps {
@@ -37,6 +46,8 @@ interface ClickResponseEditorProps {
   quests: Quest[];
   gameFlags: string[];
   uiMenus: Scene[];
+  sceneObjects?: SceneObject[];
+  characters?: Character[];
   skillIds: string[];
   needIds: string[];
   relationshipIds: string[];
@@ -65,8 +76,38 @@ const responseChoices: Array<{
   { interaction: "toggle_inventory", label: "Open Inventory", icon: Backpack },
 ];
 
+const advancedResponseChoices: Array<{
+  interaction: InteractionType;
+  label: string;
+  icon: React.ElementType;
+}> = [
+  { interaction: "open_crafting", label: "Open Crafting", icon: Hammer },
+  { interaction: "open_quest_log", label: "Open Quest Log", icon: BookOpen },
+  { interaction: "open_map", label: "Open Map", icon: MapPin },
+  { interaction: "open_skills", label: "Open Skills", icon: Wand2 },
+  { interaction: "open_almanac", label: "Open Almanac", icon: BookOpen },
+  { interaction: "open_relationships", label: "Open Relationships", icon: Users },
+  { interaction: "open_settings", label: "Open Settings", icon: Settings },
+  { interaction: "clear_flag", label: "Forget Flag", icon: Flag },
+  { interaction: "toggle_flag", label: "Toggle Flag", icon: Flag },
+  { interaction: "show_object", label: "Show Object", icon: Eye },
+  { interaction: "hide_object", label: "Hide Object", icon: EyeOff },
+  { interaction: "toggle_object", label: "Toggle Object", icon: Eye },
+  { interaction: "gift_item", label: "Give Gift to Character", icon: Gift },
+  { interaction: "run_script", label: "Run Script", icon: Wand2 },
+  { interaction: "save_game", label: "Save Game", icon: Save },
+  { interaction: "load_game", label: "Load Game", icon: Save },
+  { interaction: "restart_scene", label: "Restart Room", icon: RotateCw },
+  { interaction: "restart_game", label: "Restart Game", icon: RotateCw },
+  { interaction: "toggle_fullscreen", label: "Toggle Fullscreen", icon: Settings },
+  { interaction: "toggle_mute", label: "Toggle Mute", icon: Music },
+  { interaction: "advance_day", label: "Advance Day", icon: RotateCw },
+];
+
+const allResponseChoices = [...responseChoices, ...advancedResponseChoices];
+
 const labelForInteraction = (interaction: InteractionType) =>
-  responseChoices.find((choice) => choice.interaction === interaction)?.label ||
+  allResponseChoices.find((choice) => choice.interaction === interaction)?.label ||
   interaction.replace(/_/g, " ");
 
 export const ClickResponseTypePicker: React.FC<{
@@ -122,6 +163,8 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
   quests,
   gameFlags,
   uiMenus,
+  sceneObjects = [],
+  characters = [],
   skillIds,
   needIds,
   relationshipIds,
@@ -212,7 +255,7 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
 
       {isAdding && (
         <div className="grid grid-cols-2 gap-1.5 rounded border border-neutral-700 bg-neutral-950 p-2">
-          {responseChoices.map((choice) => {
+          {allResponseChoices.map((choice) => {
             const Icon = choice.icon;
             return (
               <button
@@ -374,6 +417,26 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
             </select>
           )}
 
+          {(response.interaction === "clear_flag" ||
+            response.interaction === "toggle_flag") && (
+            <select
+              value={response.interactionData || ""}
+              onChange={(event) =>
+                updateResponse(response.id, {
+                  interactionData: event.target.value,
+                })
+              }
+              className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
+            >
+              <option value="">Choose story flag…</option>
+              {gameFlags.map((flag) => (
+                <option key={flag} value={flag}>
+                  {flag}
+                </option>
+              ))}
+            </select>
+          )}
+
           {response.interaction === "scene_change" && (
             <select
               value={response.interactionData || ""}
@@ -432,6 +495,67 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
             </select>
           )}
 
+          {(response.interaction === "show_object" ||
+            response.interaction === "hide_object" ||
+            response.interaction === "toggle_object") && (
+            <select
+              value={response.interactionData || ""}
+              onChange={(event) =>
+                updateResponse(response.id, {
+                  interactionData: event.target.value,
+                })
+              }
+              className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
+            >
+              <option value="">Choose object…</option>
+              {sceneObjects.map((object) => (
+                <option key={object.id} value={object.id}>
+                  {object.name || `Object ${object.id.slice(0, 4)}`}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {response.interaction === "gift_item" && (
+            <select
+              value={response.interactionData || ""}
+              onChange={(event) =>
+                updateResponse(response.id, {
+                  interactionData: event.target.value,
+                })
+              }
+              className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
+            >
+              <option value="">Choose roster character…</option>
+              {characters.map((character) => (
+                <option key={character.id} value={character.id}>
+                  {character.name}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {response.interaction === "run_script" && (
+            <select
+              value={response.scriptAssetId || ""}
+              onChange={(event) =>
+                updateResponse(response.id, {
+                  scriptAssetId: event.target.value || undefined,
+                })
+              }
+              className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
+            >
+              <option value="">Choose script…</option>
+              {assets
+                .filter((asset) => asset.type === "script")
+                .map((asset) => (
+                  <option key={asset.id} value={asset.id}>
+                    {asset.name}
+                  </option>
+                ))}
+            </select>
+          )}
+
           {response.interaction === "play_cutscene" && (
             <select
               value={response.interactionData || ""}
@@ -464,6 +588,28 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
               placeholder="https://…"
               className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
             />
+          )}
+
+          {[
+            "toggle_inventory",
+            "open_crafting",
+            "open_quest_log",
+            "open_map",
+            "open_skills",
+            "open_almanac",
+            "open_relationships",
+            "open_settings",
+            "save_game",
+            "load_game",
+            "restart_scene",
+            "restart_game",
+            "toggle_fullscreen",
+            "toggle_mute",
+            "advance_day",
+          ].includes(response.interaction) && (
+            <div className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-[10px] text-neutral-400">
+              This response uses the built-in game state. No extra target is needed.
+            </div>
           )}
 
           <div className="mt-3 space-y-2 border-t border-neutral-700/70 pt-3">

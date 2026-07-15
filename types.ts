@@ -208,9 +208,34 @@ export type ItemCategory =
   | "quest"
   | "crafting_station";
 
+export interface CraftingRequirement {
+  id: string;
+  itemId: string;
+  consume: boolean;
+  role?: "ingredient" | "tool";
+}
+
+export type CraftingOutcomeType =
+  | "give_item"
+  | "set_flag"
+  | "clear_flag"
+  | "change_need"
+  | "change_skill"
+  | "start_quest"
+  | "complete_quest";
+
+export interface CraftingOutcome {
+  id: string;
+  type: CraftingOutcomeType;
+  targetId: string;
+  amount?: number;
+}
+
 export interface CraftingRecipe {
   id: string;
   name: string;
+  requirements?: CraftingRequirement[];
+  outcomes?: CraftingOutcome[];
   ingredient1Id: string;
   ingredient2Id: string;
   ingredient3Id?: string;
@@ -227,6 +252,7 @@ export interface InventoryItem {
   description: string;
   iconAssetId: string | null;
   category?: ItemCategory;
+  collectionCategory?: string;
   isUsable?: boolean;
   consumeOnUse?: boolean;
   useMessage?: string;
@@ -491,6 +517,10 @@ export interface FastTravelMap {
   id: string;
   name: string;
   backgroundSrc: string | null;
+  backgroundFit?: "contain" | "cover" | "fill";
+  backgroundScale?: number;
+  backgroundOffsetX?: number;
+  backgroundOffsetY?: number;
   nodes: MapNode[];
 }
 
@@ -499,12 +529,15 @@ export interface LoreEntry {
   title: string;
   content: string;
   category?: string;
+  entryType?: "lore" | "journal" | "quest_note";
+  questId?: string;
   requiredFlagId?: string;
 }
 
 export interface Companion {
   id: string;
   name: string;
+  characterId?: string | null;
   assetId: string | null;
   dialogueTreeId: string | null; // For clicking on them
   requiredFlagId?: string; // Follows if you have this flag
@@ -516,6 +549,11 @@ export interface Faction {
   name: string;
   description: string;
   defaultAffinity: number;
+  role?: "faction" | "family" | "guild" | "village" | "shop" | "species" | "team" | "other";
+  reputationLabel?: string;
+  joinFlagId?: string;
+  allyFactionId?: string;
+  rivalFactionId?: string;
 }
 
 export interface RelationshipThreshold {
@@ -530,6 +568,25 @@ export interface GiftPreference {
   reactionText?: string;   // dialogue line shown when gifted
 }
 
+export interface CharacterRelationship {
+  id: string;
+  characterId: string;
+  label: string;
+  value: number;
+  notes?: string;
+}
+
+export interface StatTrackDefinition {
+  id: string;
+  label: string;
+  description?: string;
+  defaultValue: number;
+  min: number;
+  max: number;
+  color?: string;
+  visibleInHud?: boolean;
+}
+
 export interface Character {
   id: string;
   name: string;
@@ -540,6 +597,7 @@ export interface Character {
   defaultAffinity?: number;
   thresholds?: RelationshipThreshold[];
   giftPreferences?: GiftPreference[];
+  relationships?: CharacterRelationship[];
 }
 
 export interface Project {
@@ -550,6 +608,7 @@ export interface Project {
   currentSceneId: string;
   currentUiMenuId: string | null;
   assets: Asset[];
+  assetCategories?: string[];
   dialogueTrees: DialogueTree[];
   inventoryItems: InventoryItem[];
   craftingRecipes: CraftingRecipe[];
@@ -644,5 +703,8 @@ export interface Project {
     customCss?: string;
     customSkills?: string[];
     customNeeds?: string[];
+    customSkillDefinitions?: Record<string, StatTrackDefinition>;
+    customNeedDefinitions?: Record<string, StatTrackDefinition>;
+    itemGroups?: string[];
   };
 }

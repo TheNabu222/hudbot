@@ -101,6 +101,11 @@ const shellDestinations: Array<{
     detail: "Save the current game state",
   },
   {
+    interaction: "load_game",
+    label: "Load Game",
+    detail: "Restore the last saved game",
+  },
+  {
     interaction: "advance_day",
     label: "Advance Day",
     detail: "Move to the next in-game day",
@@ -119,6 +124,16 @@ const shellDestinations: Array<{
     interaction: "restart_game",
     label: "Restart Game",
     detail: "Wipe save and restart from the beginning",
+  },
+  {
+    interaction: "restart_scene",
+    label: "Restart Scene",
+    detail: "Reset the current room only",
+  },
+  {
+    interaction: "exit_game",
+    label: "Exit Game",
+    detail: "Leave play mode",
   },
 ];
 
@@ -574,7 +589,7 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
                     Drag the pink box to move it. Pull any edge or corner to
                     stretch or shrink it freely.
                   </p>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2">
                     {(
                       [
                         ["x", "Left"],
@@ -675,7 +690,7 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
                   </div>
                 </div>
 
-                <details open className="rounded border border-neutral-700 bg-neutral-950/60">
+                <details className="rounded border border-neutral-700 bg-neutral-950/60">
                   <summary className="cursor-pointer px-3 py-2 font-comic text-xs font-bold text-neutral-300 hover:text-white">
                     Stack additional actions (sounds, conditions, scene change, dialogue…)
                   </summary>

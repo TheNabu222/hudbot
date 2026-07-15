@@ -71,6 +71,7 @@ import {
   History,
   Clock,
   BookOpen,
+  Activity,
 } from "lucide-react";
 import Matter from "matter-js";
 import {
@@ -87,17 +88,22 @@ import {
   Quest,
   QuestObjective,
   CraftingRecipe,
+  CraftingOutcome,
   LoreEntry,
   Faction,
   Companion,
   Character,
+  StatTrackDefinition,
 } from "./types";
 import { generateExportHtml } from "./utils/exportHtml";
 import { TEMPLATES } from "./utils/templates";
 import { ImageEditorModal } from "./components/ImageEditorModal";
 import { exportToTwee, importFromTwee } from "./utils/twineAdapter";
 import { downloadJSON, downloadText, loadJSON, loadText } from "./utils/fileHelpers";
-import { stripDuplicatedAssetSources } from "./utils/projectPersistence";
+import {
+  prepareProjectForExport,
+  stripDuplicatedAssetSources,
+} from "./utils/projectPersistence";
 import {
   createRuntimeGameState,
   evaluateRuleConditions,
@@ -106,6 +112,12 @@ import {
   buildRelationshipTargets,
   isQuestObjectiveComplete,
 } from "./utils/questObjectives";
+import {
+  applyCraftingRecipeToInventory,
+  getCraftingRequirements,
+  recipeMatchesSelection,
+  withCraftingRequirements,
+} from "./utils/crafting";
 import { MapMaker } from "./components/MapMaker";
 import { AssetPickerModal } from "./components/AssetPickerModal";
 import { AssetLibraryManager } from "./components/AssetLibraryManager";
@@ -118,10 +130,7 @@ import {
   DeviceFrameCalibrator,
   DeviceFrameOverlay,
 } from "./components/DeviceFrameCalibrator";
-import {
-  ClickResponseEditor,
-  ClickResponseTypePicker,
-} from "./components/ClickResponseEditor";
+import { ClickResponseEditor } from "./components/ClickResponseEditor";
 import { AnimatedCursor } from "./components/AnimatedCursor";
 import { CursorBehaviorPicker } from "./components/CursorBehaviorPicker";
 import { HelpCenterModal } from "./components/HelpCenterModal";
@@ -145,6 +154,51 @@ export interface SaveSlotMeta {
 const PROJECT_STORAGE_KEY = "neocities_project";
 const SAVE_SLOTS_META_KEY = "neocities_project_slots_meta";
 const saveSlotStorageKey = (slotId: number) => `neocities_project_slot_${slotId}`;
+const DEFAULT_NEED_TRACKS = ["rest", "hunger", "connection", "spiritual", "novelty"];
+const DEFAULT_SKILL_TRACKS = ["naturalist", "occultist", "scribal"];
+
+const defaultTrackDefinition = (
+  id: string,
+  kind: "need" | "skill",
+): StatTrackDefinition => ({
+  id,
+  label: id,
+  defaultValue: kind === "need" ? 100 : 1,
+  min: 0,
+  max: kind === "need" ? 100 : 20,
+  color: kind === "need" ? "#ff7acc" : "#00ffcc",
+  visibleInHud: true,
+});
+
+const getNeedTrackIds = (project: Project) =>
+  project.globalSettings.customNeeds?.length
+    ? project.globalSettings.customNeeds
+    : DEFAULT_NEED_TRACKS;
+
+const getSkillTrackIds = (project: Project) =>
+  project.globalSettings.customSkills?.length
+    ? project.globalSettings.customSkills
+    : DEFAULT_SKILL_TRACKS;
+
+const getNeedTrackDefinition = (project: Project, id: string) => ({
+  ...defaultTrackDefinition(id, "need"),
+  ...(project.globalSettings.customNeedDefinitions?.[id] || {}),
+  id,
+});
+
+const getSkillTrackDefinition = (project: Project, id: string) => ({
+  ...defaultTrackDefinition(id, "skill"),
+  ...(project.globalSettings.customSkillDefinitions?.[id] || {}),
+  id,
+});
+
+const trackPercent = (value: number, definition: StatTrackDefinition) => {
+  const span = Math.max(1, definition.max - definition.min);
+  return Math.max(
+    0,
+    Math.min(100, ((value - definition.min) / span) * 100),
+  );
+};
 
 const inspectorSectionDescriptions: Record<string, string> = {
   "Game Screen & Room Size":
@@ -351,6 +405,10 @@ const App: React.FC = () => {
     quests: [],
     maps: [],
     gameFlags: [],
+    loreEntries: [],
+    factions: [],
+    companions: [],
+    characters: [],
   });
 
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
@@ -378,6 +436,8 @@ const App: React.FC = () => {
     y: number;
     objectId: string | null;
   } | null>(null);
+  const [editingClickSequenceObjectId, setEditingClickSequenceObjectId] =
+    useState<string | null>(null);
   const [clipboard, setClipboard] = useState<SceneObject[]>([]);
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
   const [repositoryFolders, setRepositoryFolders] = useState<string[]>([]);
@@ -501,6 +561,11 @@ const App: React.FC = () => {
     string | null
   >(null);
   const [itemsTab, setItemsTab] = useState<"items" | "crafting">("items");
+  const [activeInventoryItemId, setActiveInventoryItemId] = useState<
+    string | null
+  >(null);
+  const [activeItemGroup, setActiveItemGroup] = useState("all");
+  const [newItemGroupText, setNewItemGroupText] = useState("");
   const [rpgTab, setRpgTab] = useState<
     "quests" | "stats" | "characters" | "factions" | "lore" | "companions"
   >("quests");
@@ -601,6 +666,13 @@ const App: React.FC = () => {
   });
   const [isBackupMenuOpen, setIsBackupMenuOpen] = useState(false);
   const [hideEditorHud, setHideEditorHud] = useState(true);
+  const currentLocalhostPort =
+    typeof window !== "undefined" && window.location.hostname === "localhost"
+      ? window.location.port
+      : "";
+  const isAlternateLocalhostPort = Boolean(
+    currentLocalhostPort && currentLocalhostPort !== "3000",
+  );
 
   const [isResizingCanvas, setIsResizingCanvas] = useState<{
     direction: "r" | "b" | "br";
@@ -927,6 +999,10 @@ const App: React.FC = () => {
         ...map,
         nodes: Array.isArray(map.nodes) ? map.nodes : [],
       })),
+      loreEntries: parsed.loreEntries || [],
+      factions: parsed.factions || [],
+      companions: parsed.companions || [],
+      characters: parsed.characters || [],
       currentUiMenuId: parsed.currentUiMenuId || null,
       globalSettings: {
         ...(parsed.globalSettings || {}),
@@ -964,6 +1040,10 @@ const App: React.FC = () => {
       quests: hydrated.quests || [],
       maps: hydrated.maps || [],
       gameFlags: hydrated.gameFlags || [],
+      loreEntries: hydrated.loreEntries || [],
+      factions: hydrated.factions || [],
+      companions: hydrated.companions || [],
+      characters: hydrated.characters || [],
       globalSettings: {
         ...fallback.globalSettings,
         ...(hydrated.globalSettings || {}),
@@ -1019,6 +1099,22 @@ const App: React.FC = () => {
       ),
       quests: mergeImportedList(project.quests || [], normalizedIncoming.quests || []),
       maps: mergeImportedList(project.maps || [], normalizedIncoming.maps || []),
+      loreEntries: mergeImportedList(
+        project.loreEntries || [],
+        normalizedIncoming.loreEntries || [],
+      ),
+      factions: mergeImportedList(
+        project.factions || [],
+        normalizedIncoming.factions || [],
+      ),
+      companions: mergeImportedList(
+        project.companions || [],
+        normalizedIncoming.companions || [],
+      ),
+      characters: mergeImportedList(
+        project.characters || [],
+        normalizedIncoming.characters || [],
+      ),
       gameFlags: Array.from(
         new Set([...(project.gameFlags || []), ...(normalizedIncoming.gameFlags || [])]),
       ),
@@ -1075,7 +1171,7 @@ const App: React.FC = () => {
 
   const handleExportProject = () => {
     try {
-      const strippedProject = stripDuplicatedAssetSources(project);
+      const strippedProject = prepareProjectForExport(project);
       const jsonStr = JSON.stringify(strippedProject);
       const blob = new Blob([jsonStr], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -1602,6 +1698,13 @@ const App: React.FC = () => {
   const selectedObject = currentScene?.objects.find(
     (o) => o.id === selectedObjectId,
   );
+  const hasPlayableCursorAsset = (assetId?: string | null) =>
+    Boolean(assetId && project.assets.some((asset) => asset.id === assetId && asset.src));
+  const activeCursorAssetId =
+    hoverCursorAssetId || project.globalSettings.customCursorAssetId || null;
+  const activeCursorAsset = activeCursorAssetId
+    ? project.assets.find((asset) => asset.id === activeCursorAssetId && asset.src)
+    : undefined;
 
   const updateScene = (updates: Partial<typeof currentScene>) => {
     if (!currentScene) return;
@@ -2969,17 +3072,23 @@ const App: React.FC = () => {
       });
       setPlayerFactions(defaultFactions);
       const defaultNeeds: Record<string, number> = {};
-      const customNeeds = project.globalSettings?.customNeeds?.length
-        ? project.globalSettings.customNeeds
-        : ["rest", "hunger", "connection", "spiritual", "novelty"];
-      customNeeds.forEach((need) => (defaultNeeds[need] = 100));
+      getNeedTrackIds(project).forEach((need) => {
+        const definition = getNeedTrackDefinition(project, need);
+        defaultNeeds[need] = Math.max(
+          definition.min,
+          Math.min(definition.max, definition.defaultValue),
+        );
+      });
       setPlayerNeeds(defaultNeeds);
 
       const defaultSkills: Record<string, number> = {};
-      const customSkills = project.globalSettings?.customSkills?.length
-        ? project.globalSettings.customSkills
-        : ["naturalist", "occultist", "scribal"];
-      customSkills.forEach((skill) => (defaultSkills[skill] = 1));
+      getSkillTrackIds(project).forEach((skill) => {
+        const definition = getSkillTrackDefinition(project, skill);
+        defaultSkills[skill] = Math.max(
+          definition.min,
+          Math.min(definition.max, definition.defaultValue),
+        );
+      });
       setPlayerSkills(defaultSkills);
       setGameTime(8);
       setGameDay(1);
@@ -3227,6 +3336,58 @@ const App: React.FC = () => {
   };
   const previewDialogue = previewDialogueText;
 
+  const applyCraftingOutcomes = (recipe: CraftingRecipe) => {
+    (recipe.outcomes || []).forEach((outcome) => {
+      if (!outcome.targetId) return;
+
+      if (outcome.type === "set_flag") {
+        setPlayerFlags((prev) =>
+          prev.includes(outcome.targetId) ? prev : [...prev, outcome.targetId],
+        );
+      } else if (outcome.type === "clear_flag") {
+        setPlayerFlags((prev) =>
+          prev.filter((flag) => flag !== outcome.targetId),
+        );
+      } else if (outcome.type === "change_need") {
+        setPlayerNeeds((prev) => ({
+          ...prev,
+          [outcome.targetId]: Math.max(
+            0,
+            Math.min(
+              100,
+              (prev[outcome.targetId] || 0) + (outcome.amount || 0),
+            ),
+          ),
+        }));
+      } else if (outcome.type === "change_skill") {
+        setPlayerSkills((prev) => ({
+          ...prev,
+          [outcome.targetId]: Math.max(
+            0,
+            Math.min(
+              20,
+              (prev[outcome.targetId] || 0) + (outcome.amount || 0),
+            ),
+          ),
+        }));
+      } else if (outcome.type === "start_quest") {
+        setActiveQuests((prev) =>
+          prev.includes(outcome.targetId) ||
+          completedQuests.includes(outcome.targetId)
+            ? prev
+            : [...prev, outcome.targetId],
+        );
+      } else if (outcome.type === "complete_quest") {
+        setActiveQuests((prev) =>
+          prev.filter((questId) => questId !== outcome.targetId),
+        );
+        setCompletedQuests((prev) =>
+          prev.includes(outcome.targetId) ? prev : [...prev, outcome.targetId],
+        );
+      }
+    });
+  };
+
   const handleObjectClick = (obj: SceneObject, isChainedResponse = false) => {
     if (!isPlaying) return;
     if (!isChainedResponse) {
@@ -3386,6 +3547,7 @@ const App: React.FC = () => {
               ? prev
               : [...prev, `talked_${tree.id}`],
           );
+          setPreviewDialogue(null);
           setActiveDialogue({ treeId: tree.id, nodeId: tree.startNodeId });
         }
       } else if (obj.interactionData) {
@@ -3474,7 +3636,7 @@ const App: React.FC = () => {
         showError(`Scene not found: ${obj.interactionData}`);
       }
     } else if (obj.interaction === "toggle_inventory") {
-      setIsInventoryOpen((prev) => !prev);
+      togglePlayOverlay("inventory");
     } else if (obj.interaction === "restart_scene") {
       setPreviewDialogue("");
       setPlayerInventory([]);
@@ -3496,6 +3658,11 @@ const App: React.FC = () => {
       setIsInventoryOpen(false);
       setIsCraftingOpen(false);
       setIsQuestLogOpen(false);
+      setIsSkillsOpen(false);
+      setIsAlmanacOpen(false);
+      setIsRelationshipsOpen(false);
+      setIsSettingsOpen(false);
+      setIsMapOpen(false);
       const firstScene = (project.scenes && project.scenes[0]) || null;
       if (firstScene) {
         setProject((p) => ({ ...p, currentSceneId: firstScene.id }));
@@ -3544,22 +3711,22 @@ const App: React.FC = () => {
     } else if (obj.interaction === "exit_game") {
       setIsPlaying(false);
     } else if (obj.interaction === "open_crafting") {
-      setIsCraftingOpen(true);
+      togglePlayOverlay("crafting");
     } else if (obj.interaction === "open_quest_log") {
-      setIsQuestLogOpen(true);
+      togglePlayOverlay("questLog");
     } else if (obj.interaction === "open_skills") {
-      setIsSkillsOpen(true);
+      togglePlayOverlay("skills");
     } else if (obj.interaction === "open_almanac") {
-      setIsAlmanacOpen(true);
+      togglePlayOverlay("almanac");
     } else if (obj.interaction === "open_map") {
       if (project.maps && project.maps.length > 0 && !activeFastTravelMapId) {
         setActiveFastTravelMapId(project.maps[0].id);
       }
-      setIsMapOpen(true);
+      togglePlayOverlay("map");
     } else if (obj.interaction === "open_relationships") {
-      setIsRelationshipsOpen(true);
+      togglePlayOverlay("relationships");
     } else if (obj.interaction === "open_settings") {
-      setIsSettingsOpen(true);
+      togglePlayOverlay("settings");
     } else if (obj.interaction === "start_quest" && obj.interactionData) {
       if (
         !activeQuests.includes(obj.interactionData) &&
@@ -3993,34 +4160,111 @@ const App: React.FC = () => {
     coordinateScene.width || project.globalSettings.stageWidth || 800;
   const logicalStageHeight =
     coordinateScene.height || project.globalSettings.stageHeight || 600;
+  const deviceFramePlayInset = 0;
+  const deviceFramePlayableWidth = showDeviceFrame
+    ? Math.max(1, deviceFrame!.screen.width - deviceFramePlayInset * 2)
+    : logicalStageWidth;
+  const deviceFramePlayableHeight = showDeviceFrame
+    ? Math.max(1, deviceFrame!.screen.height - deviceFramePlayInset * 2)
+    : logicalStageHeight;
   const deviceFrameUniformScale = showDeviceFrame
     ? Math.min(
-        deviceFrame!.screen.width / logicalStageWidth,
-        deviceFrame!.screen.height / logicalStageHeight,
+        deviceFramePlayableWidth / logicalStageWidth,
+        deviceFramePlayableHeight / logicalStageHeight,
       )
     : 1;
   const deviceFrameStageScaleX = showDeviceFrame
     ? isPlaying
-      ? deviceFrame!.screen.width / logicalStageWidth
+      ? deviceFramePlayableWidth / logicalStageWidth
       : deviceFrameUniformScale
     : 1;
   const deviceFrameStageScaleY = showDeviceFrame
     ? isPlaying
-      ? deviceFrame!.screen.height / logicalStageHeight
+      ? deviceFramePlayableHeight / logicalStageHeight
       : deviceFrameUniformScale
     : 1;
   const deviceFrameStageLeft = showDeviceFrame
     ? isPlaying
-      ? deviceFrame!.screen.x
+      ? deviceFrame!.screen.x + deviceFramePlayInset
       : deviceFrame!.screen.x +
-        (deviceFrame!.screen.width - logicalStageWidth * deviceFrameUniformScale) / 2
+        (deviceFramePlayableWidth - logicalStageWidth * deviceFrameUniformScale) / 2
     : 0;
   const deviceFrameStageTop = showDeviceFrame
     ? isPlaying
-      ? deviceFrame!.screen.y
+      ? deviceFrame!.screen.y + deviceFramePlayInset
       : deviceFrame!.screen.y +
-        (deviceFrame!.screen.height - logicalStageHeight * deviceFrameUniformScale) / 2
+        (deviceFramePlayableHeight - logicalStageHeight * deviceFrameUniformScale) / 2
     : 0;
+  const getPlayOverlaySurfaceStyle = (
+    padding: string,
+  ): React.CSSProperties => ({
+    inset: showDeviceFrame ? "auto" : 0,
+    left: showDeviceFrame ? deviceFrameStageLeft : undefined,
+    top: showDeviceFrame ? deviceFrameStageTop : undefined,
+    width: showDeviceFrame ? deviceFramePlayableWidth : undefined,
+    height: showDeviceFrame ? deviceFramePlayableHeight : undefined,
+    padding,
+  });
+  type PlayOverlay =
+    | "map"
+    | "inventory"
+    | "crafting"
+    | "questLog"
+    | "skills"
+    | "almanac"
+    | "relationships"
+    | "settings";
+  const closePlayOverlays = () => {
+    setIsMapOpen(false);
+    setIsInventoryOpen(false);
+    setIsCraftingOpen(false);
+    setIsQuestLogOpen(false);
+    setIsSkillsOpen(false);
+    setIsAlmanacOpen(false);
+    setIsRelationshipsOpen(false);
+    setIsSettingsOpen(false);
+  };
+  const togglePlayOverlay = (overlay: PlayOverlay) => {
+    const wasOpen =
+      (overlay === "map" && isMapOpen) ||
+      (overlay === "inventory" && isInventoryOpen) ||
+      (overlay === "crafting" && isCraftingOpen) ||
+      (overlay === "questLog" && isQuestLogOpen) ||
+      (overlay === "skills" && isSkillsOpen) ||
+      (overlay === "almanac" && isAlmanacOpen) ||
+      (overlay === "relationships" && isRelationshipsOpen) ||
+      (overlay === "settings" && isSettingsOpen);
+
+    closePlayOverlays();
+    if (wasOpen) return;
+
+    switch (overlay) {
+      case "map":
+        setIsMapOpen(true);
+        break;
+      case "inventory":
+        setIsInventoryOpen(true);
+        break;
+      case "crafting":
+        setIsCraftingOpen(true);
+        break;
+      case "questLog":
+        setIsQuestLogOpen(true);
+        break;
+      case "skills":
+        setIsSkillsOpen(true);
+        break;
+      case "almanac":
+        setIsAlmanacOpen(true);
+        break;
+      case "relationships":
+        setIsRelationshipsOpen(true);
+        break;
+      case "settings":
+        setIsSettingsOpen(true);
+        break;
+    }
+  };
   const selectedHudConfig = selectedHudWidget
     ? getHudWidgetConfig(selectedHudWidget)
     : null;
@@ -4039,6 +4283,16 @@ const App: React.FC = () => {
   const selectedHudPosition = selectedHudConfig
     ? project.globalSettings[selectedHudConfig.positionKey]
     : undefined;
+  const worldRulesUsesDetailPane = rpgTab === "quests";
+
+  useEffect(() => {
+    if (
+      editorMode === "rpg_systems" &&
+      (rpgTab === "factions" || rpgTab === "companions")
+    ) {
+      setRpgTab("characters");
+    }
+  }, [editorMode, rpgTab]);
 
   useEffect(() => {
     if (isPlaying || (editorMode !== "stage" && editorMode !== "ui_stage")) {
@@ -4405,6 +4659,12 @@ const App: React.FC = () => {
                       <X size={14} />
                     </button>
                   </div>
+
+                  {isAlternateLocalhostPort && (
+                    <div className="rounded-lg border border-amber-400/35 bg-amber-400/10 px-3 py-2 text-[11px] font-semibold leading-snug text-amber-100">
+                      Local saves are tied to the exact localhost port. You are on port {currentLocalhostPort}, so slots saved on port 3000 will not appear here.
+                    </div>
+                  )}
 
                   {/* Visual Save Timeline Sequence */}
                   {(() => {
@@ -5176,29 +5436,6 @@ const App: React.FC = () => {
                   <button
                     type="button"
                     onClick={() =>
-                      setAssetPickerCb({
-                        title: "Add Asset to Canvas",
-                        helperText:
-                          "Search your Cavebot asset library, choose a file, then Cavebot drops it into this room.",
-                        selectLabel: "Place in current room",
-                        onSelect: (id) => {
-                          const asset = project.assets.find(
-                            (candidate) => candidate.id === id,
-                          );
-                          if (asset) handleInsertAssetToStage(asset);
-                          setAssetPickerCb(null);
-                        },
-                      })
-                    }
-                    className="flex items-center gap-2 rounded-[4px_12px_4px_12px] border border-emerald-400/60 bg-neutral-950/95 px-3 py-2 font-comic text-xs font-bold text-white shadow-[0_0_18px_rgba(0,255,204,0.16)] backdrop-blur hover:bg-emerald-500/15"
-                    title="Open asset library and place a file in this scene"
-                  >
-                    <Plus size={15} className="text-emerald-300" />
-                    Add Asset
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
                       handleInsertAssetToStage({
                         id: uuidv4(),
                         name: "Clickable Area",
@@ -5228,9 +5465,6 @@ const App: React.FC = () => {
                   >
                     <Type size={14} />
                   </button>
-                  <div className="hidden max-w-[320px] rounded border border-cyan-300/25 bg-neutral-950/80 px-2 py-1 font-comic text-[12px] leading-tight text-cyan-100 shadow-lg backdrop-blur lg:block">
-                    Add Asset = pick from your library. Collect = import, clear, and organize.
-                  </div>
                 </div>
               )}
 
@@ -5479,6 +5713,7 @@ const App: React.FC = () => {
                 )}
 
               <div
+                data-play-cursor-surface={isPlaying ? "true" : undefined}
                 className={`studio-stage-frame relative mx-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 overflow-visible ${isPlaying ? "border-transparent" : "border-neutral-800 border"}`}
                 style={{
                   width: showDeviceFrame
@@ -5488,12 +5723,7 @@ const App: React.FC = () => {
                     ? deviceFrame!.outerHeight
                     : logicalStageHeight,
                   zoom: stageZoom,
-                  cursor:
-                    isPlaying &&
-                    (hoverCursorAssetId ||
-                      project.globalSettings.customCursorAssetId)
-                      ? "none"
-                      : undefined,
+                  cursor: isPlaying && activeCursorAsset ? "none" : undefined,
                 }}
               >
                 {/* Ghost Background Stage for UI Editing */}
@@ -5648,7 +5878,7 @@ const App: React.FC = () => {
                       objectId: null,
                     });
                   }}
-                  className={`studio-canvas-stage absolute shadow-2xl transition-all overflow-visible ${editorMode === "ui_stage" ? "ring-4 ring-indigo-500/70 shadow-[0_0_30px_rgba(99,102,241,0.2)]" : "ring-4 ring-pink-500 shadow-[0_0_40px_rgba(0,0,0,0.5)] z-10"}`}
+                  className={`studio-canvas-stage absolute transition-all ${isPlaying ? "z-10 overflow-hidden shadow-none" : editorMode === "ui_stage" ? "overflow-visible shadow-2xl ring-4 ring-indigo-500/70 shadow-[0_0_30px_rgba(99,102,241,0.2)]" : "z-10 overflow-visible shadow-2xl ring-4 ring-pink-500 shadow-[0_0_40px_rgba(0,0,0,0.5)]"}`}
                   style={{
                     left: showDeviceFrame ? deviceFrameStageLeft : 0,
                     top: showDeviceFrame ? deviceFrameStageTop : 0,
@@ -5872,7 +6102,7 @@ const App: React.FC = () => {
                               }}
                               onPointerEnter={() => {
                                 if (!isPlaying) return;
-                                if (obj.cursorAssetId) {
+                                if (hasPlayableCursorAsset(obj.cursorAssetId)) {
                                   setHoverCursorAssetId(obj.cursorAssetId);
                                 }
                                 if (obj.triggerOnEnter === true) {
@@ -5927,6 +6157,20 @@ const App: React.FC = () => {
                               }}
                               onPointerMove={handleObjectPointerMove}
                               onPointerUp={handleObjectPointerUp}
+                              data-object-id={obj.id}
+                              data-object-name={obj.name}
+                              data-interaction={obj.interaction || "none"}
+                              data-interaction-data={obj.interactionData || ""}
+                              data-dialogue-tree={obj.dialogueTreeId || ""}
+                              data-target-ui={obj.targetUiId || ""}
+                              data-give-item={obj.giveItemId || ""}
+                              aria-label={
+                                isPlaying &&
+                                obj.interaction &&
+                                obj.interaction !== "none"
+                                  ? `${obj.name || "Scene object"} (${obj.interaction})`
+                                  : undefined
+                              }
                               className={`absolute ${animClass} ${obj.customCssClasses || ""}`}
                               style={{
                                 ...animStyle,
@@ -5956,7 +6200,7 @@ const App: React.FC = () => {
                                         )?.blocksClicks,
                                     )
                                     ? "default"
-                                    : obj.cursorAssetId
+                                    : hasPlayableCursorAsset(obj.cursorAssetId)
                                       ? "none"
                                       : obj.cursor || (obj.interaction && obj.interaction !== "none" ? "pointer" : "default")
                                   : obj.locked
@@ -6763,7 +7007,7 @@ const App: React.FC = () => {
                                   handleObjectPointerDown(e, obj)
                                 }
                                 onPointerEnter={() => {
-                                  if (isPlaying && obj.cursorAssetId) {
+                                  if (isPlaying && hasPlayableCursorAsset(obj.cursorAssetId)) {
                                     setHoverCursorAssetId(obj.cursorAssetId);
                                   }
                                 }}
@@ -6788,7 +7032,7 @@ const App: React.FC = () => {
                                     : obj.opacity === 0 ? 0.01 : obj.opacity,
                                   transform: `rotate(${renderRot}deg)`,
                                   cursor:
-                                    isPlaying && obj.cursorAssetId
+                                    isPlaying && hasPlayableCursorAsset(obj.cursorAssetId)
                                       ? "none"
                                       : obj.cursor,
                                   backgroundColor: "rgba(255, 255, 255, 0.01)",
@@ -7299,18 +7543,20 @@ const App: React.FC = () => {
                   </div>
                 )}
 
-                {/* Companions Render */}
+                {/* Companion ambient behavior */}
                 {isPlaying && (project.companions || [])
                   .filter(c => !c.requiredFlagId || playerFlags.includes(c.requiredFlagId))
                   .map((comp, idx) => {
                     const bubbleText = activeCompanionBubbles[comp.id];
+                    if (!bubbleText && !comp.dialogueTreeId) return null;
                     return (
-                      <div
+                      <button
                         key={`comp-${comp.id}`}
-                        className="absolute bottom-4 z-[500] drop-shadow-xl hover:scale-105 transition-transform cursor-pointer flex flex-col items-center justify-end"
+                        type="button"
+                        className="absolute z-[500] max-w-[180px] rounded border border-[#00ffcc]/35 bg-black/70 px-2 py-1.5 text-left text-[11px] text-white shadow-lg backdrop-blur-sm transition hover:border-[#00ffcc] hover:bg-black/85"
                         style={{
-                          left: `${4 + (idx * 16)}%`, // Stagger them on bottom left
-                          height: "30%" // Responsive height
+                          left: 8,
+                          bottom: `${8 + idx * 38}px`,
                         }}
                         onClick={() => {
                           if (comp.dialogueTreeId) {
@@ -7318,18 +7564,15 @@ const App: React.FC = () => {
                           }
                         }}
                       >
+                        <span className="block truncate font-comic text-[#00ffcc]">
+                          {comp.name}
+                        </span>
                         {bubbleText && (
-                          <div className="absolute bottom-full mb-4 max-w-[200px] w-max bg-white border-2 border-slate-800 rounded-2xl p-3 text-slate-900 text-sm font-medium shadow-lg animate-bounce drop-shadow-[0_4px_10px_rgba(0,0,0,0.5)]">
+                          <span className="mt-0.5 block max-h-8 overflow-hidden text-neutral-200">
                             {bubbleText}
-                            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-white border-b-2 border-r-2 border-slate-800 rotate-45" />
-                          </div>
+                          </span>
                         )}
-                        <img 
-                          src={project.assets.find(a => a.id === comp.assetId)?.src || "https://upload.wikimedia.org/wikipedia/commons/2/2c/Default_pfp.svg"} 
-                          alt={comp.name} 
-                          className="h-full object-contain filter drop-shadow-[0_0_10px_rgba(255,255,255,0.4)] pointer-events-none"
-                        />
-                      </div>
+                      </button>
                     );
                   })
                 }
@@ -7347,30 +7590,43 @@ const App: React.FC = () => {
                       posClass =
                         "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2";
                     if (dPos === "below")
-                      posClass = "top-full mt-4 !left-0 !w-full !translate-x-0 !max-w-none";
+                      posClass = "bottom-3 left-1/2 -translate-x-1/2";
+                    const dialogueMaxHeight =
+                      dPos === "top" || dPos === "bottom" || dPos === "below"
+                        ? `min(${project.globalSettings.dialogueMaxHeightPercent ?? 90}%, calc(100% - 64px))`
+                        : `${project.globalSettings.dialogueMaxHeightPercent ?? 90}%`;
+                    const dialogueMaxWidth =
+                      `min(${project.globalSettings.dialogueMaxWidthPx ?? 672}px, calc(100% - 24px))`;
 
                     return (
                       <div
-                        onClick={() => setPreviewDialogue(null)}
-                        className={`absolute ${posClass} overflow-y-auto custom-scrollbar shadow-2xl backdrop-blur-sm pointer-events-auto cursor-pointer drop-shadow-2xl hover:scale-[1.02] transition-transform z-[9000]`}
-                        style={{
-                          backgroundColor: `${uiBg}ee`,
-                          border: `2px solid ${uiPrimary}80`,
-                          borderRadius: uiRadius,
-                          fontFamily: uiFont,
-                          color: "#ffffff",
-                          width: dPos === "below" ? "100%" : `${project.globalSettings.dialogueWidthPercent ?? 91.666}%`,
-                          maxWidth: dPos === "below" ? (project.globalSettings.stageWidth || 800) : (project.globalSettings.dialogueMaxWidthPx ?? 672),
-                          maxHeight: `${project.globalSettings.dialogueMaxHeightPercent ?? 90}%`,
-                        }}
+                        className="absolute z-[9000] pointer-events-none"
+                        style={getPlayOverlaySurfaceStyle("0px")}
                       >
-                        <div className="p-4 text-lg text-center font-medium drop-shadow-md">
-                          <TypewriterText
-                            text={previewDialogue}
-                            speed={project.globalSettings.typewriterSpeed ?? 15}
-                          />
-                          <div className="text-sm text-white/50 mt-2 animate-pulse">
-                            (Click to dismiss)
+                        <div
+                          onClick={() => setPreviewDialogue(null)}
+                          className={`absolute ${posClass} flex min-h-0 flex-col overflow-hidden shadow-2xl backdrop-blur-sm pointer-events-auto cursor-pointer drop-shadow-2xl hover:scale-[1.02] transition-transform`}
+                          style={{
+                            backgroundColor: `${uiBg}ee`,
+                            border: `2px solid ${uiPrimary}80`,
+                            borderRadius: uiRadius,
+                            fontFamily: uiFont,
+                            color: "#ffffff",
+                            width: `${project.globalSettings.dialogueWidthPercent ?? 91.666}%`,
+                            maxWidth: dialogueMaxWidth,
+                            maxHeight: dialogueMaxHeight,
+                          }}
+                        >
+                          <div className="flex min-h-0 flex-1 flex-col">
+                            <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar p-3 text-center text-sm font-medium leading-snug drop-shadow-md sm:p-4 sm:text-base sm:leading-relaxed">
+                              <TypewriterText
+                                text={previewDialogue}
+                                speed={project.globalSettings.typewriterSpeed ?? 15}
+                              />
+                            </div>
+                            <div className="shrink-0 px-3 pb-2 text-center text-xs text-white/50 animate-pulse">
+                              (Click to dismiss)
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -7410,7 +7666,13 @@ const App: React.FC = () => {
                       posClass =
                         "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2";
                     if (dPos === "below")
-                      posClass = "top-full mt-4 !left-0 !w-full !translate-x-0 !max-w-none";
+                      posClass = "bottom-3 left-1/2 -translate-x-1/2";
+                    const dialogueMaxHeight =
+                      dPos === "top" || dPos === "bottom" || dPos === "below"
+                        ? `min(${project.globalSettings.dialogueMaxHeightPercent ?? 90}%, calc(100% - 64px))`
+                        : `${project.globalSettings.dialogueMaxHeightPercent ?? 90}%`;
+                    const dialogueMaxWidth =
+                      `min(${project.globalSettings.dialogueMaxWidthPx ?? 672}px, calc(100% - 24px))`;
 
                     const speakerAsset = node.speakerAssetId
                       ? project.assets.find((a) => a.id === node.speakerAssetId)
@@ -7418,20 +7680,24 @@ const App: React.FC = () => {
 
                     return (
                       <div
-                        className={`absolute ${posClass} shrink-0 text-neutral-100 z-[9000] shadow-2xl flex flex-col overflow-hidden backdrop-blur-md filter drop-shadow-2xl dialogue-box`}
-                        style={{
-                          backgroundColor: `${uiBg}ee`,
-                          border: `2px solid ${uiPrimary}80`,
-                          borderRadius: uiRadius,
-                          fontFamily: uiFont,
-                          boxShadow: `0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px ${uiPrimary}40`,
-                          width: dPos === "below" ? "100%" : `${project.globalSettings.dialogueWidthPercent ?? 91.666}%`,
-                          maxWidth: dPos === "below" ? (project.globalSettings.stageWidth || 800) : (project.globalSettings.dialogueMaxWidthPx ?? 672),
-                          maxHeight: `${project.globalSettings.dialogueMaxHeightPercent ?? 90}%`,
-                        }}
+                        className="absolute z-[9000] pointer-events-none"
+                        style={getPlayOverlaySurfaceStyle("0px")}
                       >
                         <div
-                          className="px-6 py-3 border-b font-bold tracking-wide shadow-sm dialogue-title"
+                          className={`absolute ${posClass} min-h-0 shrink-0 text-neutral-100 shadow-2xl flex flex-col overflow-hidden backdrop-blur-md filter drop-shadow-2xl pointer-events-auto dialogue-box`}
+                          style={{
+                            backgroundColor: `${uiBg}ee`,
+                            border: `2px solid ${uiPrimary}80`,
+                            borderRadius: uiRadius,
+                            fontFamily: uiFont,
+                            boxShadow: `0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px ${uiPrimary}40`,
+                            width: `${project.globalSettings.dialogueWidthPercent ?? 91.666}%`,
+                            maxWidth: dialogueMaxWidth,
+                            maxHeight: dialogueMaxHeight,
+                          }}
+                        >
+                        <div
+                          className="shrink-0 border-b px-4 py-2 text-sm font-bold tracking-wide shadow-sm dialogue-title sm:px-5 sm:py-2.5"
                           style={{
                             backgroundColor: `rgba(0,0,0,0.3)`,
                             borderBottomColor: `${uiPrimary}50`,
@@ -7440,12 +7706,12 @@ const App: React.FC = () => {
                         >
                           {node.speaker || "Unknown"}
                         </div>
-                        <div className="flex shrink-0 p-6 overflow-y-auto custom-scrollbar dialogue-content">
+                        <div className="flex min-h-0 flex-1 overflow-y-auto custom-scrollbar p-3 sm:p-4 dialogue-content">
                           {speakerAsset &&
                             (!node.portraitPosition ||
                               node.portraitPosition === "left") && (
                               <div
-                                className="w-24 h-24 shrink-0 mr-6 rounded-lg overflow-hidden border shadow-inner p-1 flex items-center justify-center dialogue-portrait"
+                                className="mr-3 flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border p-1 shadow-inner sm:mr-4 sm:h-20 sm:w-20 dialogue-portrait"
                                 style={{
                                   borderColor: `${uiPrimary}40`,
                                   backgroundColor: `rgba(0,0,0,0.4)`,
@@ -7458,7 +7724,7 @@ const App: React.FC = () => {
                                 />
                               </div>
                             )}
-                          <div className="text-lg font-medium leading-relaxed flex-1 text-white drop-shadow-sm self-center overflow-y-auto max-h-full custom-scrollbar dialogue-text">
+                          <div className="min-h-0 flex-1 self-stretch overflow-y-auto custom-scrollbar text-sm font-medium leading-snug text-white drop-shadow-sm sm:text-base sm:leading-relaxed dialogue-text">
                             <TypewriterText
                               text={node.text}
                               speed={
@@ -7469,7 +7735,7 @@ const App: React.FC = () => {
                           {speakerAsset &&
                             node.portraitPosition === "right" && (
                               <div
-                                className="w-24 h-24 shrink-0 ml-6 rounded-lg overflow-hidden border shadow-inner p-1 flex items-center justify-center dialogue-portrait"
+                                className="ml-3 flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border p-1 shadow-inner sm:ml-4 sm:h-20 sm:w-20 dialogue-portrait"
                                 style={{
                                   borderColor: `${uiPrimary}40`,
                                   backgroundColor: `rgba(0,0,0,0.4)`,
@@ -7484,7 +7750,7 @@ const App: React.FC = () => {
                             )}
                         </div>
                         <div
-                          className="flex flex-col border-t relative dialogue-choices"
+                          className="relative flex max-h-[34%] shrink-0 flex-col overflow-y-auto border-t dialogue-choices"
                           style={{
                             backgroundColor: "rgba(0,0,0,0.2)",
                             borderTopColor: `${uiPrimary}50`,
@@ -7677,7 +7943,7 @@ const App: React.FC = () => {
                                       setActiveDialogue(null);
                                     }
                                   }}
-                                  className="px-6 py-4 text-left transition-colors border-b last:border-b-0 group dialogue-choice"
+                                  className="border-b px-4 py-3 text-left text-sm transition-colors last:border-b-0 group dialogue-choice sm:px-5"
                                   style={{
                                     borderBottomColor: `${uiPrimary}30`,
                                   }}
@@ -7699,7 +7965,7 @@ const App: React.FC = () => {
                           ) : (
                             <button
                               onClick={() => setActiveDialogue(null)}
-                              className="px-6 py-4 text-center transition-colors font-medium group dialogue-choice"
+                              className="px-4 py-3 text-center transition-colors font-medium group dialogue-choice sm:px-5"
                               onMouseEnter={(e) => {
                                 e.currentTarget.style.backgroundColor = `${uiPrimary}20`;
                               }}
@@ -7715,6 +7981,7 @@ const App: React.FC = () => {
                             </button>
                           )}
                         </div>
+                      </div>
                       </div>
                     );
                   })()}
@@ -7770,41 +8037,41 @@ const App: React.FC = () => {
                         >
                           NEEDS
                         </div>
-                        {(project.globalSettings.customNeeds?.length
-                          ? project.globalSettings.customNeeds
-                          : [
-                              "rest",
-                              "hunger",
-                              "connection",
-                              "spiritual",
-                              "novelty",
-                            ]
-                        ).map((need) => (
-                          <div key={need} className="flex flex-col gap-1">
-                            <div
-                              className="flex justify-between text-sm uppercase font-bold"
-                              style={{ color: "#e5e5e5" }}
-                            >
-                              <span>{need}</span>
-                              <span>{Math.floor(playerNeeds[need])}%</span>
-                            </div>
-                            <div
-                              className="h-1.5 w-full overflow-hidden"
-                              style={{
-                                backgroundColor: "rgba(0,0,0,0.5)",
-                                borderRadius: "2px",
-                              }}
-                            >
-                              <div
-                                className="h-full transition-all"
-                                style={{
-                                  width: `${Math.max(0, Math.min(100, playerNeeds[need]))}%`,
-                                  backgroundColor: uiPrimary,
-                                }}
-                              />
-                            </div>
-                          </div>
-                        ))}
+                        {getNeedTrackIds(project)
+                          .map((need) => getNeedTrackDefinition(project, need))
+                          .filter((definition) => definition.visibleInHud !== false)
+                          .map((definition) => {
+                            const value =
+                              playerNeeds[definition.id] ??
+                              definition.defaultValue;
+                            return (
+                              <div key={definition.id} className="flex flex-col gap-1">
+                                <div
+                                  className="flex justify-between text-sm uppercase font-bold"
+                                  style={{ color: "#e5e5e5" }}
+                                >
+                                  <span>{definition.label || definition.id}</span>
+                                  <span>{Math.floor(value)}</span>
+                                </div>
+                                <div
+                                  className="h-1.5 w-full overflow-hidden"
+                                  style={{
+                                    backgroundColor: "rgba(0,0,0,0.5)",
+                                    borderRadius: "2px",
+                                  }}
+                                >
+                                  <div
+                                    className="h-full transition-all"
+                                    style={{
+                                      width: `${trackPercent(value, definition)}%`,
+                                      backgroundColor:
+                                        definition.color || uiPrimary,
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
                         {project.globalSettings.useDayNightCycle && (
                           <div
                             className="mt-2 pt-2 border-t flex justify-between items-center text-sm font-bold"
@@ -7890,35 +8157,41 @@ const App: React.FC = () => {
                         >
                           SKILLS
                         </div>
-                        {(project.globalSettings.customSkills?.length
-                          ? project.globalSettings.customSkills
-                          : ["naturalist", "occultist", "scribal"]
-                        ).map((skill) => (
-                          <div key={skill} className="flex flex-col gap-1">
-                            <div
-                              className="flex justify-between text-sm uppercase font-bold"
-                              style={{ color: "#e5e5e5" }}
-                            >
-                              <span>{skill}</span>
-                              <span>{playerSkills[skill] || 0}</span>
-                            </div>
-                            <div
-                              className="h-1.5 w-full overflow-hidden"
-                              style={{
-                                backgroundColor: "rgba(0,0,0,0.5)",
-                                borderRadius: "2px",
-                              }}
-                            >
-                              <div
-                                className="h-full transition-all"
-                                style={{
-                                  width: `${Math.min(100, (playerSkills[skill] || 0) * 5)}%`,
-                                  backgroundColor: uiPrimary,
-                                }}
-                              />
-                            </div>
-                          </div>
-                        ))}
+                        {getSkillTrackIds(project)
+                          .map((skill) => getSkillTrackDefinition(project, skill))
+                          .filter((definition) => definition.visibleInHud !== false)
+                          .map((definition) => {
+                            const value =
+                              playerSkills[definition.id] ??
+                              definition.defaultValue;
+                            return (
+                              <div key={definition.id} className="flex flex-col gap-1">
+                                <div
+                                  className="flex justify-between text-sm uppercase font-bold"
+                                  style={{ color: "#e5e5e5" }}
+                                >
+                                  <span>{definition.label || definition.id}</span>
+                                  <span>{value || 0}</span>
+                                </div>
+                                <div
+                                  className="h-1.5 w-full overflow-hidden"
+                                  style={{
+                                    backgroundColor: "rgba(0,0,0,0.5)",
+                                    borderRadius: "2px",
+                                  }}
+                                >
+                                  <div
+                                    className="h-full transition-all"
+                                    style={{
+                                      width: `${trackPercent(value, definition)}%`,
+                                      backgroundColor:
+                                        definition.color || uiPrimary,
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
                         {!isPlaying && (
                           <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-emerald-500 text-neutral-950 font-bold scale-0 group-hover/skills:scale-100 transition-all text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded shadow-lg whitespace-nowrap z-50 pointer-events-none flex items-center gap-1">
                             <span>{isHudPlacementMode ? "✋ Drag to Move" : "✏️ Click to Edit"}</span>
@@ -7971,7 +8244,7 @@ const App: React.FC = () => {
                             <button
                               onClick={() => {
                                 if (isPlaying) {
-                                  setIsSettingsOpen(!isSettingsOpen);
+                                  togglePlayOverlay("settings");
                                 } else {
                                   selectHudWidget("buttons");
                                 }
@@ -7995,7 +8268,7 @@ const App: React.FC = () => {
                             <button
                               onClick={() => {
                                 if (isPlaying) {
-                                  setIsRelationshipsOpen(!isRelationshipsOpen);
+                                  togglePlayOverlay("relationships");
                                 } else {
                                   selectHudWidget("buttons");
                                 }
@@ -8019,7 +8292,7 @@ const App: React.FC = () => {
                             <button
                               onClick={() => {
                                 if (isPlaying) {
-                                  setIsAlmanacOpen(!isAlmanacOpen);
+                                  togglePlayOverlay("almanac");
                                 } else {
                                   selectHudWidget("buttons");
                                 }
@@ -8044,7 +8317,7 @@ const App: React.FC = () => {
                             <button
                               onClick={() => {
                                 if (isPlaying) {
-                                  setIsSkillsOpen(!isSkillsOpen);
+                                  togglePlayOverlay("skills");
                                 } else {
                                   selectHudWidget("buttons");
                                 }
@@ -8067,7 +8340,7 @@ const App: React.FC = () => {
                           <button
                             onClick={() => {
                               if (isPlaying) {
-                                setIsQuestLogOpen(!isQuestLogOpen);
+                                togglePlayOverlay("questLog");
                               } else {
                                 selectHudWidget("buttons");
                               }
@@ -8090,7 +8363,7 @@ const App: React.FC = () => {
                           <button
                             onClick={() => {
                               if (isPlaying) {
-                                setIsCraftingOpen(!isCraftingOpen);
+                                togglePlayOverlay("crafting");
                               } else {
                                 selectHudWidget("buttons");
                               }
@@ -8118,7 +8391,7 @@ const App: React.FC = () => {
                                   if (project.maps && project.maps.length > 0) {
                                     setActiveFastTravelMapId(project.maps[0].id);
                                   }
-                                  setIsMapOpen(!isMapOpen);
+                                  togglePlayOverlay("map");
                                 } else {
                                   selectHudWidget("buttons");
                                 }
@@ -8141,7 +8414,7 @@ const App: React.FC = () => {
                           <button
                             onClick={() => {
                               if (isPlaying) {
-                                setIsInventoryOpen(!isInventoryOpen);
+                                togglePlayOverlay("inventory");
                               } else {
                                 selectHudWidget("buttons");
                               }
@@ -8184,163 +8457,166 @@ const App: React.FC = () => {
                     {/* Map Modal */}
                     {isMapOpen && activeFastTravelMapId && (
                       <div
-                        className="absolute inset-0 z-[2001] flex items-center justify-center bg-black/80 p-2 backdrop-blur-sm"
+                        className="absolute inset-0 z-[3000] overflow-hidden bg-black"
                         onClick={() => setIsMapOpen(false)}
+                        style={getPlayOverlaySurfaceStyle("0px")}
                       >
-                        <div
-                          className="flex h-full max-h-full w-full max-w-full flex-col overflow-hidden border-2 shadow-2xl"
-                          onClick={(e) => e.stopPropagation()}
-                          style={{
-                            backgroundColor: `${uiBg}ee`,
-                            borderColor: `${uiPrimary}80`,
-                            borderRadius: uiRadius,
-                            fontFamily: uiFont,
-                          }}
-                        >
-                          <div
-                            className="flex shrink-0 items-center gap-2 border-b p-2"
-                            style={{
-                              backgroundColor: "rgba(0,0,0,0.3)",
-                              borderBottomColor: `${uiPrimary}50`,
-                            }}
-                          >
-                            <h2
-                              className="flex min-w-0 shrink-0 items-center gap-1 text-sm font-bold"
-                              style={{ color: uiPrimary }}
+                        {(() => {
+                          const mapData = project.maps.find(
+                            (m) => m.id === activeFastTravelMapId,
+                          );
+                          if (!mapData) return null;
+
+                          return (
+                            <div
+                              className="absolute inset-0 overflow-hidden"
+                              onClick={(e) => e.stopPropagation()}
+                              style={{
+                                backgroundColor: uiBg,
+                                fontFamily: uiFont,
+                              }}
                             >
-                              <MapPin size={16} />
-                              <span className="truncate">Fast Travel Map</span>
-                            </h2>
-                            <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto custom-scrollbar">
-                              {project.maps.map((m) => (
-                                <button
-                                  key={m.id}
-                                  onClick={() => setActiveFastTravelMapId(m.id)}
-                                  className="whitespace-nowrap rounded border px-2 py-1 text-xs font-bold transition-colors"
+                              {mapData.backgroundSrc ? (
+                                <img
+                                  src={mapData.backgroundSrc}
+                                  alt="Map Background"
+                                  className="pointer-events-none absolute inset-0 h-full w-full"
                                   style={{
-                                    backgroundColor:
-                                      activeFastTravelMapId === m.id
-                                        ? "rgba(128,128,128,0.2)"
-                                        : "transparent",
-                                    borderColor:
-                                      activeFastTravelMapId === m.id
-                                        ? uiPrimary
-                                        : "transparent",
-                                    color:
-                                      activeFastTravelMapId === m.id
-                                        ? uiPrimary
-                                        : "#e5e5e5",
+                                    objectFit:
+                                      mapData.backgroundFit === "fill"
+                                        ? "fill"
+                                        : mapData.backgroundFit || "contain",
+                                    transform: `translate(${mapData.backgroundOffsetX ?? 0}%, ${mapData.backgroundOffsetY ?? 0}%) scale(${mapData.backgroundScale ?? 1})`,
+                                    transformOrigin: "center",
                                   }}
-                                >
-                                  {m.name}
-                                </button>
-                              ))}
-                            </div>
-                            <button
-                              onClick={() => setIsMapOpen(false)}
-                              style={{ color: uiPrimary }}
-                              className="shrink-0 opacity-70 transition-opacity hover:opacity-100"
-                            >
-                              <X size={18} />
-                            </button>
-                          </div>
+                                />
+                              ) : (
+                                <div className="absolute inset-0 bg-black/70" />
+                              )}
 
-                          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black bg-opacity-50 p-2">
-                            {(() => {
-                              const mapData = project.maps.find(
-                                (m) => m.id === activeFastTravelMapId,
-                              );
-                              if (!mapData) return null;
+                              {mapData.nodes.map((node) => {
+                                const isUnlocked =
+                                  node.unlockedByDefault ||
+                                  (node.requiredFlagId &&
+                                    (playerFlags || []).includes(
+                                      node.requiredFlagId,
+                                    ));
+                                if (!isUnlocked) return null;
+                                return (
+                                  <button
+                                    type="button"
+                                    key={node.id}
+                                    onClick={() => {
+                                      if (node.targetSceneId) {
+                                        setProject((p) => ({
+                                          ...p,
+                                          currentSceneId:
+                                            node.targetSceneId as string,
+                                        }));
+                                        setIsMapOpen(false);
+                                      }
+                                    }}
+                                    className={`group absolute z-10 flex max-w-[5.75rem] -translate-x-1/2 -translate-y-1/2 flex-col items-center transition-transform hover:z-20
+                                      ${node.targetSceneId ? "cursor-pointer hover:scale-110" : "cursor-default opacity-80"}
+                                    `}
+                                    style={{
+                                      left: `clamp(2rem, ${node.x}%, calc(100% - 2rem))`,
+                                      top: `clamp(2.5rem, ${node.y}%, calc(100% - 2.5rem))`,
+                                    }}
+                                  >
+                                    <span
+                                      className="flex h-8 w-8 items-center justify-center rounded-full border-2 bg-black/25 opacity-45 shadow-lg backdrop-blur-[1px] transition-opacity group-hover:opacity-95 group-focus-visible:opacity-95"
+                                      style={{
+                                        borderColor: uiPrimary,
+                                        color: "#e5e5e5",
+                                      }}
+                                    >
+                                      {node.iconSrc ? (
+                                        <img
+                                          src={node.iconSrc || undefined}
+                                          alt={node.name}
+                                          className="h-6 w-6 object-contain opacity-80 drop-shadow"
+                                        />
+                                      ) : (
+                                        <MapPin className="h-4 w-4 opacity-80" />
+                                      )}
+                                    </span>
+                                    <span
+                                      className="pointer-events-none mt-1 max-w-full truncate rounded border bg-black/75 px-1.5 py-0.5 text-center text-[9px] font-bold leading-tight opacity-0 shadow-lg backdrop-blur-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                                      style={{
+                                        color: uiPrimary,
+                                        borderColor: `${uiPrimary}40`,
+                                      }}
+                                    >
+                                      {node.name}
+                                    </span>
+                                  </button>
+                                );
+                              })}
 
-                              return (
-                                <div
-                                  className="relative h-full max-h-full w-full max-w-full overflow-hidden rounded border border-white/10"
-                                >
-                                  {mapData.backgroundSrc && (
-                                    <img
-                                      src={mapData.backgroundSrc}
-                                      alt="Map Background"
-                                      className="block h-full w-full object-contain pointer-events-none"
-                                    />
-                                  )}
-                                  {mapData.nodes.map((node) => {
-                                    const isUnlocked =
-                                      node.unlockedByDefault ||
-                                      (node.requiredFlagId &&
-                                        (playerFlags || []).includes(
-                                          node.requiredFlagId,
-                                        ));
-                                    if (!isUnlocked) return null; // Hide locked nodes for mystery
-                                    return (
-                                      <div
-                                        key={node.id}
-                                        onClick={() => {
-                                          if (node.targetSceneId) {
-                                            setProject((p) => ({
-                                              ...p,
-                                              currentSceneId:
-                                                node.targetSceneId as string,
-                                            }));
-                                            setIsMapOpen(false);
-                                          }
-                                        }}
-                                        className={`absolute -translate-x-1/2 -translate-y-1/2 flex max-w-[7rem] flex-col items-center group transition-transform z-10 hover:z-20
-                                            ${node.targetSceneId ? "cursor-pointer hover:scale-110" : "cursor-default opacity-80"}
-                                          `}
+                              <div className="pointer-events-none absolute inset-x-1 top-1 z-30 flex items-start justify-between gap-2">
+                                <div className="pointer-events-auto flex min-w-0 max-w-[70%] flex-wrap gap-1">
+                                  {project.maps.length > 1 ? (
+                                    project.maps.map((m) => (
+                                      <button
+                                        type="button"
+                                        key={m.id}
+                                        onClick={() => setActiveFastTravelMapId(m.id)}
+                                        className="rounded border bg-black/75 px-1.5 py-0.5 text-[9px] font-bold leading-none backdrop-blur-sm"
                                         style={{
-                                          left: `${node.x}%`,
-                                          top: `${node.y}%`,
+                                          borderColor:
+                                            activeFastTravelMapId === m.id
+                                              ? uiPrimary
+                                              : `${uiPrimary}35`,
+                                          color:
+                                            activeFastTravelMapId === m.id
+                                              ? uiPrimary
+                                              : "#e5e5e5",
                                         }}
                                       >
-                                        <div
-                                          className={`flex h-8 w-8 items-center justify-center rounded-full border-2 shadow-lg transition-transform sm:h-10 sm:w-10
-                                              ${node.targetSceneId ? "hover:brightness-125" : ""}
-                                           `}
-                                          style={{
-                                            backgroundColor: uiBg,
-                                            borderColor: uiPrimary,
-                                            color: "#e5e5e5",
-                                          }}
-                                        >
-                                          {node.iconSrc ? (
-                                            <img
-                                              src={node.iconSrc || undefined}
-                                              alt={node.name}
-                                              className="h-6 w-6 object-contain drop-shadow sm:h-7 sm:w-7"
-                                            />
-                                          ) : (
-                                            <MapPin className="h-4 w-4 sm:h-5 sm:w-5" />
-                                          )}
-                                        </div>
-                                        <div
-                                          className="mt-1 max-w-full rounded border bg-black/80 px-2 py-0.5 text-center text-[10px] font-bold leading-tight shadow-lg backdrop-blur-sm"
-                                          style={{
-                                            color: uiPrimary,
-                                            borderColor: `${uiPrimary}40`,
-                                          }}
-                                        >
-                                          {node.name}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
+                                        {m.name}
+                                      </button>
+                                    ))
+                                  ) : (
+                                    <div
+                                      className="rounded border bg-black/75 px-1.5 py-0.5 text-[9px] font-bold leading-none backdrop-blur-sm"
+                                      style={{
+                                        borderColor: `${uiPrimary}35`,
+                                        color: uiPrimary,
+                                      }}
+                                    >
+                                      {mapData.name}
+                                    </div>
+                                  )}
                                 </div>
-                              );
-                            })()}
-                          </div>
-                        </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setIsMapOpen(false)}
+                                  className="pointer-events-auto rounded border bg-black/75 p-1 leading-none backdrop-blur-sm"
+                                  style={{
+                                    borderColor: `${uiPrimary}55`,
+                                    color: uiPrimary,
+                                  }}
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
 
                     {/* Inventory Modal */}
-                    {isInventoryOpen && ReactDOM.createPortal(
+                    {isInventoryOpen && (
                       <div
-                        className="fixed inset-0 bg-black/60 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="absolute inset-0 z-[3000] flex items-stretch justify-stretch overflow-hidden bg-black/75 p-[6%] backdrop-blur-sm"
                         onClick={() => setIsInventoryOpen(false)}
                         onPointerDown={(e) => e.stopPropagation()}
+                        style={getPlayOverlaySurfaceStyle("6%")}
                       >
                         <div
-                          className="max-w-3xl w-full max-h-[80%] flex flex-col shadow-2xl overflow-hidden border-2"
+                          className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-2 shadow-2xl"
                           onClick={(e) => e.stopPropagation()}
                           onPointerDown={(e) => e.stopPropagation()}
                           style={{
@@ -8358,10 +8634,10 @@ const App: React.FC = () => {
                             }}
                           >
                             <h2
-                              className="text-xl font-bold flex items-center gap-2"
+                              className="flex min-w-0 items-center gap-2 text-base font-bold sm:text-lg"
                               style={{ color: uiPrimary }}
                             >
-                              <Backpack size={24} />
+                              <Backpack size={18} />
                               Inventory
                             </h2>
                             <button
@@ -8369,11 +8645,11 @@ const App: React.FC = () => {
                               style={{ color: uiPrimary }}
                               className="opacity-70 hover:opacity-100 transition-opacity"
                             >
-                              <X size={24} />
+                              <X size={18} />
                             </button>
                           </div>
                           <div
-                            className="flex-1 overflow-y-auto p-6 custom-scrollbar"
+                            className="flex-1 overflow-y-auto p-3 sm:p-4 custom-scrollbar"
                             style={{ color: "#e5e5e5" }}
                           >
                             {playerInventory.length === 0 ? (
@@ -8385,7 +8661,7 @@ const App: React.FC = () => {
                                 <p>Your inventory is empty.</p>
                               </div>
                             ) : (
-                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 pb-12">
+                              <div className="grid grid-cols-2 gap-2 pb-6">
                                 {playerInventory.map((itemId, idx) => {
                                   const item = project.inventoryItems.find(
                                     (i) => i.id === itemId,
@@ -8451,48 +8727,21 @@ const App: React.FC = () => {
                                           // Try to combine
                                           const combination = (
                                             project.craftingRecipes || []
-                                          ).find(
-                                            (r) =>
-                                              (r.ingredient1Id ===
-                                                selectedInventoryItemId &&
-                                                r.ingredient2Id === itemId) ||
-                                              (r.ingredient1Id === itemId &&
-                                                r.ingredient2Id ===
-                                                  selectedInventoryItemId),
+                                          ).find((recipe) =>
+                                            recipeMatchesSelection(recipe, [
+                                              selectedInventoryItemId,
+                                              itemId,
+                                            ]),
                                           );
 
                                           if (combination) {
-                                            setPlayerInventory((prev) => {
-                                              const next = [...prev];
-                                              const ing1Id =
-                                                combination.ingredient1Id;
-                                              const ing2Id =
-                                                combination.ingredient2Id;
-
-                                              // Handle consumptions based on standard matching
-                                              if (
-                                                combination.destroyIngredient1
-                                              ) {
-                                                const idx =
-                                                  next.indexOf(ing1Id);
-                                                if (idx !== -1)
-                                                  next.splice(idx, 1);
-                                              }
-                                              if (
-                                                combination.destroyIngredient2
-                                              ) {
-                                                const idx =
-                                                  next.indexOf(ing2Id);
-                                                if (idx !== -1)
-                                                  next.splice(idx, 1);
-                                              }
-                                              if (combination.resultItemId) {
-                                                next.push(
-                                                  combination.resultItemId,
-                                                );
-                                              }
-                                              return next;
-                                            });
+                                            setPlayerInventory((prev) =>
+                                              applyCraftingRecipeToInventory(
+                                                prev,
+                                                combination,
+                                              ),
+                                            );
+                                            applyCraftingOutcomes(combination);
 
                                             setSelectedInventoryItemId(null);
                                             setPreviewDialogue(
@@ -8658,24 +8907,23 @@ const App: React.FC = () => {
                             )}
                           </div>
                         </div>
-                      </div>,
-                      document.body
+                      </div>
                     )}
                     {/* Skills Modal */}
-                    {isSkillsOpen && ReactDOM.createPortal(
+                    {isSkillsOpen && (
                       <div
-                        className="fixed inset-0 bg-black/60 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="absolute inset-0 z-[3000] flex items-stretch justify-stretch overflow-hidden bg-black/75 p-[6%] backdrop-blur-sm"
                         onClick={() => setIsSkillsOpen(false)}
                         onPointerDown={(e) => e.stopPropagation()}
+                        style={getPlayOverlaySurfaceStyle("6%")}
                       >
                         <div
-                          className="max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
+                          className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-2 shadow-2xl"
                           onClick={(e) => e.stopPropagation()}
                           style={{
                             backgroundColor: `${uiBg}ee`,
                             borderColor: `${uiPrimary}80`,
                             fontFamily: uiFont,
-                            minHeight: "400px",
                           }}
                         >
                           <div
@@ -8686,24 +8934,21 @@ const App: React.FC = () => {
                             }}
                           >
                             <h2
-                              className="text-xl font-bold flex items-center gap-2"
+                              className="flex min-w-0 items-center gap-2 text-base font-bold sm:text-lg"
                               style={{ color: uiPrimary }}
                             >
-                              <Zap size={24} /> Skills & Abilities
+                              <Zap size={18} /> Skills & Abilities
                             </h2>
                             <button
                               onClick={() => setIsSkillsOpen(false)}
                               style={{ color: uiPrimary }}
                               className="opacity-70 hover:opacity-100"
                             >
-                              <X size={24} />
+                              <X size={18} />
                             </button>
                           </div>
-                          <div className="p-6 overflow-y-auto space-y-4">
-                            {(project.globalSettings.customSkills?.length
-                              ? project.globalSettings.customSkills
-                              : ["naturalist", "occultist", "scribal"]
-                            ).length === 0 ? (
+                          <div className="p-3 sm:p-4 overflow-y-auto space-y-3">
+                            {getSkillTrackIds(project).length === 0 ? (
                               <p
                                 className="opacity-50 text-center italic"
                                 style={{ color: uiSecondary }}
@@ -8711,62 +8956,76 @@ const App: React.FC = () => {
                                 No skills defined.
                               </p>
                             ) : (
-                              (project.globalSettings.customSkills?.length
-                                ? project.globalSettings.customSkills
-                                : ["naturalist", "occultist", "scribal"]
-                              ).map((skill) => (
-                                <div
-                                  key={skill}
-                                  className="bg-black/20 p-4 rounded border"
-                                  style={{ borderColor: `${uiPrimary}20` }}
-                                >
-                                  <div className="flex justify-between items-center mb-2">
-                                    <span
-                                      className="font-bold uppercase tracking-wider"
-                                      style={{ color: uiPrimary }}
-                                    >
-                                      {skill}
-                                    </span>
-                                    <span
-                                      className="font-mono text-xl"
-                                      style={{ color: uiSecondary }}
-                                    >
-                                      {playerSkills[skill] || 0}
-                                    </span>
+                              getSkillTrackIds(project).map((skill) => {
+                                const definition = getSkillTrackDefinition(
+                                  project,
+                                  skill,
+                                );
+                                const value =
+                                  playerSkills[definition.id] ??
+                                  definition.defaultValue;
+                                return (
+                                  <div
+                                    key={definition.id}
+                                    className="bg-black/20 p-4 rounded border"
+                                    style={{ borderColor: `${uiPrimary}20` }}
+                                  >
+                                    <div className="flex justify-between items-center mb-2">
+                                      <span
+                                        className="font-bold uppercase tracking-wider"
+                                        style={{ color: definition.color || uiPrimary }}
+                                      >
+                                        {definition.label || definition.id}
+                                      </span>
+                                      <span
+                                        className="font-mono text-xl"
+                                        style={{ color: uiSecondary }}
+                                      >
+                                        {value || 0}
+                                      </span>
+                                    </div>
+                                    {definition.description && (
+                                      <div
+                                        className="mb-2 text-xs opacity-70"
+                                        style={{ color: uiSecondary }}
+                                      >
+                                        {definition.description}
+                                      </div>
+                                    )}
+                                    <div className="h-2 w-full bg-black/40 rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full transition-all"
+                                        style={{
+                                          width: `${trackPercent(value, definition)}%`,
+                                          backgroundColor:
+                                            definition.color || uiPrimary,
+                                        }}
+                                      />
+                                    </div>
                                   </div>
-                                  <div className="h-2 w-full bg-black/40 rounded-full overflow-hidden">
-                                    <div
-                                      className="h-full transition-all"
-                                      style={{
-                                        width: `${Math.min(100, (playerSkills[skill] || 0) * 5)}%`,
-                                        backgroundColor: uiPrimary,
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                              ))
+                                );
+                              })
                             )}
                           </div>
                         </div>
-                      </div>,
-                      document.body
+                      </div>
                     )}
 
                     {/* Almanac Modal */}
-                    {isAlmanacOpen && ReactDOM.createPortal(
+                    {isAlmanacOpen && (
                       <div
-                        className="fixed inset-0 bg-black/60 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="absolute inset-0 z-[3000] flex items-stretch justify-stretch overflow-hidden bg-black/75 p-[6%] backdrop-blur-sm"
                         onClick={() => setIsAlmanacOpen(false)}
                         onPointerDown={(e) => e.stopPropagation()}
+                        style={getPlayOverlaySurfaceStyle("6%")}
                       >
                         <div
-                          className="max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
+                          className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-2 shadow-2xl"
                           onClick={(e) => e.stopPropagation()}
                           style={{
                             backgroundColor: `${uiBg}ee`,
                             borderColor: `${uiPrimary}80`,
                             fontFamily: uiFont,
-                            minHeight: "400px",
                           }}
                         >
                           <div
@@ -8777,20 +9036,20 @@ const App: React.FC = () => {
                             }}
                           >
                             <h2
-                              className="text-xl font-bold flex items-center gap-2"
+                              className="flex min-w-0 items-center gap-2 text-base font-bold sm:text-lg"
                               style={{ color: uiPrimary }}
                             >
-                              <FileText size={24} /> Almanac / Logs
+                              <FileText size={18} /> Almanac / Logs
                             </h2>
                             <button
                               onClick={() => setIsAlmanacOpen(false)}
                               style={{ color: uiPrimary }}
                               className="opacity-70 hover:opacity-100"
                             >
-                              <X size={24} />
+                              <X size={18} />
                             </button>
                           </div>
-                          <div className="p-6 overflow-y-auto space-y-4">
+                          <div className="p-3 sm:p-4 overflow-y-auto space-y-3">
                             {(() => {
                               const availableLore = (
                                 project.loreEntries || []
@@ -8815,6 +9074,32 @@ const App: React.FC = () => {
                                   className="bg-black/20 p-4 rounded border space-y-2"
                                   style={{ borderColor: `${uiPrimary}20` }}
                                 >
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span
+                                      className="rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                                      style={{
+                                        borderColor: `${uiPrimary}45`,
+                                        color: uiPrimary,
+                                      }}
+                                    >
+                                      {entry.entryType === "quest_note"
+                                        ? "Quest note"
+                                        : entry.entryType || "Lore"}
+                                    </span>
+                                    {entry.questId && (
+                                      <span
+                                        className="rounded border px-2 py-0.5 text-[10px]"
+                                        style={{
+                                          borderColor: `${uiSecondary}30`,
+                                          color: uiSecondary,
+                                        }}
+                                      >
+                                        {project.quests.find(
+                                          (quest) => quest.id === entry.questId,
+                                        )?.name || "Linked quest"}
+                                      </span>
+                                    )}
+                                  </div>
                                   <h3
                                     className="font-bold text-lg"
                                     style={{ color: uiPrimary }}
@@ -8832,25 +9117,24 @@ const App: React.FC = () => {
                             })()}
                           </div>
                         </div>
-                      </div>,
-                      document.body
+                      </div>
                     )}
 
                     {/* Relationships Modal */}
-                    {isRelationshipsOpen && ReactDOM.createPortal(
+                    {isRelationshipsOpen && (
                       <div
-                        className="fixed inset-0 bg-black/60 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="absolute inset-0 z-[3000] flex items-stretch justify-stretch overflow-hidden bg-black/75 p-[6%] backdrop-blur-sm"
                         onClick={() => setIsRelationshipsOpen(false)}
                         onPointerDown={(e) => e.stopPropagation()}
+                        style={getPlayOverlaySurfaceStyle("6%")}
                       >
                         <div
-                          className="max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
+                          className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-2 shadow-2xl"
                           onClick={(e) => e.stopPropagation()}
                           style={{
                             backgroundColor: `${uiBg}ee`,
                             borderColor: `${uiPrimary}80`,
                             fontFamily: uiFont,
-                            minHeight: "400px",
                           }}
                         >
                           <div
@@ -8861,20 +9145,20 @@ const App: React.FC = () => {
                             }}
                           >
                             <h2
-                              className="text-xl font-bold flex items-center gap-2"
+                              className="flex min-w-0 items-center gap-2 text-base font-bold sm:text-lg"
                               style={{ color: uiPrimary }}
                             >
-                              <Users size={24} /> Relationships & Factions
+                              <Users size={18} /> Relationships & Factions
                             </h2>
                             <button
                               onClick={() => setIsRelationshipsOpen(false)}
                               style={{ color: uiPrimary }}
                               className="opacity-70 hover:opacity-100"
                             >
-                              <X size={24} />
+                              <X size={18} />
                             </button>
                           </div>
-                          <div className="p-6 overflow-y-auto space-y-4">
+                          <div className="p-3 sm:p-4 overflow-y-auto space-y-3">
                             {/* Characters */}
                             {(project.characters || []).length > 0 && (
                               <>
@@ -8904,6 +9188,76 @@ const App: React.FC = () => {
                                     </div>
                                   );
                                 })}
+                                {project.characters!.some(
+                                  (char) => (char.relationships || []).length > 0,
+                                ) && (
+                                  <>
+                                    <h3
+                                      className="mb-2 mt-4 text-xs font-bold uppercase tracking-widest"
+                                      style={{ color: uiPrimary }}
+                                    >
+                                      Character ties
+                                    </h3>
+                                    {project.characters!.flatMap((char) =>
+                                      (char.relationships || []).map((tie) => {
+                                        const target = project.characters!.find(
+                                          (candidate) =>
+                                            candidate.id === tie.characterId,
+                                        );
+                                        return (
+                                          <div
+                                            key={`${char.id}-${tie.id}`}
+                                            className="rounded border bg-black/20 p-3"
+                                            style={{
+                                              borderColor: `${uiPrimary}20`,
+                                            }}
+                                          >
+                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                              <span
+                                                className="font-bold"
+                                                style={{ color: uiPrimary }}
+                                              >
+                                                {char.name} {"->"}{" "}
+                                                {target?.name ||
+                                                  "Unknown character"}
+                                              </span>
+                                              <span
+                                                className="rounded px-2 py-0.5 text-xs font-bold"
+                                                style={{
+                                                  backgroundColor:
+                                                    tie.value > 20
+                                                      ? "rgba(16,185,129,.2)"
+                                                      : tie.value < -20
+                                                        ? "rgba(239,68,68,.2)"
+                                                        : "rgba(156,163,175,.2)",
+                                                  color:
+                                                    tie.value > 20
+                                                      ? "#10b981"
+                                                      : tie.value < -20
+                                                        ? "#ef4444"
+                                                        : "#9ca3af",
+                                                }}
+                                              >
+                                                {tie.label || "Knows"}{" "}
+                                                {tie.value > 0
+                                                  ? `+${tie.value}`
+                                                  : tie.value}
+                                              </span>
+                                            </div>
+                                            {tie.notes && (
+                                              <p
+                                                className="mt-2 text-xs whitespace-pre-wrap"
+                                                style={{ color: uiSecondary }}
+                                              >
+                                                {tie.notes}
+                                              </p>
+                                            )}
+                                          </div>
+                                        );
+                                      }),
+                                    )}
+                                  </>
+                                )}
                                 {(project.factions || []).length > 0 && (
                                   <h3 className="text-xs font-bold uppercase tracking-widest mt-4 mb-2" style={{ color: uiPrimary }}>Factions</h3>
                                 )}
@@ -8987,19 +9341,19 @@ const App: React.FC = () => {
                             )}
                           </div>
                         </div>
-                      </div>,
-                      document.body
+                      </div>
                     )}
 
                     {/* Settings Modal */}
-                    {isSettingsOpen && ReactDOM.createPortal(
+                    {isSettingsOpen && (
                       <div
-                        className="fixed inset-0 bg-black/80 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="absolute inset-0 z-[3000] flex items-stretch justify-stretch overflow-hidden bg-black/80 p-[8%] backdrop-blur-sm"
                         onClick={() => setIsSettingsOpen(false)}
                         onPointerDown={(e) => e.stopPropagation()}
+                        style={getPlayOverlaySurfaceStyle("8%")}
                       >
                         <div
-                          className="max-w-md w-full flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
+                          className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-2 shadow-2xl"
                           onClick={(e) => e.stopPropagation()}
                           style={{
                             backgroundColor: `${uiBg}ee`,
@@ -9015,20 +9369,20 @@ const App: React.FC = () => {
                             }}
                           >
                             <h2
-                              className="text-xl font-bold flex items-center gap-2"
+                              className="flex min-w-0 items-center gap-2 text-base font-bold sm:text-lg"
                               style={{ color: uiPrimary }}
                             >
-                              <Settings size={24} /> System Settings
+                              <Settings size={18} /> System Settings
                             </h2>
                             <button
                               onClick={() => setIsSettingsOpen(false)}
                               style={{ color: uiPrimary }}
                               className="opacity-70 hover:opacity-100"
                             >
-                              <X size={24} />
+                              <X size={18} />
                             </button>
                           </div>
-                          <div className="p-6 flex flex-col gap-4">
+                          <div className="p-3 sm:p-4 flex flex-col gap-3 overflow-y-auto">
                             <button
                               onClick={() => {
                                 handleObjectClick({
@@ -9097,19 +9451,19 @@ const App: React.FC = () => {
                             </button>
                           </div>
                         </div>
-                      </div>,
-                      document.body
+                      </div>
                     )}
 
                     {/* Crafting Modal */}
-                    {isCraftingOpen && ReactDOM.createPortal(
+                    {isCraftingOpen && (
                       <div
-                        className="fixed inset-0 bg-black/60 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="absolute inset-0 z-[3000] flex items-stretch justify-stretch overflow-hidden bg-black/75 p-[6%] backdrop-blur-sm"
                         onClick={() => setIsCraftingOpen(false)}
                         onPointerDown={(e) => e.stopPropagation()}
+                        style={getPlayOverlaySurfaceStyle("6%")}
                       >
                         <div
-                          className="max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
+                          className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-2 shadow-2xl"
                           onClick={(e) => e.stopPropagation()}
                           style={{
                             backgroundColor: `${uiBg}ee`,
@@ -9125,10 +9479,10 @@ const App: React.FC = () => {
                             }}
                           >
                             <h2
-                              className="text-xl font-bold flex items-center gap-2"
+                              className="flex min-w-0 items-center gap-2 text-base font-bold sm:text-lg"
                               style={{ color: uiPrimary }}
                             >
-                              <Backpack size={24} />
+                              <Backpack size={18} />
                               Crafting Station
                             </h2>
                             <button
@@ -9136,13 +9490,13 @@ const App: React.FC = () => {
                               style={{ color: uiPrimary }}
                               className="opacity-70 hover:opacity-100 transition-opacity"
                             >
-                              <X size={24} />
+                              <X size={18} />
                             </button>
                           </div>
-                          <div className="p-6">
+                          <div className="p-3 sm:p-4 overflow-y-auto">
                             <p className="text-white/70 mb-4 text-center">
-                              Select two items from your inventory to forge a
-                              new item.
+                              Choose every required item. Tools can be required
+                              without being consumed.
                             </p>
                             <div className="flex justify-center items-center gap-4 mb-6">
                               <div
@@ -9376,38 +9730,23 @@ const App: React.FC = () => {
                                 onClick={() => {
                                   const combination = (
                                     project.craftingRecipes || []
-                                  ).find((r) => {
-                                      const slotted = [craftSlot1, craftSlot2, craftSlot3].filter(Boolean) as string[];
-                                      const req = [r.ingredient1Id, r.ingredient2Id];
-                                      if (r.ingredient3Id) req.push(r.ingredient3Id);
-                                      if (slotted.length !== req.length) return false;
-                                      const sortedSlotted = [...slotted].sort();
-                                      const sortedReq = [...req].sort();
-                                      return JSON.stringify(sortedSlotted) === JSON.stringify(sortedReq);
-                                  });
+                                  ).find((recipe) =>
+                                    recipeMatchesSelection(
+                                      recipe,
+                                      [craftSlot1, craftSlot2, craftSlot3].filter(
+                                        Boolean,
+                                      ) as string[],
+                                    ),
+                                  );
 
                                   if (combination) {
-                                    setPlayerInventory((prev) => {
-                                      const next = [...prev];
-                                      
-                                      const processIngredient = (id: string, destroy: boolean) => {
-                                        if (destroy) {
-                                          const idx = next.indexOf(id);
-                                          if (idx !== -1) next.splice(idx, 1);
-                                        }
-                                      };
-                                      
-                                      processIngredient(combination.ingredient1Id, combination.destroyIngredient1);
-                                      processIngredient(combination.ingredient2Id, combination.destroyIngredient2);
-                                      if (combination.ingredient3Id) {
-                                        processIngredient(combination.ingredient3Id, combination.destroyIngredient3 || false);
-                                      }
-
-                                      if (combination.resultItemId) {
-                                        next.push(combination.resultItemId);
-                                      }
-                                      return next;
-                                    });
+                                    setPlayerInventory((prev) =>
+                                      applyCraftingRecipeToInventory(
+                                        prev,
+                                        combination,
+                                      ),
+                                    );
+                                    applyCraftingOutcomes(combination);
                                     setCraftSlot1(null);
                                     setCraftSlot2(null);
                                     setCraftSlot3(null);
@@ -9437,19 +9776,19 @@ const App: React.FC = () => {
                             </div>
                           </div>
                         </div>
-                      </div>,
-                      document.body
+                      </div>
                     )}
 
                     {/* Quest Log Modal */}
-                    {isQuestLogOpen && ReactDOM.createPortal(
+                    {isQuestLogOpen && (
                       <div
-                        className="fixed inset-0 bg-black/60 z-[100001] flex items-center justify-center p-8 backdrop-blur-sm"
+                        className="absolute inset-0 z-[3000] flex items-stretch justify-stretch overflow-hidden bg-black/75 p-[6%] backdrop-blur-sm"
                         onClick={() => setIsQuestLogOpen(false)}
                         onPointerDown={(e) => e.stopPropagation()}
+                        style={getPlayOverlaySurfaceStyle("6%")}
                       >
                         <div
-                          className="max-w-3xl w-full max-h-[80%] flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
+                          className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-2 shadow-2xl"
                           onClick={(e) => e.stopPropagation()}
                           style={{
                             backgroundColor: `${uiBg}ee`,
@@ -9465,10 +9804,10 @@ const App: React.FC = () => {
                             }}
                           >
                             <h2
-                              className="text-xl font-bold flex items-center gap-2"
+                              className="flex min-w-0 items-center gap-2 text-base font-bold sm:text-lg"
                               style={{ color: uiPrimary }}
                             >
-                              <Book size={24} />
+                              <Book size={18} />
                               Quest Log
                             </h2>
                             <button
@@ -9476,7 +9815,7 @@ const App: React.FC = () => {
                               style={{ color: uiPrimary }}
                               className="opacity-70 hover:opacity-100 transition-opacity"
                             >
-                              <X size={24} />
+                              <X size={18} />
                             </button>
                           </div>
                           <div
@@ -9615,8 +9954,7 @@ const App: React.FC = () => {
                             )}
                           </div>
                         </div>
-                      </div>,
-                      document.body
+                      </div>
                     )}
                   </>
                 )}
@@ -9626,6 +9964,7 @@ const App: React.FC = () => {
                     calibration={deviceFrame!}
                     imageSrc={deviceFrameAsset!.src}
                     className="pointer-events-none z-[4000]"
+                    screenInset={deviceFramePlayInset}
                   />
                 )}
                 {showDeviceFrame &&
@@ -9648,7 +9987,7 @@ const App: React.FC = () => {
                         }
                       }}
                       onPointerEnter={() => {
-                        if (isPlaying && control.cursorAssetId) {
+                        if (isPlaying && hasPlayableCursorAsset(control.cursorAssetId)) {
                           setHoverCursorAssetId(control.cursorAssetId);
                         }
                       }}
@@ -9668,7 +10007,7 @@ const App: React.FC = () => {
                         width: `${(control.width / deviceFrame!.outerWidth) * 100}%`,
                         height: `${(control.height / deviceFrame!.outerHeight) * 100}%`,
                         cursor:
-                          isPlaying && control.cursorAssetId
+                          isPlaying && hasPlayableCursorAsset(control.cursorAssetId)
                             ? "none"
                             : control.cursor || "pointer",
                       }}
@@ -13869,34 +14208,143 @@ const App: React.FC = () => {
                             );
                           })()}
 
+                          <details className="mb-3 rounded-lg border border-[#00ffcc]/20 bg-[#00ffcc]/5">
+                            <summary className="flex cursor-pointer items-center justify-between gap-2 px-2.5 py-2 font-comic text-xs font-bold text-[#00ffcc] hover:bg-[#00ffcc]/10">
+                              <span>Behavior recipes</span>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  setEditorMode("rpg_systems");
+                                  setRpgTab("characters");
+                                }}
+                                className="rounded border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[9px] font-bold text-cyan-200 hover:bg-cyan-400/20"
+                              >
+                                Roster
+                              </button>
+                            </summary>
+                            <div className="border-t border-[#00ffcc]/10 p-2.5">
+                              <p className="mb-2 text-[9px] leading-snug text-neutral-500">
+                                Prefill this object with common in-game behavior, then refine it below.
+                              </p>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const firstCharacter = (project.characters || [])[0];
+                                  updateObject(selectedObject.id, {
+                                    interaction: "dialogue",
+                                    characterId: firstCharacter?.id,
+                                    affinityId:
+                                      firstCharacter?.id ||
+                                      selectedObject.affinityId ||
+                                      selectedObject.id,
+                                    cursor: "pointer",
+                                  });
+                                }}
+                                className="rounded border border-cyan-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-cyan-100 hover:border-cyan-300"
+                              >
+                                Talk / roster
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateObject(selectedObject.id, {
+                                    interaction: "collect",
+                                    giveItemId:
+                                      selectedObject.giveItemId ||
+                                      project.inventoryItems[0]?.id ||
+                                      "",
+                                    interactionData:
+                                      selectedObject.interactionData ||
+                                      "You picked it up.",
+                                    cursor: "pointer",
+                                  })
+                                }
+                                className="rounded border border-amber-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-amber-100 hover:border-amber-300"
+                              >
+                                Pickup item
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateObject(selectedObject.id, {
+                                    requireItemId:
+                                      selectedObject.requireItemId ||
+                                      project.inventoryItems[0]?.id,
+                                    interaction:
+                                      selectedObject.interaction === "none"
+                                        ? "dialogue"
+                                        : selectedObject.interaction,
+                                    interactionData:
+                                      selectedObject.interactionData ||
+                                      "That worked.",
+                                    cursor: "pointer",
+                                  })
+                                }
+                                className="rounded border border-pink-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-pink-100 hover:border-pink-300"
+                              >
+                                Use item on this
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateObject(selectedObject.id, {
+                                    interaction: "toggle_inventory",
+                                    cursor: "pointer",
+                                  })
+                                }
+                                className="rounded border border-indigo-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-indigo-100 hover:border-indigo-300"
+                              >
+                                Open inventory
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateObject(selectedObject.id, {
+                                    interaction: "start_quest",
+                                    interactionData: project.quests[0]?.id || "",
+                                    cursor: "pointer",
+                                  })
+                                }
+                                className="rounded border border-yellow-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-yellow-100 hover:border-yellow-300"
+                              >
+                                Start quest
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateObject(selectedObject.id, {
+                                    interaction: "scene_change",
+                                    interactionData:
+                                      project.scenes.find(
+                                        (scene) => scene.id !== currentScene?.id,
+                                      )?.id || "",
+                                    cursor: "pointer",
+                                  })
+                                }
+                                className="rounded border border-emerald-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-emerald-100 hover:border-emerald-300"
+                              >
+                                Go to room
+                              </button>
+                            </div>
+                            </div>
+                          </details>
+
                           <LabelWithHelp
                             label="First Click Response"
                             helpText="Choose the first thing this object does. Add more responses underneath."
                           />
-                          <ClickResponseTypePicker
+                          <select
                             value={selectedObject.interaction}
-                            onChange={(interaction) =>
+                            onChange={(e) =>
                               updateObject(selectedObject.id, {
-                                interaction,
+                                interaction: e.target
+                                  .value as InteractionType,
                               })
                             }
-                          />
-
-                          <details className="mt-2 rounded border border-neutral-800 bg-neutral-950/60">
-                            <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-neutral-500 hover:text-white">
-                              More / system responses
-                            </summary>
-                            <div className="border-t border-neutral-800 p-2">
-                              <select
-                                value={selectedObject.interaction}
-                                onChange={(e) =>
-                                  updateObject(selectedObject.id, {
-                                    interaction: e.target
-                                      .value as InteractionType,
-                                  })
-                                }
-                                className="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1.5 text-sm"
-                              >
+                            className="mt-1 w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1.5 text-sm"
+                          >
                                 <option value="none">None (No Action)</option>
 
                                 <optgroup label="Story & Dialogues">
@@ -13959,9 +14407,7 @@ const App: React.FC = () => {
                                   <option value="toggle_mute">Toggle Audio Mute</option>
                                   <option value="exit_game">Close Game Execution</option>
                                 </optgroup>
-                              </select>
-                            </div>
-                          </details>
+                          </select>
 
                           {selectedObject.interaction !== "none" && (
                             <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-neutral-800">
@@ -14029,41 +14475,50 @@ const App: React.FC = () => {
                             </div>
                           )}
 
-                          <ClickResponseEditor
-                            responses={selectedObject.clickResponses || []}
-                            assets={project.assets}
-                            scenes={project.scenes}
-                            dialogueTrees={project.dialogueTrees || []}
-                            inventoryItems={project.inventoryItems || []}
-                            quests={project.quests || []}
-                            gameFlags={project.gameFlags || []}
-                            uiMenus={project.uiMenus || []}
-                            skillIds={
-                              project.globalSettings.customSkills?.length
-                                ? project.globalSettings.customSkills
-                                : ["naturalist", "occultist", "scribal"]
-                            }
-                            needIds={
-                              project.globalSettings.customNeeds?.length
-                                ? project.globalSettings.customNeeds
-                                : [
-                                    "rest",
-                                    "hunger",
-                                    "connection",
-                                    "spiritual",
-                                    "novelty",
-                                  ]
-                            }
-                            relationshipIds={buildRelationshipTargets(
-                              project.characters || [],
-                              project.factions || [],
-                            ).map((target) => target.id)}
-                            onChange={(clickResponses) =>
-                              updateObject(selectedObject.id, {
-                                clickResponses,
-                              })
-                            }
-                          />
+                          <div className="mt-4 rounded-lg border border-emerald-400/20 bg-emerald-500/5 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="font-comic text-sm font-bold text-emerald-200">
+                                  Action sequence
+                                </div>
+                                <p className="mt-1 text-[10px] leading-snug text-neutral-500">
+                                  {selectedObject.clickResponses?.length
+                                    ? `${selectedObject.clickResponses.length} extra response${
+                                        selectedObject.clickResponses.length === 1
+                                          ? ""
+                                          : "s"
+                                      } after the first click behavior.`
+                                    : "No extra responses yet. Open the sequence editor to add branches, sounds, quests, menus, flags, and more."}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditingClickSequenceObjectId(
+                                    selectedObject.id,
+                                  )
+                                }
+                                className="shrink-0 rounded border border-emerald-400/50 bg-emerald-500/15 px-3 py-2 font-comic text-[11px] font-bold text-emerald-100 hover:bg-emerald-500/25"
+                              >
+                                Edit sequence
+                              </button>
+                            </div>
+                            {(selectedObject.clickResponses || []).length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {(selectedObject.clickResponses || []).map(
+                                  (response, index) => (
+                                    <span
+                                      key={response.id}
+                                      className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-[10px] text-neutral-300"
+                                    >
+                                      {index + 2}.{" "}
+                                      {response.interaction.replace(/_/g, " ")}
+                                    </span>
+                                  ),
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         {selectedObject.interaction === "sound" && (
@@ -14543,10 +14998,21 @@ const App: React.FC = () => {
                                                     a.src === selectedObject.src,
                                                 )?.id || null
                                               : null,
+                                            collectionCategory: "Scene pickups",
                                           };
                                           const isUI = editorMode === "ui_stage";
                                           const newProject = {
                                             ...project,
+                                            globalSettings: {
+                                              ...project.globalSettings,
+                                              itemGroups: Array.from(
+                                                new Set([
+                                                  ...(project.globalSettings
+                                                    .itemGroups || []),
+                                                  "Scene pickups",
+                                                ]),
+                                              ),
+                                            },
                                             inventoryItems: [
                                               ...project.inventoryItems,
                                               newItem as any,
@@ -16777,7 +17243,7 @@ const App: React.FC = () => {
           <div className="studio-page flex-1 flex flex-col bg-neutral-950 overflow-hidden relative">
             <StudioFeatureHeader
               title="World Rules"
-              description="Shape quests, skills, factions, lore, companions, and the invisible logic holding the world together."
+              description="Shape quests, skills, roster groups, lore, followers, and the invisible logic holding the world together."
               tabs={
                 <div className="studio-tab-list">
                   <button
@@ -16796,13 +17262,7 @@ const App: React.FC = () => {
                     onClick={() => setRpgTab("characters")}
                     className={`studio-tab ${rpgTab === "characters" ? "is-active" : ""}`}
                   >
-                    Characters
-                  </button>
-                  <button
-                    onClick={() => setRpgTab("factions")}
-                    className={`studio-tab ${rpgTab === "factions" ? "is-active" : ""}`}
-                  >
-                    Factions
+                    Roster
                   </button>
                   <button
                     onClick={() => setRpgTab("lore")}
@@ -16810,35 +17270,30 @@ const App: React.FC = () => {
                   >
                     Almanac
                   </button>
-                  <button
-                    onClick={() => setRpgTab("companions")}
-                    className={`studio-tab ${rpgTab === "companions" ? "is-active" : ""}`}
-                  >
-                    Companions
-                  </button>
                 </div>
               }
             />
 
-            <div className="studio-page-content flex-1 flex gap-6 overflow-hidden p-6">
+            <div
+              className={`studio-page-content flex-1 gap-6 overflow-hidden p-6 ${
+                worldRulesUsesDetailPane
+                  ? "flex"
+                  : "overflow-y-auto custom-scrollbar"
+              }`}
+            >
               <div
                 className={`studio-rail relative flex flex-col gap-4 overflow-y-auto custom-scrollbar ${
-                  rpgTab === "characters"
-                    ? "min-w-0 flex-1 px-0"
-                    : rpgTab === "companions"
-                      ? "w-[280px] flex-shrink-0 border-r border-neutral-800 pr-5"
+                  !worldRulesUsesDetailPane
+                    ? "w-full min-w-0 overflow-visible px-0"
                     : "flex-shrink-0 border-r border-neutral-800 pr-6"
                 }`}
-                style={{
-                  width:
-                    rpgTab === "characters"
-                      ? "100%"
-                      : rpgTab === "companions"
-                        ? 280
-                        : leftSidebarWidth,
-                }}
+                style={
+                  worldRulesUsesDetailPane
+                    ? { width: leftSidebarWidth }
+                    : undefined
+                }
               >
-                {rpgTab !== "characters" && rpgTab !== "companions" && (
+                {worldRulesUsesDetailPane && rpgTab !== "companions" && (
                   <div
                     className="absolute top-0 bottom-0 -right-[3px] w-[6px] cursor-col-resize z-[100] hover:bg-emerald-500/50"
                     onPointerDown={() =>
@@ -16971,169 +17426,509 @@ const App: React.FC = () => {
                 )}
 
                 {rpgTab === "stats" && (
-                  <>
-                    <div className="mt-8">
-                      <div className="flex items-center justify-between mb-2">
-                        <h2 className="text-xl font-bold text-emerald-400">
-                          Custom Skills
-                        </h2>
+                  <div className="grid gap-5 xl:grid-cols-2">
+                    <div className="rounded-lg border border-emerald-400/20 bg-neutral-900 p-5">
+                      <div className="mb-4 flex items-center gap-2 text-emerald-300">
+                        <Zap size={18} />
+                        <h2 className="text-xl font-bold">Skills</h2>
                       </div>
-                      <div className="flex gap-2 mb-4">
+                      <div className="mb-4 flex gap-2">
                         <input
                           type="text"
                           value={newSkillText}
                           onChange={(e) => setNewSkillText(e.target.value)}
-                          placeholder="e.g. Archery"
-                          className="flex-1 bg-neutral-950 border border-neutral-800 rounded px-2 text-sm text-white"
-                        />
-                        <button
-                          onClick={() => {
+                          onKeyDown={(e) => {
+                            if (e.key !== "Enter") return;
+                            e.preventDefault();
                             const customSkills =
                               project.globalSettings?.customSkills || [];
-                            if (
-                              newSkillText.trim() &&
-                              !customSkills.includes(newSkillText.trim())
-                            ) {
+                            const skillName =
+                              newSkillText.trim() ||
+                              `Skill ${customSkills.length + 1}`;
+                            if (!customSkills.includes(skillName)) {
                               pushHistory({
                                 ...project,
                                 globalSettings: {
                                   ...project.globalSettings,
-                                  customSkills: [
-                                    ...customSkills,
-                                    newSkillText.trim(),
-                                  ],
+                                  customSkills: [...customSkills, skillName],
+                                  customSkillDefinitions: {
+                                    ...(project.globalSettings
+                                      .customSkillDefinitions || {}),
+                                    [skillName]: defaultTrackDefinition(
+                                      skillName,
+                                      "skill",
+                                    ),
+                                  },
                                 },
                               });
                               setNewSkillText("");
                             }
                           }}
-                          className="text-emerald-400 p-2 bg-neutral-900 border border-neutral-800 hover:bg-emerald-500/20 rounded"
+                          placeholder="e.g. Archery"
+                          className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const customSkills =
+                              project.globalSettings?.customSkills || [];
+                            const skillName =
+                              newSkillText.trim() ||
+                              `Skill ${customSkills.length + 1}`;
+                            if (!customSkills.includes(skillName)) {
+                              pushHistory({
+                                ...project,
+                                globalSettings: {
+                                  ...project.globalSettings,
+                                  customSkills: [...customSkills, skillName],
+                                  customSkillDefinitions: {
+                                    ...(project.globalSettings
+                                      .customSkillDefinitions || {}),
+                                    [skillName]: defaultTrackDefinition(
+                                      skillName,
+                                      "skill",
+                                    ),
+                                  },
+                                },
+                              });
+                              setNewSkillText("");
+                            }
+                          }}
+                          className="flex shrink-0 items-center gap-1 rounded border border-emerald-400/40 bg-emerald-500/10 px-3 text-xs font-bold text-emerald-300 hover:bg-emerald-500/20"
                         >
-                          <Plus size={16} />
+                          <Plus size={14} /> Add
                         </button>
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="grid gap-2 md:grid-cols-2">
                         {(project.globalSettings?.customSkills || []).map(
-                          (skill) => (
-                            <div
-                              key={skill}
-                              className="flex items-center gap-1 bg-neutral-800 border border-neutral-700 px-2 py-1 rounded text-sm text-emerald-300"
-                            >
-                              <span>{skill}</span>
-                              <button
-                                onClick={() => {
-                                  const customSkills =
-                                    project.globalSettings?.customSkills || [];
-                                  pushHistory({
-                                    ...project,
-                                    globalSettings: {
-                                      ...project.globalSettings,
-                                      customSkills: customSkills.filter(
-                                        (s) => s !== skill,
-                                      ),
-                                    },
-                                  });
-                                }}
-                                className="text-red-400 hover:text-red-300 ml-1"
+                          (skill) => {
+                            const definition = getSkillTrackDefinition(
+                              project,
+                              skill,
+                            );
+                            const updateDefinition = (
+                              updates: Partial<StatTrackDefinition>,
+                            ) =>
+                              pushHistory({
+                                ...project,
+                                globalSettings: {
+                                  ...project.globalSettings,
+                                  customSkillDefinitions: {
+                                    ...(project.globalSettings
+                                      .customSkillDefinitions || {}),
+                                    [skill]: { ...definition, ...updates },
+                                  },
+                                },
+                              });
+                            const questUses = (project.quests || []).filter((quest) =>
+                              (quest.objectives || []).some(
+                                (objective) =>
+                                  objective.type === "skill_check" &&
+                                  objective.targetId === skill,
+                              ),
+                            ).length;
+                            const craftUses = (project.craftingRecipes || []).filter(
+                              (recipe) =>
+                                (recipe.outcomes || []).some(
+                                  (outcome) =>
+                                    outcome.type === "change_skill" &&
+                                    outcome.targetId === skill,
+                                ),
+                            ).length;
+                            return (
+                              <div
+                                key={skill}
+                                className="rounded border border-neutral-800 bg-neutral-950 p-3"
                               >
-                                <X size={12} />
-                              </button>
-                            </div>
-                          ),
+                                <div className="mb-3 flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="truncate font-bold text-emerald-200">
+                                      {definition.label || skill}
+                                    </div>
+                                    <div className="text-xs text-neutral-500">
+                                      {questUses} quest checks · {craftUses} crafting outcomes
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      const customSkills =
+                                        project.globalSettings?.customSkills || [];
+                                      const nextDefinitions = {
+                                        ...(project.globalSettings
+                                          .customSkillDefinitions || {}),
+                                      };
+                                      delete nextDefinitions[skill];
+                                      pushHistory({
+                                        ...project,
+                                        globalSettings: {
+                                          ...project.globalSettings,
+                                          customSkills: customSkills.filter(
+                                            (s) => s !== skill,
+                                          ),
+                                          customSkillDefinitions:
+                                            nextDefinitions,
+                                        },
+                                      });
+                                    }}
+                                    className="shrink-0 rounded p-1 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <label className="col-span-2 text-[10px] font-bold uppercase text-neutral-500">
+                                    Label
+                                    <input
+                                      value={definition.label}
+                                      onChange={(e) =>
+                                        updateDefinition({
+                                          label: e.target.value,
+                                        })
+                                      }
+                                      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-emerald-400"
+                                    />
+                                  </label>
+                                  <label className="text-[10px] font-bold uppercase text-neutral-500">
+                                    Default
+                                    <input
+                                      type="number"
+                                      value={definition.defaultValue}
+                                      onChange={(e) =>
+                                        updateDefinition({
+                                          defaultValue: Number(e.target.value),
+                                        })
+                                      }
+                                      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-emerald-400"
+                                    />
+                                  </label>
+                                  <label className="text-[10px] font-bold uppercase text-neutral-500">
+                                    Color
+                                    <input
+                                      type="color"
+                                      value={definition.color || "#00ffcc"}
+                                      onChange={(e) =>
+                                        updateDefinition({
+                                          color: e.target.value,
+                                        })
+                                      }
+                                      className="mt-1 h-8 w-full rounded border border-neutral-700 bg-neutral-900 p-1"
+                                    />
+                                  </label>
+                                  <label className="text-[10px] font-bold uppercase text-neutral-500">
+                                    Min
+                                    <input
+                                      type="number"
+                                      value={definition.min}
+                                      onChange={(e) =>
+                                        updateDefinition({
+                                          min: Number(e.target.value),
+                                        })
+                                      }
+                                      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-emerald-400"
+                                    />
+                                  </label>
+                                  <label className="text-[10px] font-bold uppercase text-neutral-500">
+                                    Max
+                                    <input
+                                      type="number"
+                                      value={definition.max}
+                                      onChange={(e) =>
+                                        updateDefinition({
+                                          max: Number(e.target.value),
+                                        })
+                                      }
+                                      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-emerald-400"
+                                    />
+                                  </label>
+                                  <label className="col-span-2 flex items-center gap-2 self-end rounded border border-neutral-800 bg-black/20 px-2 py-2 text-xs text-neutral-300">
+                                    <input
+                                      type="checkbox"
+                                      checked={definition.visibleInHud !== false}
+                                      onChange={(e) =>
+                                        updateDefinition({
+                                          visibleInHud: e.target.checked,
+                                        })
+                                      }
+                                    />
+                                    Show in HUD
+                                  </label>
+                                </div>
+                                <textarea
+                                  value={definition.description || ""}
+                                  onChange={(e) =>
+                                    updateDefinition({
+                                      description: e.target.value,
+                                    })
+                                  }
+                                  className="mt-2 min-h-16 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-2 text-xs text-neutral-200 outline-none focus:border-emerald-400"
+                                  placeholder="What this skill means or where it is used..."
+                                />
+                              </div>
+                            );
+                          },
                         )}
                         {(project.globalSettings?.customSkills || []).length ===
                           0 && (
-                          <div className="text-sm text-neutral-500 italic">
+                          <div className="rounded border border-dashed border-neutral-800 p-4 text-sm italic text-neutral-500 md:col-span-2">
                             No custom skills created yet.
                           </div>
                         )}
                       </div>
                     </div>
 
-                    <div className="mt-8">
-                      <div className="flex items-center justify-between mb-2">
-                        <h2 className="text-xl font-bold text-pink-400">
-                          Custom Meters
-                        </h2>
+                    <div className="rounded-lg border border-pink-400/20 bg-neutral-900 p-5">
+                      <div className="mb-4 flex items-center gap-2 text-pink-300">
+                        <Activity size={18} />
+                        <h2 className="text-xl font-bold">Needs & Meters</h2>
                       </div>
-                      <div className="flex gap-2 mb-4">
+                      <div className="mb-4 flex gap-2">
                         <input
                           type="text"
                           value={newNeedText}
                           onChange={(e) => setNewNeedText(e.target.value)}
-                          placeholder="e.g. Mana"
-                          className="flex-1 bg-neutral-950 border border-neutral-800 rounded px-2 text-sm text-white"
-                        />
-                        <button
-                          onClick={() => {
+                          onKeyDown={(e) => {
+                            if (e.key !== "Enter") return;
+                            e.preventDefault();
                             const customNeeds =
                               project.globalSettings?.customNeeds || [];
-                            if (
-                              newNeedText.trim() &&
-                              !customNeeds.includes(newNeedText.trim())
-                            ) {
+                            const needName =
+                              newNeedText.trim() ||
+                              `Meter ${customNeeds.length + 1}`;
+                            if (!customNeeds.includes(needName)) {
                               pushHistory({
                                 ...project,
                                 globalSettings: {
                                   ...project.globalSettings,
-                                  customNeeds: [
-                                    ...customNeeds,
-                                    newNeedText.trim(),
-                                  ],
+                                  customNeeds: [...customNeeds, needName],
+                                  customNeedDefinitions: {
+                                    ...(project.globalSettings
+                                      .customNeedDefinitions || {}),
+                                    [needName]: defaultTrackDefinition(
+                                      needName,
+                                      "need",
+                                    ),
+                                  },
                                 },
                               });
                               setNewNeedText("");
                             }
                           }}
-                          className="text-pink-400 p-2 bg-neutral-900 border border-neutral-800 hover:bg-pink-500/20 rounded"
+                          placeholder="e.g. Mana"
+                          className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-pink-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const customNeeds =
+                              project.globalSettings?.customNeeds || [];
+                            const needName =
+                              newNeedText.trim() ||
+                              `Meter ${customNeeds.length + 1}`;
+                            if (!customNeeds.includes(needName)) {
+                              pushHistory({
+                                ...project,
+                                globalSettings: {
+                                  ...project.globalSettings,
+                                  customNeeds: [...customNeeds, needName],
+                                  customNeedDefinitions: {
+                                    ...(project.globalSettings
+                                      .customNeedDefinitions || {}),
+                                    [needName]: defaultTrackDefinition(
+                                      needName,
+                                      "need",
+                                    ),
+                                  },
+                                },
+                              });
+                              setNewNeedText("");
+                            }
+                          }}
+                          className="flex shrink-0 items-center gap-1 rounded border border-pink-400/40 bg-pink-500/10 px-3 text-xs font-bold text-pink-300 hover:bg-pink-500/20"
                         >
-                          <Plus size={16} />
+                          <Plus size={14} /> Add
                         </button>
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="grid gap-2 md:grid-cols-2">
                         {(project.globalSettings?.customNeeds || []).map(
-                          (need) => (
-                            <div
-                              key={need}
-                              className="flex items-center gap-1 bg-neutral-800 border border-neutral-700 px-2 py-1 rounded text-sm text-pink-300"
-                            >
-                              <span>{need}</span>
-                              <button
-                                onClick={() => {
-                                  const customNeeds =
-                                    project.globalSettings?.customNeeds || [];
-                                  pushHistory({
-                                    ...project,
-                                    globalSettings: {
-                                      ...project.globalSettings,
-                                      customNeeds: customNeeds.filter(
-                                        (n) => n !== need,
-                                      ),
-                                    },
-                                  });
-                                }}
-                                className="text-red-400 hover:text-red-300 ml-1"
+                          (need) => {
+                            const definition = getNeedTrackDefinition(
+                              project,
+                              need,
+                            );
+                            const updateDefinition = (
+                              updates: Partial<StatTrackDefinition>,
+                            ) =>
+                              pushHistory({
+                                ...project,
+                                globalSettings: {
+                                  ...project.globalSettings,
+                                  customNeedDefinitions: {
+                                    ...(project.globalSettings
+                                      .customNeedDefinitions || {}),
+                                    [need]: { ...definition, ...updates },
+                                  },
+                                },
+                              });
+                            const craftUses = (project.craftingRecipes || []).filter(
+                              (recipe) =>
+                                (recipe.outcomes || []).some(
+                                  (outcome) =>
+                                    outcome.type === "change_need" &&
+                                    outcome.targetId === need,
+                                ),
+                            ).length;
+                            return (
+                              <div
+                                key={need}
+                                className="rounded border border-neutral-800 bg-neutral-950 p-3"
                               >
-                                <X size={12} />
-                              </button>
-                            </div>
-                          ),
+                                <div className="mb-3 flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="truncate font-bold text-pink-200">
+                                      {definition.label || need}
+                                    </div>
+                                    <div className="text-xs text-neutral-500">
+                                      {craftUses} crafting outcomes
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      const customNeeds =
+                                        project.globalSettings?.customNeeds || [];
+                                      const nextDefinitions = {
+                                        ...(project.globalSettings
+                                          .customNeedDefinitions || {}),
+                                      };
+                                      delete nextDefinitions[need];
+                                      pushHistory({
+                                        ...project,
+                                        globalSettings: {
+                                          ...project.globalSettings,
+                                          customNeeds: customNeeds.filter(
+                                            (n) => n !== need,
+                                          ),
+                                          customNeedDefinitions:
+                                            nextDefinitions,
+                                        },
+                                      });
+                                    }}
+                                    className="shrink-0 rounded p-1 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <label className="col-span-2 text-[10px] font-bold uppercase text-neutral-500">
+                                    Label
+                                    <input
+                                      value={definition.label}
+                                      onChange={(e) =>
+                                        updateDefinition({
+                                          label: e.target.value,
+                                        })
+                                      }
+                                      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-pink-400"
+                                    />
+                                  </label>
+                                  <label className="text-[10px] font-bold uppercase text-neutral-500">
+                                    Default
+                                    <input
+                                      type="number"
+                                      value={definition.defaultValue}
+                                      onChange={(e) =>
+                                        updateDefinition({
+                                          defaultValue: Number(e.target.value),
+                                        })
+                                      }
+                                      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-pink-400"
+                                    />
+                                  </label>
+                                  <label className="text-[10px] font-bold uppercase text-neutral-500">
+                                    Color
+                                    <input
+                                      type="color"
+                                      value={definition.color || "#ff7acc"}
+                                      onChange={(e) =>
+                                        updateDefinition({
+                                          color: e.target.value,
+                                        })
+                                      }
+                                      className="mt-1 h-8 w-full rounded border border-neutral-700 bg-neutral-900 p-1"
+                                    />
+                                  </label>
+                                  <label className="text-[10px] font-bold uppercase text-neutral-500">
+                                    Min
+                                    <input
+                                      type="number"
+                                      value={definition.min}
+                                      onChange={(e) =>
+                                        updateDefinition({
+                                          min: Number(e.target.value),
+                                        })
+                                      }
+                                      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-pink-400"
+                                    />
+                                  </label>
+                                  <label className="text-[10px] font-bold uppercase text-neutral-500">
+                                    Max
+                                    <input
+                                      type="number"
+                                      value={definition.max}
+                                      onChange={(e) =>
+                                        updateDefinition({
+                                          max: Number(e.target.value),
+                                        })
+                                      }
+                                      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-pink-400"
+                                    />
+                                  </label>
+                                  <label className="col-span-2 flex items-center gap-2 self-end rounded border border-neutral-800 bg-black/20 px-2 py-2 text-xs text-neutral-300">
+                                    <input
+                                      type="checkbox"
+                                      checked={definition.visibleInHud !== false}
+                                      onChange={(e) =>
+                                        updateDefinition({
+                                          visibleInHud: e.target.checked,
+                                        })
+                                      }
+                                    />
+                                    Show in HUD
+                                  </label>
+                                </div>
+                                <textarea
+                                  value={definition.description || ""}
+                                  onChange={(e) =>
+                                    updateDefinition({
+                                      description: e.target.value,
+                                    })
+                                  }
+                                  className="mt-2 min-h-16 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-2 text-xs text-neutral-200 outline-none focus:border-pink-400"
+                                  placeholder="What this meter represents or what changes it..."
+                                />
+                              </div>
+                            );
+                          },
                         )}
                         {(project.globalSettings?.customNeeds || []).length ===
                           0 && (
-                          <div className="text-sm text-neutral-500 italic">
+                          <div className="rounded border border-dashed border-neutral-800 p-4 text-sm italic text-neutral-500 md:col-span-2">
                             No custom needs created yet.
                           </div>
                         )}
                       </div>
                     </div>
-                  </>
+                  </div>
                 )}
 
                 {rpgTab === "characters" && (
                   <>
                     <div className="mt-8 flex items-center justify-between mb-2">
-                      <h2 className="text-xl font-bold text-cyan-400">Characters</h2>
+                      <div>
+                        <h2 className="text-xl font-bold text-cyan-400">Roster</h2>
+                        <p className="text-sm text-neutral-500">
+                          People, groups, relationships, and follower behavior in one place.
+                        </p>
+                      </div>
                       <button
                         className="rounded border border-cyan-400/50 bg-cyan-500/10 px-3 py-1.5 font-comic text-xs font-bold text-cyan-200 hover:bg-cyan-500/20"
                         onClick={() => {
@@ -17163,9 +17958,236 @@ const App: React.FC = () => {
                       </button>
                     </div>
 
+                    <div className="rounded-lg border border-amber-400/20 bg-amber-500/5 p-4">
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <h3 className="font-comic text-lg font-bold text-amber-300">
+                            Groups
+                          </h3>
+                          <p className="text-xs text-neutral-500">
+                            Use groups for factions, families, teams, villages, shops, or any reputation bucket.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const newFaction: Faction = {
+                              id: uuidv4(),
+                              name: "New Group",
+                              description: "",
+                              defaultAffinity: 0,
+                              role: "faction",
+                              reputationLabel: "Reputation",
+                            };
+                            pushHistory({
+                              ...project,
+                              factions: [...(project.factions || []), newFaction],
+                            });
+                          }}
+                          className="rounded border border-amber-400/50 bg-amber-500/20 px-3 py-2 font-comic text-xs font-bold text-amber-100 transition-colors hover:bg-amber-500/30"
+                        >
+                          + Create Group
+                        </button>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                        {(project.factions || []).map((faction) => {
+                          const memberCount = (project.characters || []).filter(
+                            (character) => character.factionId === faction.id,
+                          ).length;
+                          return (
+                            <div
+                              key={faction.id}
+                              className="group relative rounded-lg border border-amber-400/20 bg-neutral-950/80 p-2.5"
+                            >
+                              <div className="mb-2 flex items-center justify-between gap-2 pr-5 text-[10px] font-bold uppercase tracking-wide text-amber-300/70">
+                                <span>
+                                  {memberCount} {memberCount === 1 ? "member" : "members"}
+                                </span>
+                                <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-100/80">
+                                  {faction.role || "group"}
+                                </span>
+                              </div>
+                              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_5rem]">
+                                <input
+                                  type="text"
+                                  value={faction.name}
+                                  onChange={(e) => {
+                                    const updated = (project.factions || []).map(
+                                      (f) =>
+                                        f.id === faction.id
+                                          ? { ...f, name: e.target.value }
+                                          : f,
+                                    );
+                                    pushHistory({ ...project, factions: updated });
+                                  }}
+                                  className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm font-bold text-white outline-none focus:border-amber-400"
+                                  placeholder="Group name"
+                                />
+                                <input
+                                  type="number"
+                                  value={faction.defaultAffinity}
+                                  onChange={(e) => {
+                                    const updated = (project.factions || []).map(
+                                      (f) =>
+                                        f.id === faction.id
+                                          ? {
+                                              ...f,
+                                              defaultAffinity: Number(e.target.value),
+                                            }
+                                          : f,
+                                    );
+                                    pushHistory({ ...project, factions: updated });
+                                  }}
+                                  className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-200 outline-none focus:border-amber-400"
+                                  title="Default affinity"
+                                />
+                              </div>
+                              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                <select
+                                  value={faction.role || "faction"}
+                                  onChange={(e) => {
+                                    const updated = (project.factions || []).map(
+                                      (f) =>
+                                        f.id === faction.id
+                                          ? {
+                                              ...f,
+                                              role: e.target
+                                                .value as Faction["role"],
+                                            }
+                                          : f,
+                                    );
+                                    pushHistory({ ...project, factions: updated });
+                                  }}
+                                  className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200 outline-none focus:border-amber-400"
+                                  title="Group type"
+                                >
+                                  <option value="faction">Faction</option>
+                                  <option value="family">Family</option>
+                                  <option value="guild">Guild</option>
+                                  <option value="village">Village</option>
+                                  <option value="shop">Shop</option>
+                                  <option value="species">Species</option>
+                                  <option value="team">Team</option>
+                                  <option value="other">Other</option>
+                                </select>
+                                <input
+                                  type="text"
+                                  value={faction.reputationLabel || ""}
+                                  onChange={(e) => {
+                                    const updated = (project.factions || []).map(
+                                      (f) =>
+                                        f.id === faction.id
+                                          ? {
+                                              ...f,
+                                              reputationLabel: e.target.value,
+                                            }
+                                          : f,
+                                    );
+                                    pushHistory({ ...project, factions: updated });
+                                  }}
+                                  className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200 outline-none focus:border-amber-400"
+                                  placeholder="Reputation label"
+                                  title="Relationship or reputation label"
+                                />
+                                <select
+                                  value={faction.joinFlagId || ""}
+                                  onChange={(e) => {
+                                    const updated = (project.factions || []).map(
+                                      (f) =>
+                                        f.id === faction.id
+                                          ? {
+                                              ...f,
+                                              joinFlagId:
+                                                e.target.value || undefined,
+                                            }
+                                          : f,
+                                    );
+                                    pushHistory({ ...project, factions: updated });
+                                  }}
+                                  className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200 outline-none focus:border-amber-400"
+                                  title="Flag that unlocks or joins this group"
+                                >
+                                  <option value="">No unlock flag</option>
+                                  {(project.gameFlags || []).map((flag) => (
+                                    <option key={flag} value={flag}>
+                                      {flag}
+                                    </option>
+                                  ))}
+                                </select>
+                                <select
+                                  value={faction.rivalFactionId || ""}
+                                  onChange={(e) => {
+                                    const updated = (project.factions || []).map(
+                                      (f) =>
+                                        f.id === faction.id
+                                          ? {
+                                              ...f,
+                                              rivalFactionId:
+                                                e.target.value || undefined,
+                                            }
+                                          : f,
+                                    );
+                                    pushHistory({ ...project, factions: updated });
+                                  }}
+                                  className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200 outline-none focus:border-amber-400"
+                                  title="Rival group"
+                                >
+                                  <option value="">No rival group</option>
+                                  {(project.factions || [])
+                                    .filter((f) => f.id !== faction.id)
+                                    .map((other) => (
+                                      <option key={other.id} value={other.id}>
+                                        Rival: {other.name}
+                                      </option>
+                                    ))}
+                                </select>
+                              </div>
+                              <textarea
+                                value={faction.description || ""}
+                                onChange={(e) => {
+                                  const updated = (project.factions || []).map(
+                                    (f) =>
+                                      f.id === faction.id
+                                        ? { ...f, description: e.target.value }
+                                        : f,
+                                  );
+                                  pushHistory({ ...project, factions: updated });
+                                }}
+                                className="mt-2 min-h-12 w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-300 outline-none focus:border-amber-400"
+                                placeholder="What does this group want, guard, sell, or believe?"
+                              />
+                              <button
+                                onClick={() => {
+                                  pushHistory({
+                                    ...project,
+                                    factions: (project.factions || []).filter(
+                                      (f) => f.id !== faction.id,
+                                    ),
+                                    characters: (project.characters || []).map((c) =>
+                                      c.factionId === faction.id
+                                        ? { ...c, factionId: undefined }
+                                        : c,
+                                    ),
+                                  });
+                                }}
+                                className="absolute right-2 top-2 text-neutral-600 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                                title="Delete group"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          );
+                        })}
+                        {(project.factions || []).length === 0 && (
+                          <div className="rounded-lg border border-dashed border-neutral-800 p-4 text-sm italic text-neutral-500">
+                            No groups yet. Make one when characters share a home, agenda, or reputation.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
                     {(project.characters || []).length === 0 && (
                       <p className="text-neutral-500 italic text-sm py-4">
-                        No characters yet. Add NPCs, creatures, and companions here to track relationships and gift preferences.
+                        No roster characters yet. Add NPCs, creatures, and followers here to track relationships, groups, gifts, and dialogue hooks.
                       </p>
                     )}
 
@@ -17174,6 +18196,9 @@ const App: React.FC = () => {
                         const portrait = char.portraitAssetId
                           ? project.assets.find((a) => a.id === char.portraitAssetId)
                           : null;
+                        const linkedCompanion = (project.companions || []).find(
+                          (companion) => companion.characterId === char.id,
+                        );
                         return (
                           <div
                             key={char.id}
@@ -17195,6 +18220,11 @@ const App: React.FC = () => {
                                         characters: (p.characters || []).map((c) =>
                                           c.id === char.id ? { ...c, portraitAssetId: id } : c
                                         ),
+                                        companions: (p.companions || []).map((companion) =>
+                                          companion.characterId === char.id
+                                            ? { ...companion, assetId: id }
+                                            : companion,
+                                        ),
                                       }));
                                       setAssetPickerCb(null);
                                     },
@@ -17205,6 +18235,11 @@ const App: React.FC = () => {
                                     ...p,
                                     characters: (p.characters || []).map((c) =>
                                       c.id === char.id ? { ...c, portraitAssetId: undefined } : c
+                                    ),
+                                    companions: (p.companions || []).map((companion) =>
+                                      companion.characterId === char.id
+                                        ? { ...companion, assetId: null }
+                                        : companion,
                                     ),
                                   })) : undefined}
                               />
@@ -17219,6 +18254,11 @@ const App: React.FC = () => {
                                         characters: (p.characters || []).map((c) =>
                                           c.id === char.id ? { ...c, name: e.target.value } : c
                                         ),
+                                        companions: (p.companions || []).map((companion) =>
+                                          companion.characterId === char.id
+                                            ? { ...companion, name: e.target.value }
+                                            : companion,
+                                        ),
                                       }))
                                     }
                                     placeholder="Character name"
@@ -17228,7 +18268,20 @@ const App: React.FC = () => {
                                     onClick={() =>
                                       setProject((p) => ({
                                         ...p,
-                                        characters: (p.characters || []).filter((c) => c.id !== char.id),
+                                        characters: (p.characters || [])
+                                          .filter((c) => c.id !== char.id)
+                                          .map((c) => ({
+                                            ...c,
+                                            relationships: (
+                                              c.relationships || []
+                                            ).filter(
+                                              (tie) =>
+                                                tie.characterId !== char.id,
+                                            ),
+                                          })),
+                                        companions: (p.companions || []).filter(
+                                          (companion) => companion.characterId !== char.id,
+                                        ),
                                       }))
                                     }
                                     title="Delete character"
@@ -17249,9 +18302,456 @@ const App: React.FC = () => {
                                   }
                                   placeholder="Brief description or role…"
                                 />
+                                <select
+                                  className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs text-neutral-300 outline-none focus:border-cyan-400"
+                                  value={char.factionId || ""}
+                                  onChange={(e) =>
+                                    setProject((p) => ({
+                                      ...p,
+                                      characters: (p.characters || []).map((c) =>
+                                        c.id === char.id
+                                          ? {
+                                              ...c,
+                                              factionId:
+                                                e.target.value || undefined,
+                                            }
+                                          : c,
+                                      ),
+                                    }))
+                                  }
+                                >
+                                  <option value="">No group</option>
+                                  {(project.factions || []).map((faction) => (
+                                    <option key={faction.id} value={faction.id}>
+                                      {faction.name}
+                                    </option>
+                                  ))}
+                                </select>
                               </div>
                             </div>
 
+                            <div className="rounded-lg border border-amber-400/20 bg-amber-500/5 p-3">
+                              <label className="flex items-start gap-3 text-sm font-bold text-amber-100">
+                                <input
+                                  type="checkbox"
+                                  className="mt-1"
+                                  checked={!!linkedCompanion}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      const newCompanion: Companion = {
+                                        id: uuidv4(),
+                                        name: char.name || "New Follower",
+                                        characterId: char.id,
+                                        assetId: char.portraitAssetId || null,
+                                        dialogueTreeId: null,
+                                        interjections: [],
+                                      };
+                                      setProject((p) => ({
+                                        ...p,
+                                        companions: [
+                                          ...(p.companions || []).filter(
+                                            (companion) =>
+                                              companion.characterId !== char.id,
+                                          ),
+                                          newCompanion,
+                                        ],
+                                      }));
+                                    } else {
+                                      setProject((p) => ({
+                                        ...p,
+                                        companions: (p.companions || []).filter(
+                                          (companion) =>
+                                            companion.characterId !== char.id,
+                                        ),
+                                      }));
+                                    }
+                                  }}
+                                />
+                                <span>
+                                  Enable companion behavior
+                                  <span className="block text-xs font-normal text-neutral-500">
+                                    Lets this character provide click dialogue and idle lines without placing an automatic sprite in the scene.
+                                  </span>
+                                </span>
+                              </label>
+
+                              {linkedCompanion && (
+                                <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                                  <label className="text-[11px] font-bold uppercase tracking-wide text-neutral-500">
+                                    Click dialogue
+                                    <select
+                                      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs normal-case text-neutral-200 outline-none focus:border-amber-400"
+                                      value={linkedCompanion.dialogueTreeId || ""}
+                                      onChange={(e) =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          companions: (p.companions || []).map(
+                                            (companion) =>
+                                              companion.id === linkedCompanion.id
+                                                ? {
+                                                    ...companion,
+                                                    dialogueTreeId:
+                                                      e.target.value || null,
+                                                  }
+                                                : companion,
+                                          ),
+                                        }))
+                                      }
+                                    >
+                                      <option value="">No dialogue hook</option>
+                                      {project.dialogueTrees.map((tree) => (
+                                        <option key={tree.id} value={tree.id}>
+                                          {tree.title}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="text-[11px] font-bold uppercase tracking-wide text-neutral-500">
+                                    Follow condition
+                                    <select
+                                      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs normal-case text-neutral-200 outline-none focus:border-amber-400"
+                                      value={linkedCompanion.requiredFlagId || ""}
+                                      onChange={(e) =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          companions: (p.companions || []).map(
+                                            (companion) =>
+                                              companion.id === linkedCompanion.id
+                                                ? {
+                                                    ...companion,
+                                                    requiredFlagId:
+                                                      e.target.value || undefined,
+                                                  }
+                                                : companion,
+                                          ),
+                                        }))
+                                      }
+                                    >
+                                      <option value="">Always available</option>
+                                      {(project.gameFlags || []).map((flag) => (
+                                        <option key={flag} value={flag}>
+                                          {flag}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <div className="lg:col-span-2">
+                                    <div className="mb-1 flex items-center justify-between">
+                                      <span className="text-[11px] font-bold uppercase tracking-wide text-neutral-500">
+                                        Idle lines
+                                      </span>
+                                      <button
+                                        className="text-[10px] font-bold text-amber-300 hover:text-amber-100"
+                                        onClick={() =>
+                                          setProject((p) => ({
+                                            ...p,
+                                            companions: (p.companions || []).map(
+                                              (companion) =>
+                                                companion.id === linkedCompanion.id
+                                                  ? {
+                                                      ...companion,
+                                                      interjections: [
+                                                        ...(companion.interjections ||
+                                                          []),
+                                                        "New idle line...",
+                                                      ],
+                                                    }
+                                                  : companion,
+                                            ),
+                                          }))
+                                        }
+                                      >
+                                        + add line
+                                      </button>
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                      {(linkedCompanion.interjections || []).map(
+                                        (line, lineIndex) => (
+                                          <div
+                                            key={lineIndex}
+                                            className="grid grid-cols-[minmax(0,1fr)_1.5rem] items-center gap-2"
+                                          >
+                                            <input
+                                              className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-amber-400"
+                                              value={line}
+                                              onChange={(e) =>
+                                                setProject((p) => ({
+                                                  ...p,
+                                                  companions: (
+                                                    p.companions || []
+                                                  ).map((companion) =>
+                                                    companion.id ===
+                                                    linkedCompanion.id
+                                                      ? {
+                                                          ...companion,
+                                                          interjections: (
+                                                            companion.interjections ||
+                                                            []
+                                                          ).map((item, i) =>
+                                                            i === lineIndex
+                                                              ? e.target.value
+                                                              : item,
+                                                          ),
+                                                        }
+                                                      : companion,
+                                                  ),
+                                                }))
+                                              }
+                                              placeholder="Random idle line..."
+                                            />
+                                            <button
+                                              className="text-neutral-600 hover:text-red-400"
+                                              onClick={() =>
+                                                setProject((p) => ({
+                                                  ...p,
+                                                  companions: (
+                                                    p.companions || []
+                                                  ).map((companion) =>
+                                                    companion.id ===
+                                                    linkedCompanion.id
+                                                      ? {
+                                                          ...companion,
+                                                          interjections: (
+                                                            companion.interjections ||
+                                                            []
+                                                          ).filter(
+                                                            (_, i) =>
+                                                              i !== lineIndex,
+                                                          ),
+                                                        }
+                                                      : companion,
+                                                  ),
+                                                }))
+                                              }
+                                            >
+                                              <X size={12} />
+                                            </button>
+                                          </div>
+                                        ),
+                                      )}
+                                      {(linkedCompanion.interjections || [])
+                                        .length === 0 && (
+                                        <div className="rounded border border-dashed border-neutral-800 px-3 py-2 text-xs italic text-neutral-500">
+                                          No idle lines yet.
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="rounded-lg border border-cyan-400/20 bg-cyan-500/5 p-3">
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <div>
+                                  <div className="font-comic text-sm font-bold text-cyan-200">
+                                    Character ties
+                                  </div>
+                                  <p className="text-[10px] leading-snug text-neutral-500">
+                                    Define how this character relates to other roster characters.
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="shrink-0 rounded border border-cyan-400/40 bg-cyan-500/10 px-2 py-1 text-[10px] font-bold text-cyan-200 hover:bg-cyan-500/20"
+                                  onClick={() => {
+                                    const target = (project.characters || []).find(
+                                      (candidate) => candidate.id !== char.id,
+                                    );
+                                    setProject((p) => ({
+                                      ...p,
+                                      characters: (p.characters || []).map((c) =>
+                                        c.id === char.id
+                                          ? {
+                                              ...c,
+                                              relationships: [
+                                                ...(c.relationships || []),
+                                                {
+                                                  id: uuidv4(),
+                                                  characterId: target?.id || "",
+                                                  label: "Knows",
+                                                  value: 0,
+                                                  notes: "",
+                                                },
+                                              ],
+                                            }
+                                          : c,
+                                      ),
+                                    }));
+                                  }}
+                                >
+                                  + add tie
+                                </button>
+                              </div>
+                              <div className="flex flex-col gap-2">
+                                {(char.relationships || []).map((tie) => (
+                                  <div
+                                    key={tie.id}
+                                    className="grid gap-2 rounded border border-neutral-800 bg-neutral-950 p-2 md:grid-cols-[minmax(0,1fr)_7rem_5rem_1.5rem]"
+                                  >
+                                    <select
+                                      value={tie.characterId}
+                                      onChange={(e) =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? {
+                                                  ...c,
+                                                  relationships: (
+                                                    c.relationships || []
+                                                  ).map((rel) =>
+                                                    rel.id === tie.id
+                                                      ? {
+                                                          ...rel,
+                                                          characterId:
+                                                            e.target.value,
+                                                        }
+                                                      : rel,
+                                                  ),
+                                                }
+                                              : c,
+                                          ),
+                                        }))
+                                      }
+                                      className="min-w-0 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200 outline-none focus:border-cyan-400"
+                                    >
+                                      <option value="">Choose character…</option>
+                                      {(project.characters || [])
+                                        .filter(
+                                          (candidate) => candidate.id !== char.id,
+                                        )
+                                        .map((candidate) => (
+                                          <option
+                                            key={candidate.id}
+                                            value={candidate.id}
+                                          >
+                                            {candidate.name}
+                                          </option>
+                                        ))}
+                                    </select>
+                                    <input
+                                      value={tie.label}
+                                      onChange={(e) =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? {
+                                                  ...c,
+                                                  relationships: (
+                                                    c.relationships || []
+                                                  ).map((rel) =>
+                                                    rel.id === tie.id
+                                                      ? {
+                                                          ...rel,
+                                                          label: e.target.value,
+                                                        }
+                                                      : rel,
+                                                  ),
+                                                }
+                                              : c,
+                                          ),
+                                        }))
+                                      }
+                                      className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200 outline-none focus:border-cyan-400"
+                                      placeholder="Rival, sibling..."
+                                    />
+                                    <input
+                                      type="number"
+                                      value={tie.value}
+                                      onChange={(e) =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? {
+                                                  ...c,
+                                                  relationships: (
+                                                    c.relationships || []
+                                                  ).map((rel) =>
+                                                    rel.id === tie.id
+                                                      ? {
+                                                          ...rel,
+                                                          value: Number(
+                                                            e.target.value,
+                                                          ),
+                                                        }
+                                                      : rel,
+                                                  ),
+                                                }
+                                              : c,
+                                          ),
+                                        }))
+                                      }
+                                      className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200 outline-none focus:border-cyan-400"
+                                      title="Starting relationship value"
+                                    />
+                                    <button
+                                      type="button"
+                                      className="text-neutral-600 hover:text-red-400"
+                                      onClick={() =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? {
+                                                  ...c,
+                                                  relationships: (
+                                                    c.relationships || []
+                                                  ).filter(
+                                                    (rel) => rel.id !== tie.id,
+                                                  ),
+                                                }
+                                              : c,
+                                          ),
+                                        }))
+                                      }
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                    <textarea
+                                      value={tie.notes || ""}
+                                      onChange={(e) =>
+                                        setProject((p) => ({
+                                          ...p,
+                                          characters: (p.characters || []).map((c) =>
+                                            c.id === char.id
+                                              ? {
+                                                  ...c,
+                                                  relationships: (
+                                                    c.relationships || []
+                                                  ).map((rel) =>
+                                                    rel.id === tie.id
+                                                      ? {
+                                                          ...rel,
+                                                          notes: e.target.value,
+                                                        }
+                                                      : rel,
+                                                  ),
+                                                }
+                                              : c,
+                                          ),
+                                        }))
+                                      }
+                                      className="min-h-14 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-300 outline-none focus:border-cyan-400 md:col-span-4"
+                                      placeholder="Why this relationship matters, how they talk, what can change it..."
+                                    />
+                                  </div>
+                                ))}
+                                {(char.relationships || []).length === 0 && (
+                                  <div className="rounded border border-dashed border-neutral-800 px-3 py-2 text-xs italic text-neutral-500">
+                                    No character ties yet.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <details className="rounded-lg border border-neutral-800 bg-neutral-950/45">
+                              <summary className="cursor-pointer px-3 py-2 font-comic text-xs font-bold text-neutral-300 hover:text-white">
+                                Relationship stages and gift reactions
+                              </summary>
+                              <div className="flex flex-col gap-3 border-t border-neutral-800 p-3">
                             {/* Relationship track */}
                             <div className="flex flex-wrap items-center gap-2">
                               <label className="text-xs text-neutral-400 shrink-0">Track label:</label>
@@ -17464,6 +18964,8 @@ const App: React.FC = () => {
                                 ))}
                               </div>
                             </div>
+                              </div>
+                            </details>
                           </div>
                         );
                       })}
@@ -17473,11 +18975,14 @@ const App: React.FC = () => {
 
                 {rpgTab === "factions" && (
                   <>
-                    <div className="mt-8">
-                      <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between">
+                      <div>
                         <h2 className="text-xl font-bold text-amber-500">
                           Factions
                         </h2>
+                        <p className="text-sm text-neutral-500">
+                          Groups for character membership and reputation tracks.
+                        </p>
                       </div>
                       <button
                         onClick={() => {
@@ -17492,16 +18997,23 @@ const App: React.FC = () => {
                             factions: [...(project.factions || []), newFaction],
                           });
                         }}
-                        className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold transition-colors shadow-lg mb-4"
+                        className="rounded border border-amber-400/50 bg-amber-500/20 px-4 py-2 font-bold text-amber-100 transition-colors hover:bg-amber-500/30"
                       >
                         + Create Faction
                       </button>
-                      <div className="space-y-2">
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {(project.factions || []).map((faction) => (
                           <div
                             key={faction.id}
-                            className="bg-neutral-900 border border-neutral-800 rounded p-3 group relative"
+                            className="group relative flex min-h-[18rem] flex-col rounded-lg border border-amber-400/20 bg-neutral-900 p-4"
                           >
+                            <div className="mb-3 pr-6 text-xs font-bold uppercase tracking-wide text-amber-300/70">
+                              {(project.characters || []).filter(
+                                (character) => character.factionId === faction.id,
+                              ).length}{" "}
+                              members
+                            </div>
                             <input
                               type="text"
                               value={faction.name}
@@ -17514,28 +19026,47 @@ const App: React.FC = () => {
                                 );
                                 pushHistory({ ...project, factions: updated });
                               }}
-                              className="bg-transparent font-bold text-white mb-1 w-full border-b border-transparent focus:border-amber-500 focus:outline-none"
+                              className="mb-3 w-full border-b border-neutral-700 bg-transparent pb-2 text-lg font-bold text-white outline-none focus:border-amber-500"
                               placeholder="Faction Name"
                             />
-                            <input
-                              type="number"
-                              value={faction.defaultAffinity}
+                            <label className="mb-3 block text-xs font-bold uppercase tracking-wide text-neutral-500">
+                              Default affinity
+                              <input
+                                type="number"
+                                value={faction.defaultAffinity}
+                                onChange={(e) => {
+                                  const updated = (project.factions || []).map(
+                                    (f) =>
+                                      f.id === faction.id
+                                        ? {
+                                            ...f,
+                                            defaultAffinity: Number(
+                                              e.target.value,
+                                            ),
+                                          }
+                                        : f,
+                                  );
+                                  pushHistory({ ...project, factions: updated });
+                                }}
+                                className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-amber-500"
+                              />
+                            </label>
+                            <textarea
+                              value={faction.description || ""}
                               onChange={(e) => {
                                 const updated = (project.factions || []).map(
                                   (f) =>
                                     f.id === faction.id
                                       ? {
                                           ...f,
-                                          defaultAffinity: Number(
-                                            e.target.value,
-                                          ),
+                                          description: e.target.value,
                                         }
                                       : f,
                                 );
                                 pushHistory({ ...project, factions: updated });
                               }}
-                              className="bg-transparent text-sm text-neutral-400 w-full mb-2"
-                              placeholder="Default Affinity (0)"
+                              className="min-h-32 flex-1 w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-neutral-300 outline-none focus:border-amber-500"
+                              placeholder="What does this group want, guard, sell, or believe?"
                             />
                             <button
                               onClick={() => {
@@ -17552,44 +19083,124 @@ const App: React.FC = () => {
                             </button>
                           </div>
                         ))}
-                      </div>
+                        {(project.factions || []).length === 0 && (
+                          <div className="rounded-lg border border-dashed border-neutral-800 p-6 text-sm italic text-neutral-500">
+                            No factions yet.
+                          </div>
+                        )}
                     </div>
                   </>
                 )}
 
                 {rpgTab === "lore" && (
                   <>
-                    <div className="mt-8">
-                      <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between">
+                      <div>
                         <h2 className="text-xl font-bold text-blue-400">
-                          Lore Entries
+                          Almanac
                         </h2>
+                        <p className="text-sm text-neutral-500">
+                          Player-facing lore, journal pages, and quest notes that can unlock from story flags.
+                        </p>
                       </div>
-                      <button
-                        onClick={() => {
-                          const newEntry: LoreEntry = {
-                            id: uuidv4(),
-                            title: "New Document",
-                            content: "",
-                          };
-                          pushHistory({
-                            ...project,
-                            loreEntries: [
-                              ...(project.loreEntries || []),
-                              newEntry,
-                            ],
-                          });
-                        }}
-                        className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-bold transition-colors shadow-lg mb-4"
-                      >
-                        + Create Entry
-                      </button>
-                      <div className="space-y-2">
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          {
+                            type: "journal" as const,
+                            label: "+ Journal",
+                            title: "New Journal Entry",
+                            category: "Journal",
+                          },
+                          {
+                            type: "quest_note" as const,
+                            label: "+ Quest Note",
+                            title: "New Quest Note",
+                            category: "Quest Notes",
+                          },
+                          {
+                            type: "lore" as const,
+                            label: "+ Lore",
+                            title: "New Lore Page",
+                            category: "Lore",
+                          },
+                        ].map((template) => (
+                          <button
+                            key={template.type}
+                            type="button"
+                            onClick={() => {
+                              const newEntry: LoreEntry = {
+                                id: uuidv4(),
+                                title: template.title,
+                                content: "",
+                                entryType: template.type,
+                                category: template.category,
+                                questId:
+                                  template.type === "quest_note"
+                                    ? project.quests[0]?.id
+                                    : undefined,
+                              };
+                              pushHistory({
+                                ...project,
+                                loreEntries: [
+                                  ...(project.loreEntries || []),
+                                  newEntry,
+                                ],
+                              });
+                            }}
+                            className="rounded border border-blue-400/50 bg-blue-500/20 px-3 py-2 text-xs font-bold text-blue-100 transition-colors hover:bg-blue-500/30"
+                          >
+                            {template.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {(project.loreEntries || []).map((entry) => (
                           <div
                             key={entry.id}
-                            className="bg-neutral-900 border border-neutral-800 rounded p-3 group relative"
+                            className="group relative flex min-h-[20rem] flex-col rounded-lg border border-blue-400/20 bg-neutral-900 p-4"
                           >
+                            <div className="mb-2 flex items-center gap-2 pr-6">
+                              <select
+                                value={entry.entryType || "lore"}
+                                onChange={(e) => {
+                                  const entryType = e.target
+                                    .value as LoreEntry["entryType"];
+                                  const updated = (project.loreEntries || []).map(
+                                    (e2) =>
+                                      e2.id === entry.id
+                                        ? {
+                                            ...e2,
+                                            entryType,
+                                            category:
+                                              e2.category ||
+                                              (entryType === "journal"
+                                                ? "Journal"
+                                                : entryType === "quest_note"
+                                                  ? "Quest Notes"
+                                                  : "Lore"),
+                                          }
+                                        : e2,
+                                  );
+                                  pushHistory({
+                                    ...project,
+                                    loreEntries: updated,
+                                  });
+                                }}
+                                className="rounded border border-blue-400/30 bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-100 outline-none focus:border-blue-400"
+                              >
+                                <option value="lore">Lore</option>
+                                <option value="journal">Journal</option>
+                                <option value="quest_note">Quest Note</option>
+                              </select>
+                              {entry.questId && (
+                                <span className="truncate rounded border border-yellow-400/30 bg-yellow-400/10 px-2 py-1 text-[10px] font-bold text-yellow-200">
+                                  {project.quests.find(
+                                    (quest) => quest.id === entry.questId,
+                                  )?.name || "Linked quest"}
+                                </span>
+                              )}
+                            </div>
                             <input
                               type="text"
                               value={entry.title}
@@ -17605,9 +19216,90 @@ const App: React.FC = () => {
                                   loreEntries: updated,
                                 });
                               }}
-                              className="bg-transparent font-bold text-blue-300 mb-1 w-full border-b border-transparent focus:border-blue-500 focus:outline-none"
+                              className="mb-3 w-full border-b border-neutral-700 bg-transparent pb-2 text-lg font-bold text-blue-200 outline-none focus:border-blue-500"
                               placeholder="Entry Title"
                             />
+                            <div className="mb-3 grid gap-2 sm:grid-cols-2">
+                              <select
+                                value={entry.questId || ""}
+                                onChange={(e) => {
+                                  const updated = (project.loreEntries || []).map(
+                                    (e2) =>
+                                      e2.id === entry.id
+                                        ? {
+                                            ...e2,
+                                            questId: e.target.value || undefined,
+                                            entryType:
+                                              e.target.value
+                                                ? "quest_note"
+                                                : e2.entryType,
+                                            category:
+                                              e.target.value
+                                                ? "Quest Notes"
+                                                : e2.category,
+                                          }
+                                        : e2,
+                                  );
+                                  pushHistory({
+                                    ...project,
+                                    loreEntries: updated,
+                                  });
+                                }}
+                                className="rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-300 outline-none focus:border-blue-500 sm:col-span-2"
+                              >
+                                <option value="">Not linked to a quest</option>
+                                {(project.quests || []).map((quest) => (
+                                  <option key={quest.id} value={quest.id}>
+                                    {quest.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                type="text"
+                                value={entry.category || ""}
+                                onChange={(e) => {
+                                  const updated = (project.loreEntries || []).map(
+                                    (e2) =>
+                                      e2.id === entry.id
+                                        ? { ...e2, category: e.target.value }
+                                        : e2,
+                                  );
+                                  pushHistory({
+                                    ...project,
+                                    loreEntries: updated,
+                                  });
+                                }}
+                                className="rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-300 outline-none focus:border-blue-500"
+                                placeholder="Category"
+                              />
+                              <select
+                                value={entry.requiredFlagId || ""}
+                                onChange={(e) => {
+                                  const updated = (project.loreEntries || []).map(
+                                    (e2) =>
+                                      e2.id === entry.id
+                                        ? {
+                                            ...e2,
+                                            requiredFlagId:
+                                              e.target.value || undefined,
+                                          }
+                                        : e2,
+                                  );
+                                  pushHistory({
+                                    ...project,
+                                    loreEntries: updated,
+                                  });
+                                }}
+                                className="rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-300 outline-none focus:border-blue-500"
+                              >
+                                <option value="">Always visible</option>
+                                {(project.gameFlags || []).map((flag) => (
+                                  <option key={flag} value={flag}>
+                                    {flag}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                             <textarea
                               value={entry.content}
                               onChange={(e) => {
@@ -17622,8 +19314,14 @@ const App: React.FC = () => {
                                   loreEntries: updated,
                                 });
                               }}
-                              className="bg-black/50 text-xs text-neutral-300 w-full h-20 rounded p-1 custom-scrollbar focus:outline-none focus:border-blue-500"
-                              placeholder="Lore content..."
+                              className="min-h-40 flex-1 w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-neutral-300 outline-none custom-scrollbar focus:border-blue-500"
+                              placeholder={
+                                entry.entryType === "journal"
+                                  ? "Journal text, observations, discoveries..."
+                                  : entry.entryType === "quest_note"
+                                    ? "Quest clue, objective note, rumor, or journal update..."
+                                    : "Lore content..."
+                              }
                             />
                             <button
                               onClick={() => {
@@ -17640,7 +19338,11 @@ const App: React.FC = () => {
                             </button>
                           </div>
                         ))}
-                      </div>
+                        {(project.loreEntries || []).length === 0 && (
+                          <div className="rounded-lg border border-dashed border-neutral-800 p-6 text-sm italic text-neutral-500">
+                            No almanac entries yet.
+                          </div>
+                        )}
                     </div>
                   </>
                 )}
@@ -17663,6 +19365,7 @@ const App: React.FC = () => {
                           const newComp: Companion = {
                             id: uuidv4(),
                             name: "New Companion",
+                            characterId: null,
                             assetId: null,
                             dialogueTreeId: null,
                             interjections: []
@@ -17679,6 +19382,11 @@ const App: React.FC = () => {
                       </button>
                       <div className="space-y-2">
                         {(project.companions || []).map(comp => (
+                          (() => {
+                            const linkedCharacter = (project.characters || []).find(
+                              (character) => character.id === comp.characterId,
+                            );
+                            return (
                           <div
                             key={comp.id}
                             onClick={() => setActiveCompanionId(comp.id)}
@@ -17693,9 +19401,15 @@ const App: React.FC = () => {
                               {comp.requiredFlagId && <span className="rounded-full border border-indigo-400/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] text-indigo-300">Flag</span>}
                             </div>
                             <div className="text-xs text-neutral-500 truncate">
-                              {comp.interjections && comp.interjections.length > 0 ? `${comp.interjections.length} dialogue lines` : "Silent"}
+                              {linkedCharacter
+                                ? linkedCharacter.name
+                                : comp.interjections && comp.interjections.length > 0
+                                  ? `${comp.interjections.length} dialogue lines`
+                                  : "Silent"}
                             </div>
                           </div>
+                            );
+                          })()
                         ))}
                         {(project.companions || []).length === 0 && (
                           <div className="rounded-xl border border-dashed border-neutral-800 p-4 text-center text-sm text-neutral-500">
@@ -17708,6 +19422,7 @@ const App: React.FC = () => {
                 )}
               </div>
 
+              {worldRulesUsesDetailPane && (
               <div className="flex-1 overflow-y-auto custom-scrollbar">
                 {rpgTab === "quests" &&
                   (activeQuestId &&
@@ -18451,11 +20166,93 @@ const App: React.FC = () => {
                   ))}
 
                 {rpgTab === "stats" && (
-                  <div className="flex flex-col items-center justify-center h-full text-neutral-500">
-                    <Zap size={48} className="mb-4 opacity-50" />
-                    <p className="text-lg">
-                      Skill & Stat details panel (Under Construction)
-                    </p>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <div className="rounded-lg border border-emerald-400/20 bg-neutral-900 p-4">
+                      <div className="mb-3 flex items-center gap-2 text-emerald-300">
+                        <Zap size={18} />
+                        <h3 className="font-bold">Skills</h3>
+                      </div>
+                      <p className="mb-4 text-sm text-neutral-400">
+                        Skills are number tracks used by skill checks, quest objectives, dialogue choices, and crafting outcomes.
+                      </p>
+                      <div className="space-y-2">
+                        {(project.globalSettings.customSkills || []).map((skill) => {
+                          const questUses = (project.quests || []).filter((quest) =>
+                            (quest.objectives || []).some(
+                              (objective) =>
+                                objective.type === "skill_check" &&
+                                objective.targetId === skill,
+                            ),
+                          ).length;
+                          const craftUses = (project.craftingRecipes || []).filter(
+                            (recipe) =>
+                              (recipe.outcomes || []).some(
+                                (outcome) =>
+                                  outcome.type === "change_skill" &&
+                                  outcome.targetId === skill,
+                              ),
+                          ).length;
+                          return (
+                            <div
+                              key={skill}
+                              className="rounded border border-neutral-800 bg-neutral-950 p-3"
+                            >
+                              <div className="font-bold text-emerald-200">
+                                {skill}
+                              </div>
+                              <div className="mt-1 text-xs text-neutral-500">
+                                {questUses} quest checks · {craftUses} crafting outcomes
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {(project.globalSettings.customSkills || []).length === 0 && (
+                          <div className="rounded border border-dashed border-neutral-800 p-4 text-sm text-neutral-500">
+                            Add skills on the left, then use them in object skill checks, quests, dialogue, or crafting outcomes.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-pink-400/20 bg-neutral-900 p-4">
+                      <div className="mb-3 flex items-center gap-2 text-pink-300">
+                        <Activity size={18} />
+                        <h3 className="font-bold">Needs & Meters</h3>
+                      </div>
+                      <p className="mb-4 text-sm text-neutral-400">
+                        Needs are player meters like hunger, novelty, rest, or spiritual. Crafting and dialogue can raise or lower them.
+                      </p>
+                      <div className="space-y-2">
+                        {(project.globalSettings.customNeeds || []).map((need) => {
+                          const craftUses = (project.craftingRecipes || []).filter(
+                            (recipe) =>
+                              (recipe.outcomes || []).some(
+                                (outcome) =>
+                                  outcome.type === "change_need" &&
+                                  outcome.targetId === need,
+                              ),
+                          ).length;
+                          return (
+                            <div
+                              key={need}
+                              className="rounded border border-neutral-800 bg-neutral-950 p-3"
+                            >
+                              <div className="font-bold text-pink-200">
+                                {need}
+                              </div>
+                              <div className="mt-1 text-xs text-neutral-500">
+                                {craftUses} crafting outcomes
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {(project.globalSettings.customNeeds || []).length === 0 && (
+                          <div className="rounded border border-dashed border-neutral-800 p-4 text-sm text-neutral-500">
+                            Add meters on the left to track survival, mood, magic, reputation pressure, or anything else.
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -18512,6 +20309,40 @@ const App: React.FC = () => {
                                   }}
                                   className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2.5 font-bold text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
                                 />
+                              </div>
+
+                              <div className="rounded-xl border border-neutral-800 bg-neutral-950/60 p-4">
+                                <label className="mb-2 block text-sm font-bold text-neutral-300">
+                                  Linked roster character
+                                </label>
+                                <select
+                                  value={comp.characterId || ""}
+                                  onChange={(e) => {
+                                    const selectedCharacter = (project.characters || []).find(
+                                      (character) => character.id === e.target.value,
+                                    );
+                                    const updated = (project.companions || []).map((c2) =>
+                                      c2.id === comp.id
+                                        ? {
+                                            ...c2,
+                                            characterId: e.target.value || null,
+                                            assetId:
+                                              selectedCharacter?.portraitAssetId ||
+                                              c2.assetId,
+                                          }
+                                        : c2,
+                                    );
+                                    pushHistory({ ...project, companions: updated });
+                                  }}
+                                  className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2.5 text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                                >
+                                  <option value="">Standalone follower</option>
+                                  {(project.characters || []).map((character) => (
+                                    <option key={character.id} value={character.id}>
+                                      {character.name}
+                                    </option>
+                                  ))}
+                                </select>
                               </div>
 
                               <div className="grid gap-4 md:grid-cols-2">
@@ -18645,6 +20476,7 @@ const App: React.FC = () => {
                     </div>
                   ))}
               </div>
+              )}
             </div>
           </div>
         )}
@@ -18674,16 +20506,22 @@ const App: React.FC = () => {
                 <div className="flex gap-2">
                   <button
                     onClick={() => {
+                      const itemId = uuidv4();
                       const newItem: InventoryItem = {
-                        id: uuidv4(),
+                        id: itemId,
                         name: "New Item",
                         description: "",
                         iconAssetId: null,
+                        collectionCategory:
+                          activeItemGroup !== "all"
+                            ? activeItemGroup
+                            : undefined,
                       };
                       pushHistory({
                         ...project,
                         inventoryItems: [...project.inventoryItems, newItem],
                       });
+                      setActiveInventoryItemId(itemId);
                     }}
                     className="studio-primary-button flex flex-1 items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
                   >
@@ -18745,6 +20583,27 @@ const App: React.FC = () => {
                       resultItemId: "",
                       destroyIngredient1: true,
                       destroyIngredient2: true,
+                      requirements: [
+                        {
+                          id: uuidv4(),
+                          itemId: "",
+                          consume: true,
+                          role: "ingredient",
+                        },
+                        {
+                          id: uuidv4(),
+                          itemId: "",
+                          consume: false,
+                          role: "tool",
+                        },
+                      ],
+                      outcomes: [
+                        {
+                          id: uuidv4(),
+                          type: "give_item",
+                          targetId: "",
+                        },
+                      ],
                       successMessage: "Crafting successful!",
                     };
                     pushHistory({
@@ -18762,15 +20621,150 @@ const App: React.FC = () => {
               )}
             />
 
-            {itemsTab === "items" ? (
-              <div className="studio-page-content studio-card-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 overflow-y-auto custom-scrollbar p-6 pb-20">
-                {project.inventoryItems.map((item) => (
+            {itemsTab === "items" ? (() => {
+              const itemGroups = Array.from(
+                new Set([
+                  ...(project.globalSettings.itemGroups || []),
+                  ...project.inventoryItems
+                    .map((item) => item.collectionCategory)
+                    .filter((group): group is string => Boolean(group)),
+                ]),
+              );
+              const visibleItems =
+                activeItemGroup === "all"
+                  ? project.inventoryItems
+                  : project.inventoryItems.filter(
+                      (item) =>
+                        (item.collectionCategory || "Ungrouped") ===
+                        activeItemGroup,
+                    );
+
+              return (
+              <div className="studio-page-content flex min-h-0 gap-4 overflow-hidden p-6 pb-20">
+                <aside className="flex w-72 shrink-0 flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950/80">
+                  <div className="border-b border-neutral-800 px-3 py-2">
+                    <div className="text-xs font-bold uppercase text-emerald-200">
+                      Item Library
+                    </div>
+                    <div className="text-[11px] text-neutral-500">
+                      {visibleItems.length} / {project.inventoryItems.length} items
+                    </div>
+                    <div className="mt-3 flex gap-1">
+                      <input
+                        value={newItemGroupText}
+                        onChange={(e) => setNewItemGroupText(e.target.value)}
+                        placeholder="New group"
+                        className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none focus:border-emerald-400"
+                      />
+                      <button
+                        onClick={() => {
+                          const group = newItemGroupText.trim();
+                          if (!group) return;
+                          const itemGroups =
+                            project.globalSettings.itemGroups || [];
+                          if (!itemGroups.includes(group)) {
+                            pushHistory({
+                              ...project,
+                              globalSettings: {
+                                ...project.globalSettings,
+                                itemGroups: [...itemGroups, group],
+                              },
+                            });
+                          }
+                          setActiveItemGroup(group);
+                          setNewItemGroupText("");
+                        }}
+                        className="rounded border border-emerald-400/40 bg-emerald-500/10 px-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/20"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {["all", "Ungrouped", ...itemGroups].map((group) => (
+                        <button
+                          key={group}
+                          type="button"
+                          onClick={() => setActiveItemGroup(group)}
+                          className={`rounded border px-2 py-1 text-[11px] font-bold ${
+                            activeItemGroup === group
+                              ? "border-emerald-400 bg-emerald-400/20 text-emerald-100"
+                              : "border-neutral-800 bg-neutral-900 text-neutral-400 hover:border-emerald-400/40"
+                          }`}
+                        >
+                          {group === "all" ? "All" : group}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar p-2">
+                    {visibleItems.map((item) => {
+                      const iconAsset = item.iconAssetId
+                        ? project.assets.find((asset) => asset.id === item.iconAssetId)
+                        : null;
+                      const isActive =
+                        item.id ===
+                        (activeInventoryItemId || project.inventoryItems[0]?.id);
+
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setActiveInventoryItemId(item.id)}
+                          className={`mb-2 flex w-full items-center gap-3 rounded border p-2 text-left transition-colors ${
+                            isActive
+                              ? "border-emerald-400/70 bg-emerald-400/12 text-emerald-50"
+                              : "border-neutral-800 bg-neutral-900/70 text-neutral-200 hover:border-emerald-400/30 hover:bg-neutral-900"
+                          }`}
+                        >
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-neutral-700 bg-neutral-950">
+                            {iconAsset?.src ? (
+                              <img
+                                src={iconAsset.src}
+                                alt=""
+                                className="h-full w-full object-contain"
+                              />
+                            ) : (
+                              <Backpack size={18} className="text-neutral-600" />
+                            )}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-bold">
+                              {item.name || "Unnamed Item"}
+                            </span>
+                            <span className="block truncate text-[11px] text-neutral-500">
+                              {item.category || "normal"}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {visibleItems.length === 0 && (
+                      <div className="rounded border border-dashed border-neutral-800 p-4 text-center text-sm italic text-neutral-500">
+                        No items in this group.
+                      </div>
+                    )}
+                  </div>
+                </aside>
+
+                <div className="min-w-0 flex-1 overflow-y-auto custom-scrollbar pr-2">
+                  {(() => {
+                    const selectedItem =
+                      visibleItems.find(
+                        (item) => item.id === activeInventoryItemId,
+                      ) ||
+                      visibleItems[0] ||
+                      project.inventoryItems.find(
+                        (item) => item.id === activeInventoryItemId,
+                      ) ||
+                      project.inventoryItems[0];
+
+                    return selectedItem ? [selectedItem].map((item) => (
                   <div
                     key={item.id}
-                    className="studio-card bg-neutral-900 border border-neutral-800 rounded-lg p-4 flex flex-col gap-3"
+                    className="studio-card mx-auto grid max-w-5xl gap-4 rounded-lg border border-neutral-800 bg-neutral-900 p-4 shadow-xl lg:grid-cols-[260px_minmax(0,1fr)]"
                   >
-                    <div className="flex justify-between items-start">
-                      <div className="w-16 h-16 bg-neutral-800 rounded border border-neutral-700 flex items-center justify-center overflow-hidden shrink-0">
+                    <div className="flex flex-col gap-3 rounded border border-neutral-800 bg-neutral-950/70 p-3">
+                      <div className="aspect-square w-full bg-neutral-800 rounded border border-neutral-700 flex items-center justify-center overflow-hidden shrink-0">
                         {item.iconAssetId &&
                         project.assets.find(
                           (a) => a.id === item.iconAssetId,
@@ -18787,21 +20781,61 @@ const App: React.FC = () => {
                           <Backpack size={24} className="text-neutral-600" />
                         )}
                       </div>
-                      <button
-                        onClick={() => {
+                      <AssetInspectorSlot
+                        label="Item icon"
+                        description="The picture shown for this item in inventory menus."
+                        asset={project.assets.find(
+                          (asset) => asset.id === item.iconAssetId,
+                        )}
+                        emptyLabel="No item icon"
+                        chooseLabel="Choose icon"
+                        compact
+                        onChoose={() =>
+                          setAssetPickerCb({
+                            filterType: "image",
+                            onSelect: (id) => {
+                              pushHistory({
+                                ...project,
+                                inventoryItems: project.inventoryItems.map((i) =>
+                                  i.id === item.id
+                                    ? { ...i, iconAssetId: id }
+                                    : i,
+                                ),
+                              });
+                              setAssetPickerCb(null);
+                            },
+                          })
+                        }
+                        onClear={() =>
                           pushHistory({
                             ...project,
-                            inventoryItems: project.inventoryItems.filter(
-                              (i) => i.id !== item.id,
+                            inventoryItems: project.inventoryItems.map((i) =>
+                              i.id === item.id
+                                ? { ...i, iconAssetId: null }
+                                : i,
                             ),
+                          })
+                        }
+                      />
+                      <button
+                        onClick={() => {
+                          const remainingItems = project.inventoryItems.filter(
+                            (i) => i.id !== item.id,
+                          );
+                          pushHistory({
+                            ...project,
+                            inventoryItems: remainingItems,
                           });
+                          setActiveInventoryItemId(remainingItems[0]?.id || null);
                         }}
-                        className="text-red-400 hover:text-red-300"
+                        className="flex items-center justify-center gap-2 rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-bold text-red-300 hover:bg-red-500/20"
                       >
-                        <Trash2 size={14} />
+                        <Trash2 size={14} /> Delete Item
                       </button>
                     </div>
 
+                    <div className="min-w-0 space-y-4">
+                      <div className="grid gap-3 md:grid-cols-2">
                     <div>
                       <LabelWithHelp
                         label="Name"
@@ -18855,7 +20889,44 @@ const App: React.FC = () => {
                           Crafting Station / Tool
                         </option>
                       </select>
+                      <LabelWithHelp
+                        label="Collection Group"
+                        helpText="Where this item lives in your editor library. This is for organization and does not change crafting behavior."
+                        className="mt-3 block text-sm uppercase font-bold"
+                      />
+                      <select
+                        value={item.collectionCategory || "Ungrouped"}
+                        onChange={(e) => {
+                          const nextGroup =
+                            e.target.value === "Ungrouped"
+                              ? undefined
+                              : e.target.value;
+                          pushHistory({
+                            ...project,
+                            inventoryItems: project.inventoryItems.map((i) =>
+                              i.id === item.id
+                                ? { ...i, collectionCategory: nextGroup }
+                                : i,
+                            ),
+                          });
+                        }}
+                        className="mt-1 w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm"
+                      >
+                        <option value="Ungrouped">Ungrouped</option>
+                        {itemGroups.map((group) => (
+                          <option key={group} value={group}>
+                            {group}
+                          </option>
+                        ))}
+                        {item.collectionCategory &&
+                          !itemGroups.includes(item.collectionCategory) && (
+                            <option value={item.collectionCategory}>
+                              {item.collectionCategory}
+                            </option>
+                          )}
+                      </select>
                     </div>
+                      </div>
 
                     <div>
                       <LabelWithHelp
@@ -18878,43 +20949,6 @@ const App: React.FC = () => {
                         className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm mt-1 min-h-[60px]"
                       ></textarea>
                     </div>
-
-                    <AssetInspectorSlot
-                      label="Item icon"
-                      description="The picture shown for this item in inventory menus."
-                      asset={project.assets.find(
-                        (asset) => asset.id === item.iconAssetId,
-                      )}
-                      emptyLabel="No item icon"
-                      chooseLabel="Choose icon"
-                      compact
-                      onChoose={() =>
-                        setAssetPickerCb({
-                          filterType: "image",
-                          onSelect: (id) => {
-                            pushHistory({
-                              ...project,
-                              inventoryItems: project.inventoryItems.map((i) =>
-                                i.id === item.id
-                                  ? { ...i, iconAssetId: id }
-                                  : i,
-                              ),
-                            });
-                            setAssetPickerCb(null);
-                          },
-                        })
-                      }
-                      onClear={() =>
-                        pushHistory({
-                          ...project,
-                          inventoryItems: project.inventoryItems.map((i) =>
-                            i.id === item.id
-                              ? { ...i, iconAssetId: null }
-                              : i,
-                          ),
-                        })
-                      }
-                    />
 
                     <div className="pt-2 border-t border-neutral-800">
                       <label className="flex items-center gap-2 text-sm text-neutral-300 font-medium">
@@ -19315,243 +21349,416 @@ const App: React.FC = () => {
                         ),
                       )}
                     </div>
+                    </div>
                   </div>
-                ))}
-                {project.inventoryItems.length === 0 && (
-                  <div className="col-span-full text-center text-neutral-500 py-10">
+                )) : (
+                  <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-neutral-800 text-center text-neutral-500">
                     No items created yet.
                   </div>
-                )}
+                );
+                  })()}
+                </div>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-4 overflow-y-auto custom-scrollbar pb-20">
-                {(project.craftingRecipes || []).map((recipe) => (
-                  <div
-                    key={recipe.id}
-                    className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 flex gap-4 items-center"
-                  >
-                    <div className="flex-1 grid grid-cols-11 gap-2 items-center">
-                      <div className="col-span-2 flex flex-col gap-1 text-sm text-neutral-400 font-medium">
-                        <label>Ingr. 1</label>
-                        <select
-                          value={recipe.ingredient1Id}
-                          onChange={(e) =>
-                            pushHistory({
-                              ...project,
-                              craftingRecipes: project.craftingRecipes.map(
-                                (r) =>
-                                  r.id === recipe.id
-                                    ? { ...r, ingredient1Id: e.target.value }
-                                    : r,
-                              ),
-                            })
-                          }
-                          className="bg-neutral-800 border border-neutral-700 rounded p-1.5 focus:border-indigo-500"
-                        >
-                          <option value="">Select Item...</option>
-                          {project.inventoryItems.map((i) => (
-                            <option key={i.id} value={i.id}>
-                              {i.name}
-                            </option>
-                          ))}
-                        </select>
-                        <label className="flex items-center gap-2 mt-1 whitespace-nowrap cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={recipe.destroyIngredient1}
-                            onChange={(e) =>
-                              pushHistory({
-                                ...project,
-                                craftingRecipes: project.craftingRecipes.map(
-                                  (r) =>
-                                    r.id === recipe.id
-                                      ? {
-                                          ...r,
-                                          destroyIngredient1: e.target.checked,
-                                        }
-                                      : r,
-                                ),
-                              })
+              );
+            })() : (
+              <div className="studio-page-content grid grid-cols-1 gap-4 overflow-y-auto custom-scrollbar p-6 pb-20 xl:grid-cols-2">
+                {(project.craftingRecipes || []).map((recipe) => {
+                  const requirements = getCraftingRequirements(recipe);
+                  const outcomes: CraftingOutcome[] =
+                    recipe.outcomes && recipe.outcomes.length > 0
+                      ? recipe.outcomes
+                      : recipe.resultItemId
+                        ? [
+                            {
+                              id: `${recipe.id}-legacy-result`,
+                              type: "give_item",
+                              targetId: recipe.resultItemId,
+                            },
+                          ]
+                        : [];
+                  const updateRecipe = (updates: Partial<CraftingRecipe>) => {
+                    pushHistory({
+                      ...project,
+                      craftingRecipes: project.craftingRecipes.map((r) =>
+                        r.id === recipe.id ? { ...r, ...updates } : r,
+                      ),
+                    });
+                  };
+                  const updateRequirements = (
+                    nextRequirements: ReturnType<typeof getCraftingRequirements>,
+                  ) => {
+                    pushHistory({
+                      ...project,
+                      craftingRecipes: project.craftingRecipes.map((r) =>
+                        r.id === recipe.id
+                          ? withCraftingRequirements(r, nextRequirements)
+                          : r,
+                      ),
+                    });
+                  };
+                  const updateOutcomes = (nextOutcomes: CraftingOutcome[]) => {
+                    const firstItemOutcome = nextOutcomes.find(
+                      (outcome) =>
+                        outcome.type === "give_item" && outcome.targetId,
+                    );
+                    pushHistory({
+                      ...project,
+                      craftingRecipes: project.craftingRecipes.map((r) =>
+                        r.id === recipe.id
+                          ? {
+                              ...r,
+                              outcomes: nextOutcomes,
+                              resultItemId: firstItemOutcome?.targetId || "",
                             }
-                            className="rounded bg-neutral-800 border-neutral-700 text-indigo-500"
-                          />
-                          Consume
-                        </label>
-                      </div>
+                          : r,
+                      ),
+                    });
+                  };
 
-                      <div className="col-span-1 flex justify-center text-neutral-600 font-bold text-2xl">
-                        +
-                      </div>
-
-                      <div className="col-span-2 flex flex-col gap-1 text-sm text-neutral-400 font-medium">
-                        <label>Ingr. 2</label>
-                        <select
-                          value={recipe.ingredient2Id}
-                          onChange={(e) =>
-                            pushHistory({
-                              ...project,
-                              craftingRecipes: project.craftingRecipes.map(
-                                (r) =>
-                                  r.id === recipe.id
-                                    ? { ...r, ingredient2Id: e.target.value }
-                                    : r,
-                              ),
-                            })
-                          }
-                          className="bg-neutral-800 border border-neutral-700 rounded p-1.5 focus:border-indigo-500"
-                        >
-                          <option value="">Select Item...</option>
-                          {project.inventoryItems.map((i) => (
-                            <option key={i.id} value={i.id}>
-                              {i.name}
-                            </option>
-                          ))}
-                        </select>
-                        <label className="flex items-center gap-2 mt-1 whitespace-nowrap cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={recipe.destroyIngredient2}
-                            onChange={(e) =>
-                              pushHistory({
-                                ...project,
-                                craftingRecipes: project.craftingRecipes.map(
-                                  (r) =>
-                                    r.id === recipe.id
-                                      ? {
-                                          ...r,
-                                          destroyIngredient2: e.target.checked,
-                                        }
-                                      : r,
-                                ),
-                              })
-                            }
-                            className="rounded bg-neutral-800 border-neutral-700 text-indigo-500"
-                          />
-                          Consume
-                        </label>
-                      </div>
-
-                      <div className="col-span-1 flex justify-center text-neutral-600 font-bold text-2xl">
-                        +
-                      </div>
-
-                      <div className="col-span-2 flex flex-col gap-1 text-sm text-neutral-400 font-medium">
-                        <label>Ingr. 3</label>
-                        <select
-                          value={recipe.ingredient3Id || ""}
-                          onChange={(e) =>
-                            pushHistory({
-                              ...project,
-                              craftingRecipes: project.craftingRecipes.map(
-                                (r) =>
-                                  r.id === recipe.id
-                                    ? { ...r, ingredient3Id: e.target.value || undefined }
-                                    : r,
-                              ),
-                            })
-                          }
-                          className="bg-neutral-800 border border-neutral-700 rounded p-1.5 focus:border-indigo-500 text-xs"
-                        >
-                          <option value="">(Optional)</option>
-                          {project.inventoryItems.map((i) => (
-                            <option key={i.id} value={i.id}>
-                              {i.name}
-                            </option>
-                          ))}
-                        </select>
-                        <label className="flex items-center gap-2 mt-1 whitespace-nowrap cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={recipe.destroyIngredient3 ?? true}
-                            onChange={(e) =>
-                              pushHistory({
-                                ...project,
-                                craftingRecipes: project.craftingRecipes.map(
-                                  (r) =>
-                                    r.id === recipe.id
-                                      ? {
-                                          ...r,
-                                          destroyIngredient3: e.target.checked,
-                                        }
-                                      : r,
-                                ),
-                              })
-                            }
-                            className="rounded bg-neutral-800 border-neutral-700 text-indigo-500"
-                          />
-                          Consume
-                        </label>
-                      </div>
-
-                      <div className="col-span-1 flex justify-center text-indigo-500 font-bold">
-                        <Plus size={24} />
-                      </div>
-
-                      <div className="col-span-2 flex flex-col gap-1 text-sm text-neutral-400 font-medium">
-                        <label>Result</label>
-                        <select
-                          value={recipe.resultItemId}
-                          onChange={(e) =>
-                            pushHistory({
-                              ...project,
-                              craftingRecipes: project.craftingRecipes.map(
-                                (r) =>
-                                  r.id === recipe.id
-                                    ? { ...r, resultItemId: e.target.value }
-                                    : r,
-                              ),
-                            })
-                          }
-                          className="bg-neutral-800 border border-neutral-700 rounded p-1.5 focus:border-emerald-500 text-emerald-400 font-bold"
-                        >
-                          <option value="">Result Item...</option>
-                          {project.inventoryItems.map((i) => (
-                            <option key={i.id} value={i.id}>
-                              {i.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="w-[1px] h-full bg-neutral-800 self-stretch my-2" />
-
-                    <div className="w-[200px] flex flex-col gap-1 text-sm text-neutral-400 font-medium shrink-0">
-                      <label>Success Message</label>
-                      <input
-                        type="text"
-                        value={recipe.successMessage}
-                        onChange={(e) =>
-                          pushHistory({
-                            ...project,
-                            craftingRecipes: project.craftingRecipes.map((r) =>
-                              r.id === recipe.id
-                                ? { ...r, successMessage: e.target.value }
-                                : r,
-                            ),
-                          })
-                        }
-                        className="bg-neutral-800 border border-neutral-700 rounded p-1.5 focus:border-indigo-500"
-                        placeholder="Crafting successful!"
-                      />
-                    </div>
-
-                    <button
-                      onClick={() =>
-                        pushHistory({
-                          ...project,
-                          craftingRecipes: project.craftingRecipes.filter(
-                            (r) => r.id !== recipe.id,
-                          ),
-                        })
-                      }
-                      className="p-2 ml-2 text-red-500 hover:bg-neutral-800 rounded transition-colors self-center shrink-0"
-                      title="Delete Recipe"
+                  return (
+                    <div
+                      key={recipe.id}
+                      className="studio-card grid gap-4 rounded-lg border border-neutral-800 bg-neutral-900 p-4 shadow-xl lg:grid-cols-[minmax(0,1fr)_260px]"
                     >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                ))}
+                      <div className="min-w-0 space-y-4">
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-emerald-400/35 bg-emerald-400/10 text-emerald-200">
+                            <Hammer size={18} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <label className="text-[10px] font-bold uppercase text-neutral-500">
+                              Recipe Name
+                            </label>
+                            <input
+                              type="text"
+                              value={recipe.name}
+                              onChange={(e) => updateRecipe({ name: e.target.value })}
+                              className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm font-bold text-neutral-100 focus:border-emerald-400"
+                              placeholder="Smoke herbs"
+                            />
+                          </div>
+                          <button
+                            onClick={() =>
+                              pushHistory({
+                                ...project,
+                                craftingRecipes: project.craftingRecipes.filter(
+                                  (r) => r.id !== recipe.id,
+                                ),
+                              })
+                            }
+                            className="rounded p-2 text-red-400 transition-colors hover:bg-red-500/10 hover:text-red-300"
+                            title="Delete Recipe"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+
+                        <div className="rounded border border-cyan-400/20 bg-neutral-950/70 p-3">
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-xs font-bold uppercase tracking-wide text-cyan-200">
+                                Required Inventory
+                              </div>
+                              <div className="text-[11px] text-neutral-400">
+                                Add ingredients and tools. Turn off Consume for reusable objects like a hookah or lighter.
+                              </div>
+                            </div>
+                            <button
+                              onClick={() =>
+                                updateRequirements([
+                                  ...requirements,
+                                  {
+                                    id: uuidv4(),
+                                    itemId: "",
+                                    consume: true,
+                                    role: "ingredient",
+                                  },
+                                ])
+                              }
+                              className="flex shrink-0 items-center gap-1 rounded border border-cyan-400/40 bg-cyan-400/10 px-2 py-1 text-xs font-bold text-cyan-100 hover:bg-cyan-400/20"
+                            >
+                              <Plus size={12} /> Add
+                            </button>
+                          </div>
+
+                          <div className="space-y-2">
+                            {requirements.map((requirement, requirementIndex) => (
+                              <div
+                                key={requirement.id}
+                                className="grid grid-cols-[minmax(0,1fr)_28px] items-center gap-2 rounded border border-neutral-800 bg-neutral-900/80 p-2"
+                              >
+                                <select
+                                  value={requirement.itemId}
+                                  onChange={(e) => {
+                                    const next = requirements.map((candidate, index) =>
+                                      index === requirementIndex
+                                        ? { ...candidate, itemId: e.target.value }
+                                        : candidate,
+                                    );
+                                    updateRequirements(next);
+                                  }}
+                                  className="min-w-0 rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm focus:border-cyan-400"
+                                >
+                                  <option value="">Select item...</option>
+                                  {project.inventoryItems.map((item) => (
+                                    <option key={item.id} value={item.id}>
+                                      {item.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  onClick={() =>
+                                    updateRequirements(
+                                      requirements.filter(
+                                        (_, index) => index !== requirementIndex,
+                                      ),
+                                    )
+                                  }
+                                  className="flex h-9 w-8 items-center justify-center rounded text-red-400 hover:bg-red-500/10"
+                                  title="Remove requirement"
+                                >
+                                  <X size={14} />
+                                </button>
+                                <select
+                                  value={requirement.role || "ingredient"}
+                                  onChange={(e) => {
+                                    const role = e.target.value as "ingredient" | "tool";
+                                    const next = requirements.map((candidate, index) =>
+                                      index === requirementIndex
+                                        ? {
+                                            ...candidate,
+                                            role,
+                                            consume: role === "tool" ? false : candidate.consume,
+                                          }
+                                        : candidate,
+                                    );
+                                    updateRequirements(next);
+                                  }}
+                                  className="col-span-2 rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-xs focus:border-cyan-400"
+                                >
+                                  <option value="ingredient">Ingredient</option>
+                                  <option value="tool">Tool</option>
+                                </select>
+                                <label className="col-span-2 flex items-center gap-2 rounded border border-neutral-800 bg-black/20 px-2 py-2 text-xs text-neutral-300">
+                                  <input
+                                    type="checkbox"
+                                    checked={requirement.consume}
+                                    onChange={(e) => {
+                                      const next = requirements.map((candidate, index) =>
+                                        index === requirementIndex
+                                          ? { ...candidate, consume: e.target.checked }
+                                          : candidate,
+                                      );
+                                      updateRequirements(next);
+                                    }}
+                                    className="rounded border-neutral-700 bg-neutral-900 text-emerald-500"
+                                  />
+                                  Consume
+                                </label>
+                              </div>
+                            ))}
+
+                            {requirements.length === 0 && (
+                              <div className="rounded border border-dashed border-neutral-700 py-6 text-center text-sm text-neutral-500">
+                                Add the items the player must have together.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex min-w-0 flex-col gap-3 rounded border border-emerald-400/20 bg-neutral-950/70 p-3">
+                        <div>
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <div>
+                              <div className="text-[10px] font-bold uppercase text-neutral-500">
+                                Outcomes
+                              </div>
+                              <div className="text-[11px] text-neutral-400">
+                                What happens after the required inventory matches.
+                              </div>
+                            </div>
+                            <button
+                              onClick={() =>
+                                updateOutcomes([
+                                  ...outcomes,
+                                  {
+                                    id: uuidv4(),
+                                    type: "give_item",
+                                    targetId: "",
+                                  },
+                                ])
+                              }
+                              className="flex shrink-0 items-center gap-1 rounded border border-emerald-400/40 bg-emerald-400/10 px-2 py-1 text-xs font-bold text-emerald-100 hover:bg-emerald-400/20"
+                            >
+                              <Plus size={12} /> Add
+                            </button>
+                          </div>
+
+                          <div className="space-y-2">
+                            {outcomes.map((outcome, outcomeIndex) => {
+                              const targetOptions =
+                                outcome.type === "give_item"
+                                  ? project.inventoryItems.map((item) => ({
+                                      id: item.id,
+                                      label: item.name,
+                                    }))
+                                  : outcome.type === "set_flag" ||
+                                      outcome.type === "clear_flag"
+                                    ? (project.gameFlags || []).map((flag) => ({
+                                        id: flag,
+                                        label: flag,
+                                      }))
+                                    : outcome.type === "change_need"
+                                      ? (
+                                          project.globalSettings.customNeeds ||
+                                          []
+                                        ).map((need) => ({
+                                          id: need,
+                                          label: need,
+                                        }))
+                                      : outcome.type === "change_skill"
+                                        ? (
+                                            project.globalSettings
+                                              .customSkills || []
+                                          ).map((skill) => ({
+                                            id: skill,
+                                            label: skill,
+                                          }))
+                                        : (project.quests || []).map((quest) => ({
+                                            id: quest.id,
+                                            label: quest.name,
+                                          }));
+                              const needsAmount =
+                                outcome.type === "change_need" ||
+                                outcome.type === "change_skill";
+
+                              return (
+                                <div
+                                  key={outcome.id}
+                                  className="grid grid-cols-[minmax(0,1fr)_28px] gap-2 rounded border border-neutral-800 bg-neutral-900/80 p-2"
+                                >
+                                  <select
+                                    value={outcome.type}
+                                    onChange={(e) => {
+                                      const type = e.target
+                                        .value as CraftingOutcome["type"];
+                                      const next = outcomes.map(
+                                        (candidate, index) =>
+                                          index === outcomeIndex
+                                            ? {
+                                                ...candidate,
+                                                type,
+                                                targetId: "",
+                                                amount:
+                                                  type === "change_need" ||
+                                                  type === "change_skill"
+                                                    ? candidate.amount ?? 1
+                                                    : undefined,
+                                              }
+                                            : candidate,
+                                      );
+                                      updateOutcomes(next);
+                                    }}
+                                    className="min-w-0 rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-xs font-bold text-emerald-200 focus:border-emerald-400"
+                                  >
+                                    <option value="give_item">Give item</option>
+                                    <option value="change_need">Change need</option>
+                                    <option value="change_skill">Change skill</option>
+                                    <option value="set_flag">Set story flag</option>
+                                    <option value="clear_flag">Clear story flag</option>
+                                    <option value="start_quest">Start quest</option>
+                                    <option value="complete_quest">Complete quest</option>
+                                  </select>
+                                  <button
+                                    onClick={() =>
+                                      updateOutcomes(
+                                        outcomes.filter(
+                                          (_, index) => index !== outcomeIndex,
+                                        ),
+                                      )
+                                    }
+                                    className="flex h-9 w-8 items-center justify-center rounded text-red-400 hover:bg-red-500/10"
+                                    title="Remove outcome"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                  <select
+                                    value={outcome.targetId}
+                                    onChange={(e) => {
+                                      const next = outcomes.map(
+                                        (candidate, index) =>
+                                          index === outcomeIndex
+                                            ? {
+                                                ...candidate,
+                                                targetId: e.target.value,
+                                              }
+                                            : candidate,
+                                      );
+                                      updateOutcomes(next);
+                                    }}
+                                    className={`${needsAmount ? "" : "col-span-2"} min-w-0 rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-xs focus:border-emerald-400`}
+                                  >
+                                    <option value="">Select target...</option>
+                                    {targetOptions.map((target) => (
+                                      <option key={target.id} value={target.id}>
+                                        {target.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {needsAmount && (
+                                    <input
+                                      type="number"
+                                      value={outcome.amount ?? 1}
+                                      onChange={(e) => {
+                                        const next = outcomes.map(
+                                          (candidate, index) =>
+                                            index === outcomeIndex
+                                              ? {
+                                                  ...candidate,
+                                                  amount: Number(e.target.value),
+                                                }
+                                              : candidate,
+                                        );
+                                        updateOutcomes(next);
+                                      }}
+                                      className="min-w-0 rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-xs focus:border-emerald-400"
+                                      placeholder="+/-"
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })}
+
+                            {outcomes.length === 0 && (
+                              <div className="rounded border border-dashed border-neutral-700 py-5 text-center text-sm text-neutral-500">
+                                Add an outcome like giving an item, changing a meter, or setting a story flag.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold uppercase text-neutral-500">
+                            Success Message
+                          </label>
+                          <textarea
+                            value={recipe.successMessage}
+                            onChange={(e) =>
+                              updateRecipe({ successMessage: e.target.value })
+                            }
+                            className="mt-1 min-h-[84px] w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm focus:border-emerald-400"
+                            placeholder="Crafting successful!"
+                          />
+                        </div>
+
+                        <div className="mt-auto rounded border border-neutral-800 bg-black/20 p-2 text-[11px] leading-snug text-neutral-400">
+                          Example: Herb as Ingredient + Hookah as Tool + Lighter as Tool. Only the Herb gets consumed.
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
                 {(project.craftingRecipes || []).length === 0 && (
                   <div className="col-span-full text-center text-neutral-500 py-10">
                     No crafting recipes created yet. Keep players crafting by
@@ -20210,6 +22417,107 @@ const App: React.FC = () => {
           />
         )}
 
+      {(() => {
+        const sequenceObject = currentScene?.objects.find(
+          (object) => object.id === editingClickSequenceObjectId,
+        );
+        if (!sequenceObject) return null;
+        return (
+          <div
+            className="fixed inset-0 z-[76000] flex items-center justify-center bg-black/82 p-4 backdrop-blur-sm"
+            onClick={() => setEditingClickSequenceObjectId(null)}
+          >
+            <div
+              className="flex h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-emerald-400/30 bg-neutral-950 shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-neutral-800 bg-neutral-900 px-4 py-3">
+                <div className="min-w-0">
+                  <div className="font-comic text-lg font-bold text-emerald-200">
+                    Action sequence
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+                    Extra responses that run after{" "}
+                    <span className="font-bold text-white">
+                      {sequenceObject.name || "this object"}
+                    </span>
+                    's first click behavior. Use this for chains, branches,
+                    sounds, flags, quests, menus, and object visibility.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close action sequence editor"
+                  onClick={() => setEditingClickSequenceObjectId(null)}
+                  className="rounded p-2 text-neutral-400 hover:bg-neutral-800 hover:text-white"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar">
+                <ClickResponseEditor
+                  responses={sequenceObject.clickResponses || []}
+                  assets={project.assets}
+                  scenes={project.scenes}
+                  dialogueTrees={project.dialogueTrees || []}
+                  inventoryItems={project.inventoryItems || []}
+                  quests={project.quests || []}
+                  gameFlags={project.gameFlags || []}
+                  uiMenus={project.uiMenus || []}
+                  sceneObjects={(currentScene?.objects || []).filter(
+                    (object) => object.id !== sequenceObject.id,
+                  )}
+                  characters={project.characters || []}
+                  skillIds={
+                    project.globalSettings.customSkills?.length
+                      ? project.globalSettings.customSkills
+                      : ["naturalist", "occultist", "scribal"]
+                  }
+                  needIds={
+                    project.globalSettings.customNeeds?.length
+                      ? project.globalSettings.customNeeds
+                      : [
+                          "rest",
+                          "hunger",
+                          "connection",
+                          "spiritual",
+                          "novelty",
+                        ]
+                  }
+                  relationshipIds={buildRelationshipTargets(
+                    project.characters || [],
+                    project.factions || [],
+                  ).map((target) => target.id)}
+                  heading="Sequence steps"
+                  description="Each step can have its own target and conditions."
+                  startNumber={2}
+                  onChange={(clickResponses) =>
+                    updateObject(sequenceObject.id, {
+                      clickResponses,
+                    })
+                  }
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3 border-t border-neutral-800 bg-neutral-900 px-4 py-3">
+                <div className="text-xs text-neutral-500">
+                  {(sequenceObject.clickResponses || []).length} extra response
+                  {(sequenceObject.clickResponses || []).length === 1
+                    ? ""
+                    : "s"}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingClickSequenceObjectId(null)}
+                  className="rounded border border-emerald-400/45 bg-emerald-500/15 px-4 py-2 font-comic text-sm font-bold text-emerald-100 hover:bg-emerald-500/25"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {assetPickerCb && (
         <AssetPickerModal
           assets={
@@ -20269,16 +22577,8 @@ const App: React.FC = () => {
       )}
 
       <AnimatedCursor
-        src={
-          isPlaying
-            ? project.assets.find(
-                (asset) =>
-                  asset.id ===
-                  (hoverCursorAssetId ||
-                    project.globalSettings.customCursorAssetId),
-              )?.src
-            : undefined
-        }
+        src={isPlaying ? activeCursorAsset?.src : undefined}
+        surfaceSelector='[data-play-cursor-surface="true"]'
       />
 
     </div>

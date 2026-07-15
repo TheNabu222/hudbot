@@ -1,5 +1,5 @@
 import { Project, Scene } from "../types";
-import { stripDuplicatedAssetSources } from "./projectPersistence";
+import { prepareProjectForExport } from "./projectPersistence";
 import {
   compareRuleValue,
   evaluateRuleCondition,
@@ -7,7 +7,7 @@ import {
 } from "./runtimeRules";
 
 export function generateExportHtml(project: Project): string {
-  const strippedProject = stripDuplicatedAssetSources(project);
+  const strippedProject = prepareProjectForExport(project);
 
   const scene = project.scenes.find((s) => s.id === project.currentSceneId) ||
     project.scenes[0] || {
@@ -66,27 +66,34 @@ export function generateExportHtml(project: Project): string {
   const hasDeviceFrame = !!(deviceFrame && deviceFrameAsset);
   const layoutWidth = hasDeviceFrame ? deviceFrame.outerWidth : boundW;
   const layoutHeight = hasDeviceFrame ? deviceFrame.outerHeight : boundH;
-  const deviceScreenScale = hasDeviceFrame
-    ? Math.min(
-        deviceFrame.screen.width / exportWidth,
-        deviceFrame.screen.height / exportHeight,
-      )
+  const deviceFrameScreenInset = 0;
+  const deviceFrameAperture = hasDeviceFrame
+    ? {
+        x: deviceFrame.screen.x + deviceFrameScreenInset,
+        y: deviceFrame.screen.y + deviceFrameScreenInset,
+        width: Math.max(1, deviceFrame.screen.width - deviceFrameScreenInset * 2),
+        height: Math.max(1, deviceFrame.screen.height - deviceFrameScreenInset * 2),
+      }
+    : null;
+  const deviceScreenScaleX = hasDeviceFrame
+    ? deviceFrameAperture!.width / exportWidth
+    : 1;
+  const deviceScreenScaleY = hasDeviceFrame
+    ? deviceFrameAperture!.height / exportHeight
     : 1;
   const deviceScreenLeft = hasDeviceFrame
-    ? deviceFrame.screen.x +
-      (deviceFrame.screen.width - exportWidth * deviceScreenScale) / 2
+    ? deviceFrameAperture!.x
     : offsetX;
   const deviceScreenTop = hasDeviceFrame
-    ? deviceFrame.screen.y +
-      (deviceFrame.screen.height - exportHeight * deviceScreenScale) / 2
+    ? deviceFrameAperture!.y
     : offsetY;
 
   const css = `
     :root {
       --time-filter: brightness(1) sepia(0) hue-rotate(0deg);
     }
-    .animated-cursor-active,
-    .animated-cursor-active * {
+    .animated-cursor-active #game-positioner,
+    .animated-cursor-active #game-positioner * {
       cursor: none !important;
     }
     #animated-game-cursor {
@@ -101,6 +108,24 @@ export function generateExportHtml(project: Project): string {
       opacity: 0;
       transform: translate3d(-100px, -100px, 0);
       filter: drop-shadow(0 2px 4px rgba(0,0,0,0.65));
+    }
+    .map-node-icon {
+      opacity: 0.45;
+      transition: opacity 0.16s ease, transform 0.16s ease;
+    }
+    .map-node-label {
+      opacity: 0;
+      transition: opacity 0.16s ease;
+      pointer-events: none;
+    }
+    .map-travel-node:hover .map-node-icon,
+    .map-travel-node:focus-visible .map-node-icon {
+      opacity: 0.95;
+      transform: scale(1.05);
+    }
+    .map-travel-node:hover .map-node-label,
+    .map-travel-node:focus-visible .map-node-label {
+      opacity: 1;
     }
     body {
       margin: 0;
@@ -132,6 +157,7 @@ export function generateExportHtml(project: Project): string {
       top: 50%;
       width: ${layoutWidth}px;
       height: ${layoutHeight}px;
+      transform: translate(-50%, -50%) scale(1);
       transform-origin: center center;
       will-change: transform;
     }
@@ -256,12 +282,19 @@ export function generateExportHtml(project: Project): string {
         const dPos = project.globalSettings?.dialoguePosition || "bottom";
         const wPct = project.globalSettings?.dialogueWidthPercent ?? 91.666;
         const maxWPx = project.globalSettings?.dialogueMaxWidthPx ?? 672;
-        if (dPos === "top") return `position: absolute; top: 32px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${maxWPx}px;`;
-        if (dPos === "center") return `position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: ${wPct}%; max-width: ${maxWPx}px;`;
-        if (dPos === "below") return `position: relative; margin-top: 24px; width: ${wPct}%; max-width: ${maxWPx}px;`;
-        return `position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${maxWPx}px;`;
+        const cappedWidth = `min(${maxWPx}px, calc(100% - 24px))`;
+        if (dPos === "top") return `position: absolute; top: 32px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${cappedWidth};`;
+        if (dPos === "center") return `position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: ${wPct}%; max-width: ${cappedWidth};`;
+        if (dPos === "below") return `position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${cappedWidth};`;
+        return `position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${cappedWidth};`;
       })()}
-      max-height: ${project.globalSettings?.dialogueMaxHeightPercent ?? 90}%;
+      ${(() => {
+        const dPos = project.globalSettings?.dialoguePosition || "bottom";
+        const heightPct = project.globalSettings?.dialogueMaxHeightPercent ?? 90;
+        return dPos === "top" || dPos === "bottom" || dPos === "below"
+          ? `max-height: min(${heightPct}%, calc(100% - 64px));`
+          : `max-height: ${heightPct}%;`;
+      })()}
       background-color: var(--ui-bg-alpha);
       color: #f5f5f5;
       padding: 0;
@@ -277,26 +310,30 @@ export function generateExportHtml(project: Project): string {
       z-index: 20000;
       flex-direction: column;
       flex-shrink: 0;
+      min-height: 0;
     }
     
     .dialogue-title {
-      padding: 12px 24px;
+      padding: 10px 20px;
       border-bottom: 1px solid var(--ui-primary-half);
       font-weight: bold;
+      font-size: 14px;
       letter-spacing: 0.05em;
       background-color: rgba(0,0,0,0.3);
       color: var(--ui-primary);
       box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      flex-shrink: 0;
     }
     .dialogue-content {
       display: flex;
-      padding: 24px;
+      padding: 16px;
       overflow-y: auto;
-      flex-shrink: 0;
+      flex: 1 1 auto;
+      min-height: 0;
     }
     .dialogue-portrait {
-      width: 96px;
-      height: 96px;
+      width: 80px;
+      height: 80px;
       flex-shrink: 0;
       border-radius: 8px;
       overflow: hidden;
@@ -308,23 +345,24 @@ export function generateExportHtml(project: Project): string {
       justify-content: center;
       box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
     }
-    .dialogue-portrait.left { margin-right: 24px; }
-    .dialogue-portrait.right { margin-left: 24px; }
+    .dialogue-portrait.left { margin-right: 16px; }
+    .dialogue-portrait.right { margin-left: 16px; }
     .dialogue-portrait img {
       max-width: 100%;
       max-height: 100%;
       object-fit: contain;
     }
     .dialogue-text-container {
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 500;
-      line-height: 1.625;
+      line-height: 1.45;
       flex: 1;
       color: white;
       text-shadow: 0 1px 2px rgba(0,0,0,0.4);
-      align-self: center;
+      align-self: stretch;
       overflow-y: auto;
       max-height: 100%;
+      min-height: 0;
     }
     .dialogue-choices {
       display: flex;
@@ -333,6 +371,9 @@ export function generateExportHtml(project: Project): string {
       border-top: 1px solid var(--ui-primary-half);
       background-color: rgba(0,0,0,0.2);
       position: relative;
+      flex-shrink: 0;
+      max-height: 34%;
+      overflow-y: auto;
     }
     .dialogue-choice {
       display: block;
@@ -341,12 +382,12 @@ export function generateExportHtml(project: Project): string {
       background: transparent;
       color: white;
       border: none;
-      padding: 16px 24px;
+      padding: 12px 20px;
       border-bottom: 1px solid var(--ui-primary-choice);
       cursor: pointer;
       transition: background-color 0.2s, color 0.2s;
       font-family: inherit;
-      font-size: 16px;
+      font-size: 14px;
       font-weight: 500;
     }
     .dialogue-choice:last-child {
@@ -366,13 +407,14 @@ export function generateExportHtml(project: Project): string {
       transform: translateX(-50%) scale(1.02);
     }
     .simple-dialogue-text {
-      padding: 16px;
+      padding: 14px;
       text-align: center;
-      margin-top: 10px;
-      line-height: 1.625;
+      line-height: 1.45;
       font-weight: 500;
       color: white;
       text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+      overflow-y: auto;
+      min-height: 0;
     }
     .simple-dialogue-continue {
       padding: 8px 16px;
@@ -457,15 +499,35 @@ export function generateExportHtml(project: Project): string {
     }
     #inventory-overlay {
       display: none;
-      position: fixed;
+      position: absolute;
       inset: 0;
       background: rgba(0,0,0,0.6);
       pointer-events: auto;
-      align-items: center;
-      justify-content: center;
-      padding: 32px;
+      align-items: stretch;
+      justify-content: stretch;
+      padding: 6%;
       backdrop-filter: blur(4px);
       z-index: 20001;
+    }
+    .runtime-screen-overlay {
+      position: absolute;
+      inset: 0;
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      pointer-events: auto;
+    }
+    .runtime-screen-overlay .inventory-box {
+      width: 100%;
+      height: 100%;
+      max-height: 100%;
+      max-width: 100%;
+      min-height: 0;
+      min-width: 0;
+    }
+    .runtime-screen-overlay .inventory-content {
+      min-height: 0;
     }
     .inventory-box {
       width: 100%;
@@ -491,11 +553,12 @@ export function generateExportHtml(project: Project): string {
     }
     .inventory-header h2 {
       margin: 0;
-      font-size: 20px;
+      font-size: 17px;
       font-weight: bold;
       display: flex;
       align-items: center;
       gap: 8px;
+      min-width: 0;
     }
     .close-btn {
       background: none;
@@ -511,13 +574,13 @@ export function generateExportHtml(project: Project): string {
     .inventory-content {
       flex: 1;
       overflow-y: auto;
-      padding: 24px;
+      padding: 16px;
       color: #e5e5e5;
     }
     .inventory-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
     }
     .inventory-item {
       border: 1px solid color-mix(in srgb, var(--ui-primary) 40%, transparent);
@@ -644,6 +707,14 @@ export function generateExportHtml(project: Project): string {
     }
   `;
 
+  const hasCursorAsset = (assetId?: string) =>
+    Boolean(
+      assetId &&
+        (project.assets || []).some(
+          (asset) => asset.id === assetId && (asset.src || asset.dataURL),
+        ),
+    );
+
   const getObjectHtml = (obj: any) => {
     let animStyle = "";
     if (obj.animation === "glow") {
@@ -666,7 +737,7 @@ export function generateExportHtml(project: Project): string {
       z-index: ${obj.zIndex ?? 100};
       opacity: ${obj.opacity === 0 ? 0.01 : (obj.opacity ?? 1)};
       transform: rotate(${obj.rotation || 0}deg);
-      cursor: ${obj.cursorAssetId ? "none" : obj.cursor || "pointer"};
+      cursor: ${hasCursorAsset(obj.cursorAssetId) ? "none" : obj.cursor || "pointer"};
       mix-blend-mode: ${obj.blendMode || "normal"};
       ${peStr}
       ${animStyle}
@@ -839,8 +910,12 @@ export function generateExportHtml(project: Project): string {
         ? `brightness(${obj.filters.brightness ?? 1}) contrast(${obj.filters.contrast ?? 1}) saturate(${obj.filters.saturate ?? 1}) hue-rotate(${obj.filters.hueRotate ?? 0}deg) blur(${obj.filters.blur ?? 0}px) sepia(${obj.filters.sepia ?? 0}) invert(${obj.filters.invert ?? 0}) grayscale(${obj.filters.grayscale ?? 0})`
         : "none";
       const imgStyle = `width: 100%; height: 100%; object-fit: fill; transform: scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1}); filter: ${filters};`;
-      const asset = project.assets.find(a => a.src === obj.src);
-      const assetDataAttr = asset ? `data-asset-id="${asset.id}" data-runtime-src="true"` : `src="${obj.src}"`;
+      const asset = obj._assetId
+        ? project.assets.find((a) => a.id === obj._assetId)
+        : project.assets.find((a) => a.src === obj.src);
+      const assetDataAttr = asset
+        ? `data-asset-id="${asset.id}" data-runtime-src="true" src="${asset.src || obj.src || ""}"`
+        : `src="${obj.src || ""}"`;
       if (obj.isVideo) {
         return `<div id="${obj.id}" onclick="void(0)" class="${classes.join(" ")}" style="${style}" ${dataAttrs}><video ${assetDataAttr} style="${imgStyle}" autoplay loop muted playsinline></video></div>`;
       } else {
@@ -917,18 +992,26 @@ export function generateExportHtml(project: Project): string {
     const animatedCursor = document.getElementById('animated-game-cursor');
     const globalCursorAssetId = globalSettings.customCursorAssetId || '';
     const findCursorAsset = (assetId) => assets.find(asset => asset.id === assetId);
+    const resolveCursorSrc = (assetId) => {
+      const cursorAsset = findCursorAsset(assetId);
+      return cursorAsset ? (cursorAsset.dataURL || cursorAsset.src || '') : '';
+    };
     const setAnimatedCursor = (assetId) => {
-      const cursorAsset = findCursorAsset(assetId || globalCursorAssetId);
-      if (!animatedCursor || !cursorAsset) {
+      const cursorSrc = resolveCursorSrc(assetId) || resolveCursorSrc(globalCursorAssetId);
+      if (!animatedCursor || !cursorSrc) {
         if (animatedCursor) animatedCursor.style.opacity = '0';
         document.body.classList.remove('animated-cursor-active');
         return;
       }
-      animatedCursor.src = cursorAsset.dataURL || cursorAsset.src || '';
+      animatedCursor.src = cursorSrc;
       document.body.classList.add('animated-cursor-active');
     };
     document.addEventListener('pointermove', (event) => {
       if (!animatedCursor || !document.body.classList.contains('animated-cursor-active')) return;
+      if (!(event.target instanceof Element) || !event.target.closest('#game-positioner')) {
+        animatedCursor.style.opacity = '0';
+        return;
+      }
       animatedCursor.style.transform = 'translate3d(' + (event.clientX - 4) + 'px,' + (event.clientY - 4) + 'px,0)';
       animatedCursor.style.opacity = '1';
     });
@@ -954,13 +1037,25 @@ export function generateExportHtml(project: Project): string {
     let defaultNeeds = { rest: 100, hunger: 100, connection: 100, spiritual: 100, novelty: 100 };
     if (globalSettings.customNeeds && globalSettings.customNeeds.length > 0) {
       defaultNeeds = {};
-      globalSettings.customNeeds.forEach(n => defaultNeeds[n] = 100);
+      globalSettings.customNeeds.forEach(n => {
+        const definition = (globalSettings.customNeedDefinitions || {})[n] || {};
+        const min = definition.min ?? 0;
+        const max = definition.max ?? 100;
+        const value = definition.defaultValue ?? 100;
+        defaultNeeds[n] = Math.max(min, Math.min(max, value));
+      });
     }
     
     let defaultSkills = { naturalist: 5, occultist: 2, scribal: 8 };
     if (globalSettings.customSkills && globalSettings.customSkills.length > 0) {
       defaultSkills = {};
-      globalSettings.customSkills.forEach(s => defaultSkills[s] = 0);
+      globalSettings.customSkills.forEach(s => {
+        const definition = (globalSettings.customSkillDefinitions || {})[s] || {};
+        const min = definition.min ?? 0;
+        const max = definition.max ?? 20;
+        const value = definition.defaultValue ?? 0;
+        defaultSkills[s] = Math.max(min, Math.min(max, value));
+      });
     }
 
     let state = {
@@ -1793,16 +1888,35 @@ export function generateExportHtml(project: Project): string {
             toggleSkills();
           } else if (interaction === 'open_almanac') {
             toggleAlmanac();
+          } else if (interaction === 'open_settings') {
+            toggleSettings();
+          } else if (interaction === 'toggle_fullscreen') {
+            if (!document.fullscreenElement) {
+              document.documentElement.requestFullscreen?.();
+            } else {
+              document.exitFullscreen?.();
+            }
+          } else if (interaction === 'toggle_mute') {
+            window.__cavebotMuted = !window.__cavebotMuted;
+            document.querySelectorAll('audio, video').forEach(media => {
+              media.muted = !!window.__cavebotMuted;
+            });
+            showSimpleDialogue(window.__cavebotMuted ? 'Audio muted.' : 'Audio unmuted.', 'System');
+          } else if (interaction === 'restart_game') {
+            try { localStorage.removeItem('neocities_game_save_${project.id}'); } catch(e) {}
+            location.reload();
+          } else if (interaction === 'exit_game') {
+            showSimpleDialogue('Game paused.', 'System');
           } else if (interaction === 'gift_item') {
             const charId = data;
-            if (!charId) { showSimpleDialogue('Nothing to gift here.', 'System'); break; }
+            if (!charId) { showSimpleDialogue('Nothing to gift here.', 'System'); return; }
             if (!selectedInventoryItemId) {
               showSimpleDialogue('Open your inventory and select an item to give first.', 'System');
-              break;
+              return;
             }
             const characters = gameData.characters || [];
             const char = characters.find(c => c.id === charId);
-            if (!char) { showSimpleDialogue('No one to give it to.', 'System'); break; }
+            if (!char) { showSimpleDialogue('No one to give it to.', 'System'); return; }
             const pref = (char.giftPreferences || []).find(p => p.itemId === selectedInventoryItemId);
             const itemDef = inventoryItems.find(i => i.id === selectedInventoryItemId);
             const itemName = itemDef ? itemDef.name : selectedInventoryItemId;
@@ -1879,6 +1993,9 @@ export function generateExportHtml(project: Project): string {
               const responses = JSON.parse(
                 decodeURIComponent(obj.getAttribute('data-click-responses') || '%5B%5D')
               );
+              const responsesToRun = obj.classList.contains('shell-control')
+                ? responses.slice(1)
+                : responses;
               const responseAttributes = {
                 interaction: 'data-interaction',
                 interactionData: 'data-interaction-data',
@@ -1892,7 +2009,7 @@ export function generateExportHtml(project: Project): string {
                 originalValues[attribute] = obj.getAttribute(attribute);
               });
 
-              responses.forEach(response => {
+              responsesToRun.forEach(response => {
                 const responseKey = obj.id + '::' + response.id;
                 if (response.triggerOnce && state.triggeredRuleIds.includes(responseKey)) {
                   return;
@@ -1935,15 +2052,57 @@ export function generateExportHtml(project: Project): string {
         obj.addEventListener('click', handleClick);
       });
       
+      const runtimeOverlayIds = [
+        'inventory-overlay',
+        'map-overlay',
+        'relationships-overlay',
+        'skills-overlay',
+        'almanac-overlay',
+        'settings-overlay',
+        'quest-overlay',
+      ];
+
+      const closeRuntimeOverlays = (exceptId = '') => {
+        runtimeOverlayIds.forEach((id) => {
+          if (id === exceptId) return;
+          const overlay = document.getElementById(id);
+          if (overlay) overlay.style.display = 'none';
+        });
+        if (exceptId !== 'inventory-overlay') selectedInventoryItemId = null;
+      };
+
+      const setRuntimeOverlayOpen = (id, onOpen, onClose) => {
+        const overlay = document.getElementById(id);
+        if (!overlay) return false;
+        const opening = overlay.style.display === 'none' || !overlay.style.display;
+        closeRuntimeOverlays(opening ? id : '');
+        overlay.style.display = opening ? 'flex' : 'none';
+        if (opening) onOpen?.(overlay);
+        else onClose?.(overlay);
+        return opening;
+      };
+      
       window.toggleInventory = () => {
-        const overlay = document.getElementById('inventory-overlay');
-        if (overlay.style.display === 'none' || !overlay.style.display) {
-          overlay.style.display = 'flex';
-          updateInventoryUI();
-        } else {
-          overlay.style.display = 'none';
-          selectedInventoryItemId = null; // deselect when closed
-        }
+        setRuntimeOverlayOpen(
+          'inventory-overlay',
+          () => updateInventoryUI(),
+          () => {
+            selectedInventoryItemId = null;
+          },
+        );
+      };
+
+      window.showMapPanel = (mapId) => {
+        const overlay = document.getElementById('map-overlay');
+        if (!overlay) return;
+        overlay.querySelectorAll('.map-panel').forEach((panel) => {
+          panel.style.display = panel.getAttribute('data-map-id') === mapId ? 'block' : 'none';
+        });
+        overlay.querySelectorAll('[data-map-tab]').forEach((tab) => {
+          const active = tab.getAttribute('data-map-tab') === mapId;
+          tab.style.borderColor = active ? 'var(--ui-primary)' : 'color-mix(in srgb, var(--ui-primary) 35%, transparent)';
+          tab.style.color = active ? 'var(--ui-primary)' : '#e5e5e5';
+        });
       };
 
       window.toggleMap = () => {
@@ -1952,14 +2111,14 @@ export function generateExportHtml(project: Project): string {
           showSimpleDialogue('No world map has been created yet.', 'System');
           return;
         }
-        const opening = overlay.style.display === 'none' || !overlay.style.display;
-        overlay.style.display = opening ? 'flex' : 'none';
-        if (opening) {
+        setRuntimeOverlayOpen('map-overlay', () => {
+          const firstPanel = overlay.querySelector('.map-panel');
+          if (firstPanel) showMapPanel(firstPanel.getAttribute('data-map-id'));
           overlay.querySelectorAll('.map-travel-node').forEach((node) => {
             const requiredFlag = node.getAttribute('data-required-flag');
             node.style.display = !requiredFlag || state.flags[requiredFlag] ? 'block' : 'none';
           });
-        }
+        });
       };
 
       window.travelToScene = (sceneId) => {
@@ -1977,14 +2136,7 @@ export function generateExportHtml(project: Project): string {
       };
 
       window.toggleRelationships = () => {
-        const overlay = document.getElementById('relationships-overlay');
-        if (!overlay) return;
-        if (overlay.style.display === 'flex') {
-          overlay.style.display = 'none';
-        } else {
-          overlay.style.display = 'flex';
-          buildRelationshipsPanel();
-        }
+        setRuntimeOverlayOpen('relationships-overlay', () => buildRelationshipsPanel());
       };
 
       window.buildRelationshipsPanel = () => {
@@ -2017,6 +2169,21 @@ export function generateExportHtml(project: Project): string {
             </div>
           </div>\`;
         });
+        const characterTies = characters.flatMap(char => (char.relationships || []).map(tie => ({ ...tie, sourceName: char.name })));
+        if (characterTies.length > 0) {
+          html += '<div style="font-size:11px;font-weight:bold;text-transform:uppercase;color:var(--ui-primary);opacity:0.7;padding:8px 0 4px 0;">Character ties</div>';
+          characterTies.forEach(tie => {
+            const target = characters.find(char => char.id === tie.characterId);
+            const clr = tie.value >= 20 ? '#10b981' : tie.value <= -20 ? '#ef4444' : '#9ca3af';
+            html += \`<div style="padding:10px 12px;border:1px solid \${clr}40;border-radius:8px;background:rgba(0,0,0,.18);">
+              <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+                <span style="font-weight:bold;font-size:13px;">\${tie.sourceName} -> \${target ? target.name : 'Unknown character'}</span>
+                <span style="font-size:11px;color:\${clr};font-weight:bold;">\${tie.label || 'Knows'} \${tie.value > 0 ? '+' + tie.value : tie.value}</span>
+              </div>
+              \${tie.notes ? '<div style="font-size:12px;opacity:.75;line-height:1.4;margin-top:6px;white-space:pre-wrap;">' + tie.notes + '</div>' : ''}
+            </div>\`;
+          });
+        }
         if (factions.length > 0) {
           html += '<div style="font-size:11px;font-weight:bold;text-transform:uppercase;color:var(--ui-primary);opacity:0.7;padding:8px 0 4px 0;">Factions</div>';
           factions.forEach(faction => {
@@ -2040,14 +2207,7 @@ export function generateExportHtml(project: Project): string {
       };
 
       window.toggleSkills = () => {
-        const overlay = document.getElementById('skills-overlay');
-        if (!overlay) return;
-        if (overlay.style.display === 'flex') {
-          overlay.style.display = 'none';
-        } else {
-          overlay.style.display = 'flex';
-          buildSkillsPanel();
-        }
+        setRuntimeOverlayOpen('skills-overlay', () => buildSkillsPanel());
       };
 
       window.buildSkillsPanel = () => {
@@ -2079,14 +2239,7 @@ export function generateExportHtml(project: Project): string {
       };
 
       window.toggleAlmanac = () => {
-        const overlay = document.getElementById('almanac-overlay');
-        if (!overlay) return;
-        if (overlay.style.display === 'flex') {
-          overlay.style.display = 'none';
-        } else {
-          overlay.style.display = 'flex';
-          buildAlmanacPanel();
-        }
+        setRuntimeOverlayOpen('almanac-overlay', () => buildAlmanacPanel());
       };
 
       window.buildAlmanacPanel = () => {
@@ -2103,7 +2256,13 @@ export function generateExportHtml(project: Project): string {
         Object.entries(byCategory).forEach(([cat, items]) => {
           html += '<div style="font-size:11px;font-weight:bold;text-transform:uppercase;color:var(--ui-primary);opacity:0.7;padding:4px 0;">' + cat + '</div>';
           items.forEach(entry => {
+            const quest = entry.questId ? (gameData.quests || []).find(q => q.id === entry.questId) : null;
+            const entryType = entry.entryType === 'quest_note' ? 'Quest note' : entry.entryType || 'Lore';
             html += \`<div style="padding:12px;border:1px solid var(--ui-primary)30;border-radius:8px;">
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+                <span style="border:1px solid var(--ui-primary)45;border-radius:999px;color:var(--ui-primary);padding:2px 7px;font-size:10px;font-weight:bold;text-transform:uppercase;">\${entryType}</span>
+                \${quest ? '<span style="border:1px solid rgba(255,255,255,.16);border-radius:999px;color:rgba(255,255,255,.7);padding:2px 7px;font-size:10px;">' + quest.name + '</span>' : ''}
+              </div>
               <div style="font-weight:bold;font-size:14px;margin-bottom:6px;color:var(--ui-primary);">\${entry.title}</div>
               <div style="font-size:13px;opacity:0.85;line-height:1.5;white-space:pre-wrap;">\${entry.content}</div>
             </div>\`;
@@ -2111,6 +2270,64 @@ export function generateExportHtml(project: Project): string {
         });
         html += '</div>';
         list.innerHTML = html;
+      };
+
+      window.toggleSettings = () => {
+        setRuntimeOverlayOpen('settings-overlay');
+      };
+
+      const getCraftingRequirements = (recipe) => {
+        const modern = (recipe.requirements || []).filter(req => req && req.itemId);
+        if (modern.length > 0) return modern;
+        return [
+          recipe.ingredient1Id ? { itemId: recipe.ingredient1Id, consume: !!recipe.destroyIngredient1 } : null,
+          recipe.ingredient2Id ? { itemId: recipe.ingredient2Id, consume: !!recipe.destroyIngredient2 } : null,
+          recipe.ingredient3Id ? { itemId: recipe.ingredient3Id, consume: recipe.destroyIngredient3 !== false } : null,
+        ].filter(Boolean);
+      };
+
+      const craftingRecipeMatches = (recipe, selectedIds) => {
+        const selected = selectedIds.filter(Boolean).slice().sort();
+        const required = getCraftingRequirements(recipe).map(req => req.itemId).sort();
+        if (selected.length === 0 || selected.length !== required.length) return false;
+        return selected.every((itemId, index) => itemId === required[index]);
+      };
+
+      const applyCraftingRecipe = (recipe) => {
+        getCraftingRequirements(recipe).forEach(req => {
+          if (!req.consume) return;
+          const itemIndex = state.inventory.indexOf(req.itemId);
+          if (itemIndex !== -1) state.inventory.splice(itemIndex, 1);
+        });
+        const itemOutcomes = (recipe.outcomes || []).filter(outcome => outcome.type === 'give_item' && outcome.targetId);
+        if (itemOutcomes.length > 0) {
+          itemOutcomes.forEach(outcome => state.inventory.push(outcome.targetId));
+        } else if (recipe.resultItemId) {
+          state.inventory.push(recipe.resultItemId);
+        }
+        (recipe.outcomes || []).forEach(outcome => {
+          if (!outcome.targetId) return;
+          if (outcome.type === 'set_flag') {
+            state.flags[outcome.targetId] = true;
+          } else if (outcome.type === 'clear_flag') {
+            delete state.flags[outcome.targetId];
+          } else if (outcome.type === 'change_need') {
+            state.needs[outcome.targetId] = Math.max(0, Math.min(100, (state.needs[outcome.targetId] || 0) + (outcome.amount || 0)));
+            updateNeedsUI();
+          } else if (outcome.type === 'change_skill') {
+            state.skills[outcome.targetId] = Math.max(0, Math.min(20, (state.skills[outcome.targetId] || 0) + (outcome.amount || 0)));
+            updateSkillsUI();
+          } else if (outcome.type === 'start_quest') {
+            if (!state.activeQuests.includes(outcome.targetId) && !state.completedQuests.includes(outcome.targetId)) {
+              state.activeQuests.push(outcome.targetId);
+              buildQuestLog();
+            }
+          } else if (outcome.type === 'complete_quest') {
+            state.activeQuests = state.activeQuests.filter(id => id !== outcome.targetId);
+            if (!state.completedQuests.includes(outcome.targetId)) state.completedQuests.push(outcome.targetId);
+            buildQuestLog();
+          }
+        });
       };
 
       let selectedInventoryItemId = null;
@@ -2126,25 +2343,11 @@ export function generateExportHtml(project: Project): string {
           flavorText.style.display = 'block';
           setTimeout(() => flavorText.style.display = 'none', 3000);
         } else if (selectedInventoryItemId && selectedInventoryItemId !== itemId) {
-             const combination = (gameData.craftingRecipes || []).find(r => 
-               (r.ingredient1Id === selectedInventoryItemId && r.ingredient2Id === itemId) ||
-               (r.ingredient1Id === itemId && r.ingredient2Id === selectedInventoryItemId)
+             const combination = (gameData.craftingRecipes || []).find(r =>
+               craftingRecipeMatches(r, [selectedInventoryItemId, itemId])
              );
              if (combination) {
-                 const ing1Id = combination.ingredient1Id;
-                 const ing2Id = combination.ingredient2Id;
-                 
-                 if (combination.destroyIngredient1) {
-                     const idIdx = state.inventory.indexOf(ing1Id);
-                     if (idIdx !== -1) state.inventory.splice(idIdx, 1);
-                 }
-                 if (combination.destroyIngredient2) {
-                     const idIdx = state.inventory.indexOf(ing2Id);
-                     if (idIdx !== -1) state.inventory.splice(idIdx, 1);
-                 }
-                 if (combination.resultItemId) {
-                     state.inventory.push(combination.resultItemId);
-                 }
+                 applyCraftingRecipe(combination);
                  selectedInventoryItemId = null;
                  flavorText.innerText = combination.successMessage || 'Items combined successfully!';
                  flavorText.style.display = 'block';
@@ -2190,13 +2393,7 @@ export function generateExportHtml(project: Project): string {
 
       const gameQuests = gameData.quests || [];
       window.toggleQuestLog = () => {
-        const overlay = document.getElementById('quest-overlay');
-        if (overlay.style.display === 'block') {
-          overlay.style.display = 'none';
-        } else {
-          overlay.style.display = 'block';
-          buildQuestLog();
-        }
+        setRuntimeOverlayOpen('quest-overlay', () => buildQuestLog());
       };
 
       // Called at midnight each continuous cycle, or when advance_day fires
@@ -2350,31 +2547,32 @@ export function generateExportHtml(project: Project): string {
   let deviceControlsHtml = "";
   if (hasDeviceFrame && deviceFrame && deviceFrameAsset) {
     const frameSrc = deviceFrameAsset.dataURL || deviceFrameAsset.src || "";
+    const aperture = deviceFrameAperture!;
     const slices = [
-      { x: 0, y: 0, width: deviceFrame.outerWidth, height: deviceFrame.screen.y },
+      { x: 0, y: 0, width: deviceFrame.outerWidth, height: aperture.y },
       {
         x: 0,
-        y: deviceFrame.screen.y,
-        width: deviceFrame.screen.x,
-        height: deviceFrame.screen.height,
+        y: aperture.y,
+        width: aperture.x,
+        height: aperture.height,
       },
       {
-        x: deviceFrame.screen.x + deviceFrame.screen.width,
-        y: deviceFrame.screen.y,
+        x: aperture.x + aperture.width,
+        y: aperture.y,
         width:
           deviceFrame.outerWidth -
-          deviceFrame.screen.x -
-          deviceFrame.screen.width,
-        height: deviceFrame.screen.height,
+          aperture.x -
+          aperture.width,
+        height: aperture.height,
       },
       {
         x: 0,
-        y: deviceFrame.screen.y + deviceFrame.screen.height,
+        y: aperture.y + aperture.height,
         width: deviceFrame.outerWidth,
         height:
           deviceFrame.outerHeight -
-          deviceFrame.screen.y -
-          deviceFrame.screen.height,
+          aperture.y -
+          aperture.height,
       },
     ].filter((slice) => slice.width > 0 && slice.height > 0);
     deviceFrameHtml = `
@@ -2390,40 +2588,45 @@ export function generateExportHtml(project: Project): string {
       </div>
     `;
     deviceControlsHtml = (deviceFrame.controls || [])
-      .map(
-        (control) => `
+      .map((control) => {
+        const primaryResponse = control.clickResponses?.[0];
+        const primaryScriptSrc = primaryResponse?.scriptAssetId
+          ? project.assets.find((asset) => asset.id === primaryResponse.scriptAssetId)?.src ||
+            primaryResponse.scriptAssetId
+          : "";
+        return `
         <button
           id="shell-control-${control.id}"
           class="scene-object shell-control"
           type="button"
           aria-label="${control.name.replace(/"/g, "&quot;")}"
-          data-interaction="none"
-          data-interaction-data=""
-          data-give-item=""
-          data-target-ui=""
-          data-dialogue-tree=""
+          data-interaction="${primaryResponse?.interaction || "none"}"
+          data-interaction-data="${(primaryResponse?.interactionData || "").replace(/"/g, "&quot;")}"
+          data-give-item="${primaryResponse?.giveItemId || ""}"
+          data-target-ui="${primaryResponse?.targetUiId || ""}"
+          data-dialogue-tree="${primaryResponse?.dialogueTreeId || ""}"
+          data-script-src="${primaryScriptSrc}"
           data-click-responses="${encodeURIComponent(JSON.stringify(control.clickResponses || []))}"
           data-cursor-asset="${control.cursorAssetId || ""}"
-          style="position:absolute; left:${control.x}px; top:${control.y}px; width:${control.width}px; height:${control.height}px; z-index:4500; border:0; padding:0; background:transparent; cursor:${control.cursorAssetId ? "none" : control.cursor || "pointer"};"
-        ></button>`,
-      )
+          style="position:absolute; left:${control.x}px; top:${control.y}px; width:${control.width}px; height:${control.height}px; z-index:4500; border:0; padding:0; background:transparent; cursor:${hasCursorAsset(control.cursorAssetId) ? "none" : control.cursor || "pointer"};"
+        ></button>`;
+      })
       .join("");
   }
 
   const mapOverlayHtml = (project.maps || []).length
     ? `
-      <div id="map-overlay" onclick="toggleMap()" style="display:none; position:absolute; inset:0; z-index:100001; align-items:center; justify-content:center; padding:20px; background:rgba(0,0,0,.72);">
-        <div onclick="event.stopPropagation()" style="position:relative; width:min(92%,900px); height:min(86%,650px); overflow:auto; border:2px solid var(--ui-primary); background:var(--ui-bg); color:white; box-shadow:0 24px 80px rgba(0,0,0,.6);">
-          <div style="position:sticky; top:0; z-index:3; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; background:var(--ui-bg); border-bottom:1px solid var(--ui-primary);">
-            <strong>World Map</strong>
-            <button onclick="toggleMap()" style="border:1px solid var(--ui-primary); padding:6px 10px; color:var(--ui-primary); background:transparent; cursor:pointer;">Close</button>
-          </div>
+      <div id="map-overlay" class="runtime-screen-overlay" onclick="toggleMap()" style="display:none; z-index:100001; align-items:stretch; justify-content:stretch; padding:0; background:#000;">
+        <div onclick="event.stopPropagation()" style="position:absolute; inset:0; width:100%; height:100%; overflow:hidden; background:var(--ui-bg); color:white;">
           ${(project.maps || [])
             .map(
               (map) => `
-              <section style="padding:16px;">
-                <h2 style="margin:0 0 12px; color:var(--ui-primary);">${map.name}</h2>
-                <div style="position:relative; min-height:360px; overflow:hidden; background:${map.backgroundSrc ? `url('${map.backgroundSrc}') center/cover no-repeat` : "rgba(255,255,255,.05)"}; border:1px solid color-mix(in srgb, var(--ui-primary) 55%, transparent);">
+              <section class="map-panel" data-map-id="${map.id}" style="display:none; position:absolute; inset:0; overflow:hidden; background:#000;">
+                ${
+                  map.backgroundSrc
+                    ? `<img src="${map.backgroundSrc}" alt="" style="position:absolute; inset:0; width:100%; height:100%; object-fit:${map.backgroundFit === "fill" ? "fill" : map.backgroundFit || "contain"}; transform:translate(${map.backgroundOffsetX ?? 0}%, ${map.backgroundOffsetY ?? 0}%) scale(${map.backgroundScale ?? 1}); transform-origin:center; pointer-events:none; user-select:none;" />`
+                    : `<div style="position:absolute; inset:0; background:rgba(255,255,255,.05);"></div>`
+                }
                   ${map.nodes
                     .map(
                       (node) => `
@@ -2432,14 +2635,33 @@ export function generateExportHtml(project: Project): string {
                         data-required-flag="${node.requiredFlagId || ""}"
                         onclick="travelToScene('${node.targetSceneId || ""}')"
                         ${node.targetSceneId ? "" : "disabled"}
-                        style="position:absolute; left:${node.x}%; top:${node.y}%; transform:translate(-50%,-50%); border:2px solid var(--ui-primary); border-radius:999px; padding:8px 12px; color:white; background:var(--ui-bg); cursor:${node.targetSceneId ? "pointer" : "default"};"
-                      >${node.name}</button>`,
+                        style="position:absolute; left:clamp(32px, ${node.x}%, calc(100% - 32px)); top:clamp(40px, ${node.y}%, calc(100% - 40px)); transform:translate(-50%,-50%); display:flex; max-width:92px; flex-direction:column; align-items:center; border:0; padding:0; color:white; background:transparent; cursor:${node.targetSceneId ? "pointer" : "default"};"
+                      >
+                        <span class="map-node-icon" style="display:flex; width:32px; height:32px; align-items:center; justify-content:center; border:2px solid var(--ui-primary); border-radius:999px; background:rgba(0,0,0,.25); box-shadow:0 6px 18px rgba(0,0,0,.55);">
+                          ${
+                            node.iconSrc
+                              ? `<img src="${node.iconSrc}" alt="" style="width:24px; height:24px; object-fit:contain; opacity:.8; pointer-events:none;" />`
+                              : `<span style="font-size:18px; line-height:1; opacity:.8;">⌖</span>`
+                          }
+                        </span>
+                        <span class="map-node-label" style="margin-top:4px; max-width:92px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border:1px solid color-mix(in srgb, var(--ui-primary) 40%, transparent); border-radius:4px; background:rgba(0,0,0,.78); color:var(--ui-primary); padding:2px 5px; font-size:9px; font-weight:bold; line-height:1.1;">${node.name}</span>
+                      </button>`,
                     )
                     .join("")}
-                </div>
               </section>`,
             )
             .join("")}
+          <div style="position:absolute; left:4px; right:4px; top:4px; z-index:5; display:flex; align-items:flex-start; justify-content:space-between; gap:8px; pointer-events:none;">
+            <div style="display:flex; max-width:72%; flex-wrap:wrap; gap:4px; pointer-events:auto;">
+              ${(project.maps || [])
+                .map(
+                  (map) => `
+                  <button type="button" data-map-tab="${map.id}" onclick="showMapPanel('${map.id}')" style="border:1px solid color-mix(in srgb, var(--ui-primary) 35%, transparent); border-radius:4px; background:rgba(0,0,0,.72); color:#e5e5e5; padding:3px 6px; font-size:9px; font-weight:bold; line-height:1; cursor:pointer;">${map.name}</button>`,
+                )
+                .join("")}
+            </div>
+            <button type="button" onclick="toggleMap()" style="pointer-events:auto; border:1px solid color-mix(in srgb, var(--ui-primary) 55%, transparent); border-radius:4px; background:rgba(0,0,0,.72); color:var(--ui-primary); padding:3px 5px; font-size:11px; font-weight:bold; line-height:1; cursor:pointer;">×</button>
+          </div>
         </div>
       </div>`
     : "";
@@ -2463,7 +2685,7 @@ export function generateExportHtml(project: Project): string {
       <div id="game-positioner">
         ${deviceFrameHtml}
         ${deviceControlsHtml}
-        <div id="game-coordinate-space" style="position: absolute; left: ${deviceScreenLeft}px; top: ${deviceScreenTop}px; width: ${exportWidth}px; height: ${exportHeight}px; transform: scale(${deviceScreenScale}); transform-origin: top left;">
+        <div id="game-coordinate-space" style="position: absolute; z-index: 100; overflow: hidden; left: ${deviceScreenLeft}px; top: ${deviceScreenTop}px; width: ${exportWidth}px; height: ${exportHeight}px; transform: scale(${deviceScreenScaleX}, ${deviceScreenScaleY}); transform-origin: top left;">
         ${hudHtml}
         <div id="game-container" style="position: absolute; inset: 0; overflow: hidden; width: 100%; height: 100%;">
           ${scenesHtml}
@@ -2474,7 +2696,7 @@ export function generateExportHtml(project: Project): string {
           ${uiMenusHtml}
         </div>
 
-        <div id="cutscene-player" style="display: none; position: fixed; inset: 0; z-index: 99998; background: black; justify-content: center; align-items: center;">
+        <div id="cutscene-player" class="runtime-screen-overlay" style="display: none; z-index: 99998; background: black; justify-content: center; align-items: center;">
             <video id="cutscene-video" class="w-full h-full object-contain" style="max-width: 100%; max-height: 100%; object-fit: contain;"></video>
             <button id="cutscene-skip-btn" style="position: absolute; top: 1rem; right: 1rem; background: rgba(0,0,0,0.5); color: white; border: none; padding: 0.25rem 0.75rem; border-radius: 4px; cursor: pointer;">Skip</button>
         </div>
@@ -2482,7 +2704,7 @@ export function generateExportHtml(project: Project): string {
 
         ${project.globalSettings?.dialoguePosition !== 'below' ? '<div id="dialogue-box"></div>' : ''}
         <div id="flavor-text"></div>
-        <div id="game-transition" style="display: none; position: fixed; inset: 0; z-index: 99999; background: black; opacity: 0; pointer-events: none; transition: opacity 0.5s ease;"></div>
+        <div id="game-transition" class="runtime-screen-overlay" style="display: none; z-index: 99999; background: black; opacity: 0; pointer-events: none; transition: opacity 0.5s ease;"></div>
         
         ${
           (project.globalSettings?.hideAllDefaultHud || project.globalSettings?.hideDefaultInventoryBtn)
@@ -2523,14 +2745,9 @@ export function generateExportHtml(project: Project): string {
            TIME: <span id="time-display">08:00</span>
         </div>
       </div>
-  </div> <!-- Close game-coordinate-space -->
-  </div> <!-- Close game-positioner -->
-  </div> <!-- Close game-layout-resizer -->
-  ${project.globalSettings?.dialoguePosition === 'below' ? '<div id="dialogue-box"></div>' : ''}
-  </div> <!-- Close scale-wrapper -->
 
-  <!-- Inventory and quest overlays live outside the scaled game space so they're never squished by device-frame transforms -->
-  <div id="inventory-overlay" onclick="toggleInventory()">
+  <!-- Runtime screens live inside the device screen cutout so they honor frame masks. -->
+  <div id="inventory-overlay" class="runtime-screen-overlay" onclick="toggleInventory()">
     <div class="inventory-box" onclick="event.stopPropagation()">
       <div class="inventory-header">
         <h2>
@@ -2547,8 +2764,8 @@ export function generateExportHtml(project: Project): string {
     </div>
   </div>
 
-  <div id="quest-overlay" onclick="toggleQuestLog()" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100000; padding: 20px;">
-    <div class="inventory-box" onclick="event.stopPropagation()" style="max-height: 80%; max-width: 600px; margin: auto;">
+  <div id="quest-overlay" class="runtime-screen-overlay" onclick="toggleQuestLog()" style="display: none; align-items:stretch; justify-content:stretch; background: rgba(0,0,0,0.62); backdrop-filter:blur(4px); z-index: 100000; padding: 6%;">
+    <div class="inventory-box" onclick="event.stopPropagation()">
       <div class="inventory-header">
         <h2>Quest Log</h2>
         <button class="close-btn" onclick="toggleQuestLog()">
@@ -2561,42 +2778,62 @@ export function generateExportHtml(project: Project): string {
     </div>
   </div>
 
-  <!-- Relationships, Skills, Almanac overlays — outside scaled game space -->
-  <div id="relationships-overlay" onclick="toggleRelationships()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:100000;align-items:center;justify-content:center;padding:32px;">
-    <div class="inventory-box" onclick="event.stopPropagation()" style="max-width:500px;">
+  <!-- Relationships, Skills, Almanac overlays -->
+  <div id="relationships-overlay" class="runtime-screen-overlay" onclick="toggleRelationships()" style="display:none;background:rgba(0,0,0,0.62);backdrop-filter:blur(4px);z-index:100000;align-items:stretch;justify-content:stretch;padding:6%;">
+    <div class="inventory-box" onclick="event.stopPropagation()">
       <div class="inventory-header">
         <h2>Relationships</h2>
         <button class="close-btn" onclick="toggleRelationships()">✕</button>
       </div>
-      <div class="inventory-content" style="overflow-y:auto;max-height:70vh;">
+      <div class="inventory-content" style="overflow-y:auto;">
         <div id="relationships-list"></div>
       </div>
     </div>
   </div>
 
-  <div id="skills-overlay" onclick="toggleSkills()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:100000;align-items:center;justify-content:center;padding:32px;">
-    <div class="inventory-box" onclick="event.stopPropagation()" style="max-width:500px;">
+  <div id="skills-overlay" class="runtime-screen-overlay" onclick="toggleSkills()" style="display:none;background:rgba(0,0,0,0.62);backdrop-filter:blur(4px);z-index:100000;align-items:stretch;justify-content:stretch;padding:6%;">
+    <div class="inventory-box" onclick="event.stopPropagation()">
       <div class="inventory-header">
         <h2>Skills</h2>
         <button class="close-btn" onclick="toggleSkills()">✕</button>
       </div>
-      <div class="inventory-content" style="overflow-y:auto;max-height:70vh;">
+      <div class="inventory-content" style="overflow-y:auto;">
         <div id="skills-list"></div>
       </div>
     </div>
   </div>
 
-  <div id="almanac-overlay" onclick="toggleAlmanac()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:100000;align-items:center;justify-content:center;padding:32px;">
-    <div class="inventory-box" onclick="event.stopPropagation()" style="max-width:600px;">
+  <div id="almanac-overlay" class="runtime-screen-overlay" onclick="toggleAlmanac()" style="display:none;background:rgba(0,0,0,0.62);backdrop-filter:blur(4px);z-index:100000;align-items:stretch;justify-content:stretch;padding:6%;">
+    <div class="inventory-box" onclick="event.stopPropagation()">
       <div class="inventory-header">
         <h2>Almanac</h2>
         <button class="close-btn" onclick="toggleAlmanac()">✕</button>
       </div>
-      <div class="inventory-content" style="overflow-y:auto;max-height:70vh;">
+      <div class="inventory-content" style="overflow-y:auto;">
         <div id="almanac-list"></div>
       </div>
     </div>
   </div>
+
+  <div id="settings-overlay" class="runtime-screen-overlay" onclick="toggleSettings()" style="display:none;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:100000;align-items:stretch;justify-content:stretch;padding:8%;">
+    <div class="inventory-box" onclick="event.stopPropagation()">
+      <div class="inventory-header">
+        <h2>Settings</h2>
+        <button class="close-btn" onclick="toggleSettings()">✕</button>
+      </div>
+      <div class="inventory-content" style="display:flex;flex-direction:column;gap:10px;">
+        <button onclick="saveGame(); showSimpleDialogue('Game saved.', 'System'); toggleSettings();" style="border:1px solid var(--ui-primary);background:rgba(0,0,0,.28);color:var(--ui-primary);padding:10px;border-radius:var(--ui-radius);font-weight:bold;cursor:pointer;">Save Game</button>
+        <button onclick="location.reload();" style="border:1px solid var(--ui-primary);background:rgba(0,0,0,.28);color:var(--ui-primary);padding:10px;border-radius:var(--ui-radius);font-weight:bold;cursor:pointer;">Load Game</button>
+        <button onclick="if(!document.fullscreenElement){document.documentElement.requestFullscreen?.();}else{document.exitFullscreen?.();}" style="border:1px solid var(--ui-primary);background:rgba(0,0,0,.28);color:var(--ui-primary);padding:10px;border-radius:var(--ui-radius);font-weight:bold;cursor:pointer;">Fullscreen</button>
+        <button onclick="try { localStorage.removeItem('neocities_game_save_${project.id}'); } catch(e) {} location.reload();" style="border:1px solid #ef4444;background:rgba(127,29,29,.35);color:#fecaca;padding:10px;border-radius:var(--ui-radius);font-weight:bold;cursor:pointer;">Restart Game</button>
+      </div>
+    </div>
+  </div>
+  </div> <!-- Close game-coordinate-space -->
+  </div> <!-- Close game-positioner -->
+  </div> <!-- Close game-layout-resizer -->
+  ${project.globalSettings?.dialoguePosition === 'below' ? '<div id="dialogue-box"></div>' : ''}
+  </div> <!-- Close scale-wrapper -->
 
   <script id="__GAME_DATA__" type="application/json">${JSON.stringify(strippedProject).split("</script>").join("<\\/script>").split("</SCRIPT>").join("<\\/script>")}</script>
   <script>${js}</script>

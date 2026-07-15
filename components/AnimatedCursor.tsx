@@ -1,12 +1,23 @@
 import React, { useEffect, useRef } from "react";
 
-export const AnimatedCursor: React.FC<{ src?: string }> = ({ src }) => {
+export const AnimatedCursor: React.FC<{
+  src?: string;
+  surfaceSelector?: string;
+}> = ({ src, surfaceSelector }) => {
   const cursorRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
     const moveCursor = (event: PointerEvent) => {
       if (!cursorRef.current) return;
-      cursorRef.current.style.transform = `translate3d(${event.clientX}px, ${event.clientY}px, 0)`;
+      const target = event.target;
+      if (
+        surfaceSelector &&
+        (!(target instanceof Element) || !target.closest(surfaceSelector))
+      ) {
+        cursorRef.current.style.opacity = "0";
+        return;
+      }
+      cursorRef.current.style.transform = `translate3d(${event.clientX - 4}px, ${event.clientY - 4}px, 0)`;
       cursorRef.current.style.opacity = "1";
     };
     const hideCursor = () => {
@@ -19,7 +30,7 @@ export const AnimatedCursor: React.FC<{ src?: string }> = ({ src }) => {
       window.removeEventListener("pointermove", moveCursor);
       document.documentElement.removeEventListener("mouseleave", hideCursor);
     };
-  }, []);
+  }, [surfaceSelector]);
 
   if (!src) return null;
 
