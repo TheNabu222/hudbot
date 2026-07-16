@@ -17,6 +17,8 @@ export const createRuntimeGameState = (
   relationships: {},
   activeQuests: [],
   completedQuests: [],
+  completedQuestObjectives: [],
+  unlockedLoreEntryIds: [],
   collectedObjects: [],
   activeUiMenus: [],
   triggeredRuleIds: [],

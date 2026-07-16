@@ -6,12 +6,14 @@ export interface QuestObjectiveContext {
   currentSceneId: string;
   playerSkills: Record<string, number>;
   playerTalkCounts: Record<string, number>;
+  completedQuestObjectives?: string[];
 }
 
 export function isQuestObjectiveComplete(
   obj: QuestObjective,
   ctx: QuestObjectiveContext,
 ): boolean {
+  if (ctx.completedQuestObjectives?.includes(obj.id)) return true;
   switch (obj.type) {
     case "custom_flag":
       return ctx.playerFlags.includes(obj.targetId);

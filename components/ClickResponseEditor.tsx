@@ -30,6 +30,7 @@ import {
   DialogueTree,
   InteractionType,
   InventoryItem,
+  LoreEntry,
   Quest,
   RuleCondition,
   RuleConditionType,
@@ -44,6 +45,7 @@ interface ClickResponseEditorProps {
   dialogueTrees: DialogueTree[];
   inventoryItems: InventoryItem[];
   quests: Quest[];
+  loreEntries?: LoreEntry[];
   gameFlags: string[];
   uiMenus: Scene[];
   sceneObjects?: SceneObject[];
@@ -69,7 +71,10 @@ const responseChoices: Array<{
   { interaction: "set_flag", label: "Remember Something", icon: Flag },
   { interaction: "scene_change", label: "Go Somewhere Else", icon: MapPin },
   { interaction: "start_quest", label: "Start Quest", icon: BookOpen },
+  { interaction: "complete_quest_objective", label: "Complete Quest Step", icon: BookOpen },
   { interaction: "complete_quest", label: "Complete Quest", icon: BookOpen },
+  { interaction: "unlock_lore_entry", label: "Unlock Lore / Journal", icon: BookOpen },
+  { interaction: "show_lore_entry", label: "Show Lore Popup", icon: BookOpen },
   { interaction: "open_ui", label: "Open Menu or HUD", icon: Wand2 },
   { interaction: "play_cutscene", label: "Play Cutscene", icon: Video },
   { interaction: "link", label: "Open Link", icon: Link },
@@ -161,6 +166,7 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
   dialogueTrees,
   inventoryItems,
   quests,
+  loreEntries = [],
   gameFlags,
   uiMenus,
   sceneObjects = [],
@@ -471,6 +477,47 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
               {quests.map((quest) => (
                 <option key={quest.id} value={quest.id}>
                   {quest.name}
+                </option>
+              ))}
+            </select>
+	          )}
+
+          {response.interaction === "complete_quest_objective" && (
+            <select
+              value={response.interactionData || ""}
+              onChange={(event) =>
+                updateResponse(response.id, {
+                  interactionData: event.target.value,
+                })
+              }
+              className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
+            >
+              <option value="">Choose quest step…</option>
+              {quests.flatMap((quest) =>
+                (quest.objectives || []).map((objective) => (
+                  <option key={objective.id} value={objective.id}>
+                    {quest.name}: {objective.description || objective.type}
+                  </option>
+                )),
+              )}
+            </select>
+          )}
+
+          {(response.interaction === "unlock_lore_entry" ||
+            response.interaction === "show_lore_entry") && (
+            <select
+              value={response.interactionData || ""}
+              onChange={(event) =>
+                updateResponse(response.id, {
+                  interactionData: event.target.value,
+                })
+              }
+              className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
+            >
+              <option value="">Choose lore or journal entry…</option>
+              {loreEntries.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.title}
                 </option>
               ))}
             </select>

@@ -1,10 +1,94 @@
-import { Project, Scene } from "../types";
+import { Project, Scene, StatTrackDefinition } from "../types";
 import { prepareProjectForExport } from "./projectPersistence";
 import {
   compareRuleValue,
   evaluateRuleCondition,
   evaluateRuleConditions,
 } from "./runtimeRules";
+
+const DEFAULT_EXPORT_NEED_TRACKS: StatTrackDefinition[] = [
+  { id: "rest", label: "Rest", defaultValue: 100, min: 0, max: 100, color: "#60a5fa", visibleInHud: true },
+  { id: "hunger", label: "Hunger", defaultValue: 100, min: 0, max: 100, color: "#fb7185", visibleInHud: true },
+  { id: "connection", label: "Connection", defaultValue: 100, min: 0, max: 100, color: "#facc15", visibleInHud: true },
+  { id: "spiritual", label: "Spiritual", defaultValue: 100, min: 0, max: 100, color: "#a78bfa", visibleInHud: true },
+  { id: "novelty", label: "Novelty", defaultValue: 100, min: 0, max: 100, color: "#34d399", visibleInHud: true },
+];
+
+const DEFAULT_EXPORT_SKILL_TRACKS: StatTrackDefinition[] = [
+  { id: "naturalist", label: "Naturalist", defaultValue: 5, min: 0, max: 20, color: "#00ffcc", visibleInHud: true },
+  { id: "occultist", label: "Occultist", defaultValue: 2, min: 0, max: 20, color: "#ff4fc8", visibleInHud: true },
+  { id: "scribal", label: "Scribal", defaultValue: 8, min: 0, max: 20, color: "#facc15", visibleInHud: true },
+];
+
+type ExportTrackDefinition = StatTrackDefinition & { domId: string };
+
+const trackDomId = (id: string) =>
+  encodeURIComponent(id).replace(/%/g, "_").replace(/[()]/g, "_");
+
+const normalizeExportTracks = (
+  ids: string[] | undefined,
+  definitions: Record<string, StatTrackDefinition> | undefined,
+  fallback: StatTrackDefinition[],
+  kind: "need" | "skill",
+): ExportTrackDefinition[] => {
+  const seen = new Set<string>();
+  const sourceIds = ids?.length ? ids : Object.keys(definitions || {});
+  const orderedIds = sourceIds.length ? sourceIds : fallback.map((track) => track.id);
+
+  return orderedIds.map((id) => {
+    const definition = definitions?.[id];
+    const fallbackTrack = fallback.find((track) => track.id === id);
+    const normalizedId = definition?.id || fallbackTrack?.id || id;
+    seen.add(normalizedId);
+    return {
+      id: normalizedId,
+      label: definition?.label || fallbackTrack?.label || normalizedId,
+      defaultValue:
+        definition?.defaultValue ??
+        fallbackTrack?.defaultValue ??
+        (kind === "need" ? 100 : 0),
+      min: definition?.min ?? fallbackTrack?.min ?? 0,
+      max: definition?.max ?? fallbackTrack?.max ?? (kind === "need" ? 100 : 20),
+      color:
+        definition?.color ||
+        fallbackTrack?.color ||
+        (kind === "need" ? "#4ade80" : "#00ffcc"),
+      visibleInHud: definition?.visibleInHud ?? fallbackTrack?.visibleInHud ?? true,
+      domId: trackDomId(normalizedId),
+    };
+  }).concat(
+    Object.entries(definitions || {})
+      .filter(([id, definition]) => !seen.has(definition.id || id))
+      .map(([id, definition]) => {
+        const normalizedId = definition.id || id;
+        return {
+          id: normalizedId,
+          label: definition.label || normalizedId,
+          defaultValue: definition.defaultValue ?? (kind === "need" ? 100 : 0),
+          min: definition.min ?? 0,
+          max: definition.max ?? (kind === "need" ? 100 : 20),
+          color: definition.color || (kind === "need" ? "#4ade80" : "#00ffcc"),
+          visibleInHud: definition.visibleInHud ?? true,
+          domId: trackDomId(normalizedId),
+        };
+      }),
+  );
+};
+
+const jsonForInlineScript = (value: unknown) =>
+  JSON.stringify(value)
+    .split("</script>")
+    .join("<\\/script>")
+    .split("</SCRIPT>")
+    .join("<\\/script>");
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 
 export function generateExportHtml(project: Project): string {
   const strippedProject = prepareProjectForExport(project);
@@ -22,6 +106,23 @@ export function generateExportHtml(project: Project): string {
   const exportWidth = scene.width || project.globalSettings?.stageWidth || 800;
   const exportHeight =
     scene.height || project.globalSettings?.stageHeight || 600;
+  const dialogueTextSize = project.globalSettings?.dialogueTextSizePx ?? 14;
+  const dialogueChoiceTextSize =
+    project.globalSettings?.dialogueChoiceTextSizePx ?? 13;
+  const dialoguePortraitSize = project.globalSettings?.dialoguePortraitSizePx ?? 64;
+  const dialogueTitleSize = Math.max(11, dialogueTextSize - 1);
+  const needTracks = normalizeExportTracks(
+    project.globalSettings?.customNeeds,
+    project.globalSettings?.customNeedDefinitions,
+    DEFAULT_EXPORT_NEED_TRACKS,
+    "need",
+  );
+  const skillTracks = normalizeExportTracks(
+    project.globalSettings?.customSkills,
+    project.globalSettings?.customSkillDefinitions,
+    DEFAULT_EXPORT_SKILL_TRACKS,
+    "skill",
+  );
 
   // Calculate the total bounding box for scaling
   let boundMinX = 0;
@@ -283,16 +384,16 @@ export function generateExportHtml(project: Project): string {
         const wPct = project.globalSettings?.dialogueWidthPercent ?? 91.666;
         const maxWPx = project.globalSettings?.dialogueMaxWidthPx ?? 672;
         const cappedWidth = `min(${maxWPx}px, calc(100% - 24px))`;
-        if (dPos === "top") return `position: absolute; top: 32px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${cappedWidth};`;
+        if (dPos === "top") return `position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${cappedWidth};`;
         if (dPos === "center") return `position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: ${wPct}%; max-width: ${cappedWidth};`;
-        if (dPos === "below") return `position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${cappedWidth};`;
-        return `position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${cappedWidth};`;
+        if (dPos === "below") return `position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${cappedWidth};`;
+        return `position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: ${wPct}%; max-width: ${cappedWidth};`;
       })()}
       ${(() => {
         const dPos = project.globalSettings?.dialoguePosition || "bottom";
         const heightPct = project.globalSettings?.dialogueMaxHeightPercent ?? 90;
         return dPos === "top" || dPos === "bottom" || dPos === "below"
-          ? `max-height: min(${heightPct}%, calc(100% - 64px));`
+          ? `max-height: min(${heightPct}%, calc(100% - 16px));`
           : `max-height: ${heightPct}%;`;
       })()}
       background-color: var(--ui-bg-alpha);
@@ -317,7 +418,7 @@ export function generateExportHtml(project: Project): string {
       padding: 10px 20px;
       border-bottom: 1px solid var(--ui-primary-half);
       font-weight: bold;
-      font-size: 14px;
+	      font-size: ${dialogueTitleSize}px;
       letter-spacing: 0.05em;
       background-color: rgba(0,0,0,0.3);
       color: var(--ui-primary);
@@ -332,8 +433,8 @@ export function generateExportHtml(project: Project): string {
       min-height: 0;
     }
     .dialogue-portrait {
-      width: 80px;
-      height: 80px;
+	      width: ${dialoguePortraitSize}px;
+	      height: ${dialoguePortraitSize}px;
       flex-shrink: 0;
       border-radius: 8px;
       overflow: hidden;
@@ -353,17 +454,19 @@ export function generateExportHtml(project: Project): string {
       object-fit: contain;
     }
     .dialogue-text-container {
-      font-size: 16px;
+	      font-size: ${dialogueTextSize}px;
       font-weight: 500;
       line-height: 1.45;
-      flex: 1;
-      color: white;
+	      flex: 1;
+	      min-width: 0;
+	      color: white;
       text-shadow: 0 1px 2px rgba(0,0,0,0.4);
       align-self: stretch;
       overflow-y: auto;
       max-height: 100%;
-      min-height: 0;
-    }
+	      min-height: 0;
+	      overflow-wrap: anywhere;
+	    }
     .dialogue-choices {
       display: flex;
       flex-direction: column;
@@ -382,14 +485,15 @@ export function generateExportHtml(project: Project): string {
       background: transparent;
       color: white;
       border: none;
-      padding: 12px 20px;
+	      padding: 10px 16px;
       border-bottom: 1px solid var(--ui-primary-choice);
       cursor: pointer;
       transition: background-color 0.2s, color 0.2s;
       font-family: inherit;
-      font-size: 14px;
-      font-weight: 500;
-    }
+	      font-size: ${dialogueChoiceTextSize}px;
+	      font-weight: 500;
+	      overflow-wrap: anywhere;
+	    }
     .dialogue-choice:last-child {
       border-bottom: none;
     }
@@ -398,10 +502,10 @@ export function generateExportHtml(project: Project): string {
     }
 
     #dialogue-box.simple-dialogue {
-      width: 80%;
-      max-width: 512px;
-      cursor: pointer;
-      transition: transform 0.2s;
+	      width: ${project.globalSettings?.dialogueWidthPercent ?? 91.666}%;
+	      max-width: min(${project.globalSettings?.dialogueMaxWidthPx ?? 672}px, calc(100% - 24px));
+	      cursor: pointer;
+	      transition: transform 0.2s;
     }
     #dialogue-box.simple-dialogue:hover {
       transform: translateX(-50%) scale(1.02);
@@ -410,12 +514,14 @@ export function generateExportHtml(project: Project): string {
       padding: 14px;
       text-align: center;
       line-height: 1.45;
-      font-weight: 500;
-      color: white;
+	      font-weight: 500;
+	      font-size: ${dialogueTextSize}px;
+	      color: white;
       text-shadow: 0 1px 2px rgba(0,0,0,0.4);
       overflow-y: auto;
-      min-height: 0;
-    }
+	      min-height: 0;
+	      overflow-wrap: anywhere;
+	    }
     .simple-dialogue-continue {
       padding: 8px 16px;
       opacity: 0.5;
@@ -727,7 +833,22 @@ export function generateExportHtml(project: Project): string {
       animStyle = `animation: ${obj.animation} ${duration}s ${easing} infinite;`;
     }
 
-    const peStr = obj.ignoreClicks ? "pointer-events: none;" : "";
+    const hasPrimaryInteraction =
+      Boolean(obj.interaction) && obj.interaction !== "none";
+    const hasClickResponses =
+      Array.isArray(obj.clickResponses) && obj.clickResponses.length > 0;
+    const hasInteractiveUiRole =
+      obj.isUiElement &&
+      (obj.uiElementType === "button" || obj.uiElementType === "toggle");
+    const shouldReceiveClicks =
+      !obj.ignoreClicks &&
+      (obj.isHitbox ||
+        hasPrimaryInteraction ||
+        hasClickResponses ||
+        hasInteractiveUiRole);
+    const peStr = shouldReceiveClicks
+      ? "pointer-events: auto; touch-action: manipulation;"
+      : "pointer-events: none;";
 
     const style = `
       left: ${obj.x}px;
@@ -963,11 +1084,13 @@ export function generateExportHtml(project: Project): string {
     }
 
     /* Dialogue & Variables */
-    const dialogueTrees = gameData.dialogueTrees || [];
-    const assets = gameData.assets || [];
-    const inventoryItems = gameData.inventoryItems || [];
-    const globalSettings = gameData.globalSettings || {};
-    let activeDialogue = null;
+	    const dialogueTrees = gameData.dialogueTrees || [];
+	    const assets = gameData.assets || [];
+	    const inventoryItems = gameData.inventoryItems || [];
+	    const globalSettings = gameData.globalSettings || {};
+	    const needTrackDefinitions = ${jsonForInlineScript(needTracks)};
+	    const skillTrackDefinitions = ${jsonForInlineScript(skillTracks)};
+	    let activeDialogue = null;
 
     const buildAudioSrc = (asset) => {
       if (!asset || !asset.src) return "";
@@ -1033,30 +1156,30 @@ export function generateExportHtml(project: Project): string {
     const evaluateRuleCondition = ${evaluateRuleCondition.toString()};
     const evaluateRuleConditions = ${evaluateRuleConditions.toString()};
 
-    // Game State
-    let defaultNeeds = { rest: 100, hunger: 100, connection: 100, spiritual: 100, novelty: 100 };
-    if (globalSettings.customNeeds && globalSettings.customNeeds.length > 0) {
-      defaultNeeds = {};
-      globalSettings.customNeeds.forEach(n => {
-        const definition = (globalSettings.customNeedDefinitions || {})[n] || {};
-        const min = definition.min ?? 0;
-        const max = definition.max ?? 100;
-        const value = definition.defaultValue ?? 100;
-        defaultNeeds[n] = Math.max(min, Math.min(max, value));
-      });
-    }
-    
-    let defaultSkills = { naturalist: 5, occultist: 2, scribal: 8 };
-    if (globalSettings.customSkills && globalSettings.customSkills.length > 0) {
-      defaultSkills = {};
-      globalSettings.customSkills.forEach(s => {
-        const definition = (globalSettings.customSkillDefinitions || {})[s] || {};
-        const min = definition.min ?? 0;
-        const max = definition.max ?? 20;
-        const value = definition.defaultValue ?? 0;
-        defaultSkills[s] = Math.max(min, Math.min(max, value));
-      });
-    }
+	    const clampTrackValue = (track, fallback) => {
+	      const min = track.min ?? 0;
+	      const max = track.max ?? 100;
+	      const value = track.defaultValue ?? fallback;
+	      return Math.max(min, Math.min(max, value));
+	    };
+
+	    const percentForTrack = (value, track) => {
+	      const min = track.min ?? 0;
+	      const max = track.max ?? 100;
+	      const span = Math.max(1, max - min);
+	      return Math.max(0, Math.min(100, ((value - min) / span) * 100));
+	    };
+
+	    // Game State
+	    const defaultNeeds = {};
+	    needTrackDefinitions.forEach(track => {
+	      defaultNeeds[track.id] = clampTrackValue(track, 100);
+	    });
+	    
+	    const defaultSkills = {};
+	    skillTrackDefinitions.forEach(track => {
+	      defaultSkills[track.id] = clampTrackValue(track, 0);
+	    });
 
     let state = {
       version: 1,
@@ -1069,6 +1192,8 @@ export function generateExportHtml(project: Project): string {
       relationships: {},
       activeQuests: gameData.quests?.filter(q => q.autoStart).map(q => q.id) || [],
       completedQuests: [],
+      completedQuestObjectives: [],
+      unlockedLoreEntryIds: [],
       collectedObjects: [],
       activeUiMenus: [],
       triggeredRuleIds: [],
@@ -1318,19 +1443,55 @@ export function generateExportHtml(project: Project): string {
         saveGame();
       };
 
+      const isQuestObjectiveDone = (obj) => {
+        if (!obj) return false;
+        if (state.completedQuestObjectives && state.completedQuestObjectives.includes(obj.id)) return true;
+        if (obj.type === 'custom_flag') return !!state.flags[obj.targetId];
+        if (obj.type === 'talk_to') return (state.talkCounts[obj.targetId] || 0) >= (obj.requiredAmount || 1);
+        if (obj.type === 'collect_item') return state.inventory.includes(obj.targetId);
+        if (obj.type === 'reach_scene') return state.currentSceneId === obj.targetId || !!state.flags['visited_scene_' + obj.targetId];
+        if (obj.type === 'skill_check') return (state.skills[obj.targetId] || 0) >= (obj.requiredAmount || 1);
+        return false;
+      };
+
+      const completeQuestObjective = (objectiveId) => {
+        if (!objectiveId) return;
+        state.completedQuestObjectives = state.completedQuestObjectives || [];
+        if (!state.completedQuestObjectives.includes(objectiveId)) {
+          state.completedQuestObjectives.push(objectiveId);
+        }
+        const q = (gameData.quests || []).find(q => (q.objectives || []).some(obj => obj.id === objectiveId));
+        const obj = q ? (q.objectives || []).find(obj => obj.id === objectiveId) : null;
+        if (q && !state.activeQuests.includes(q.id) && !state.completedQuests.includes(q.id)) {
+          state.activeQuests.push(q.id);
+        }
+        if (q && obj) showSimpleDialogue('Quest step complete: ' + (obj.description || q.name), 'System');
+        checkQuestAutoComplete();
+        buildQuestLog();
+        saveGame();
+      };
+
+      const unlockLoreEntry = (entryId, showNow) => {
+        if (!entryId) return;
+        state.unlockedLoreEntryIds = state.unlockedLoreEntryIds || [];
+        if (!state.unlockedLoreEntryIds.includes(entryId)) {
+          state.unlockedLoreEntryIds.push(entryId);
+        }
+        const entry = (gameData.loreEntries || []).find(e => e.id === entryId);
+        if (showNow && entry) {
+          const label = entry.entryType === 'quest_note' ? 'Quest Note' : entry.entryType === 'journal' ? 'Journal' : 'Lore';
+          showSimpleDialogue(label + ': ' + entry.title + '\\n\\n' + (entry.content || 'Added to your almanac.'), 'System');
+        }
+        if (window.buildAlmanacPanel) window.buildAlmanacPanel();
+        saveGame();
+      };
+
       const checkQuestAutoComplete = () => {
         const toComplete = [];
         state.activeQuests.forEach(qId => {
           const q = (gameData.quests || []).find(q => q.id === qId);
           if (!q || !q.objectives || q.objectives.length === 0) return;
-          const allDone = q.objectives.every(obj => {
-            if (obj.type === 'custom_flag') return !!state.flags[obj.targetId];
-            if (obj.type === 'talk_to') return (state.talkCounts[obj.targetId] || 0) >= (obj.requiredAmount || 1);
-            if (obj.type === 'collect_item') return state.inventory.includes(obj.targetId);
-            if (obj.type === 'reach_scene') return state.currentSceneId === obj.targetId || !!state.flags['visited_scene_' + obj.targetId];
-            if (obj.type === 'skill_check') return (state.skills[obj.targetId] || 0) >= (obj.requiredAmount || 1);
-            return false;
-          });
+          const allDone = q.objectives.every(obj => isQuestObjectiveDone(obj));
           if (allDone) toComplete.push(qId);
         });
         if (toComplete.length === 0) return;
@@ -1366,6 +1527,15 @@ export function generateExportHtml(project: Project): string {
           showSimpleDialogue('Quest Completed: ' + (q ? q.name : choice.completeQuestId), 'System');
           applyQuestRewards(choice.completeQuestId);
           buildQuestLog();
+        }
+        if (choice.completeQuestObjectiveId) {
+          completeQuestObjective(choice.completeQuestObjectiveId);
+        }
+        if (choice.unlockLoreEntryId) {
+          unlockLoreEntry(choice.unlockLoreEntryId, false);
+        }
+        if (choice.showLoreEntryId) {
+          unlockLoreEntry(choice.showLoreEntryId, true);
         }
         if (choice.giveItemId && !state.inventory.includes(choice.giveItemId)) {
           state.inventory.push(choice.giveItemId);
@@ -1481,22 +1651,22 @@ export function generateExportHtml(project: Project): string {
       
       updateGameFlagsUI();
 
-      // Update Needs UI
-      const updateNeedsUI = () => {
-        Object.keys(state.needs).forEach(need => {
-          const el = document.getElementById('need-' + need);
-          if (el) el.style.width = Math.max(0, Math.min(100, state.needs[need] || 0)) + '%';
-        });
-      };
-      updateNeedsUI();
+	      // Update Needs UI
+	      const updateNeedsUI = () => {
+	        needTrackDefinitions.forEach(track => {
+	          const el = document.getElementById('need-' + track.domId);
+	          if (el) el.style.width = percentForTrack(state.needs[track.id] ?? track.defaultValue ?? 0, track) + '%';
+	        });
+	      };
+	      updateNeedsUI();
 
-      // Update Skills UI
-      const updateSkillsUI = () => {
-        Object.keys(state.skills).forEach(skill => {
-          const el = document.getElementById('skill-' + skill);
-          if (el) el.style.width = Math.max(0, Math.min(100, (state.skills[skill] || 0) * 5)) + '%';
-        });
-      };
+	      // Update Skills UI
+	      const updateSkillsUI = () => {
+	        skillTrackDefinitions.forEach(track => {
+	          const el = document.getElementById('skill-' + track.domId);
+	          if (el) el.style.width = percentForTrack(state.skills[track.id] ?? track.defaultValue ?? 0, track) + '%';
+	        });
+	      };
       updateSkillsUI();
 
       // Day/Night Cycle
@@ -1756,17 +1926,23 @@ export function generateExportHtml(project: Project): string {
                saveGame();
                buildQuestLog();
             }
-          } else if (interaction === 'complete_quest') {
-            if (data && state.activeQuests.includes(data)) {
-               state.activeQuests = state.activeQuests.filter(id => id !== data);
-               state.completedQuests.push(data);
+	          } else if (interaction === 'complete_quest') {
+	            if (data && state.activeQuests.includes(data)) {
+	               state.activeQuests = state.activeQuests.filter(id => id !== data);
+	               state.completedQuests.push(data);
                const q = (gameData.quests || []).find(q => q.id === data);
                showSimpleDialogue("Quest Completed: " + (q ? q.name : data), "System");
                applyQuestRewards(data);
                saveGame();
-               buildQuestLog();
-            }
-          } else if (interaction === 'set_flag') {
+	               buildQuestLog();
+	            }
+	          } else if (interaction === 'complete_quest_objective') {
+	            completeQuestObjective(data);
+	          } else if (interaction === 'unlock_lore_entry') {
+	            unlockLoreEntry(data, false);
+	          } else if (interaction === 'show_lore_entry') {
+	            unlockLoreEntry(data, true);
+	          } else if (interaction === 'set_flag') {
             if (data) {
               state.flags[data] = true;
               checkQuestAutoComplete();
@@ -2172,17 +2348,30 @@ export function generateExportHtml(project: Project): string {
         const characterTies = characters.flatMap(char => (char.relationships || []).map(tie => ({ ...tie, sourceName: char.name })));
         if (characterTies.length > 0) {
           html += '<div style="font-size:11px;font-weight:bold;text-transform:uppercase;color:var(--ui-primary);opacity:0.7;padding:8px 0 4px 0;">Character ties</div>';
-          characterTies.forEach(tie => {
-            const target = characters.find(char => char.id === tie.characterId);
-            const clr = tie.value >= 20 ? '#10b981' : tie.value <= -20 ? '#ef4444' : '#9ca3af';
-            html += \`<div style="padding:10px 12px;border:1px solid \${clr}40;border-radius:8px;background:rgba(0,0,0,.18);">
-              <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-                <span style="font-weight:bold;font-size:13px;">\${tie.sourceName} -> \${target ? target.name : 'Unknown character'}</span>
-                <span style="font-size:11px;color:\${clr};font-weight:bold;">\${tie.label || 'Knows'} \${tie.value > 0 ? '+' + tie.value : tie.value}</span>
-              </div>
-              \${tie.notes ? '<div style="font-size:12px;opacity:.75;line-height:1.4;margin-top:6px;white-space:pre-wrap;">' + tie.notes + '</div>' : ''}
-            </div>\`;
-          });
+	          characterTies.forEach(tie => {
+	            const target = characters.find(char => char.id === tie.characterId);
+	            const clr = tie.value >= 20 ? '#10b981' : tie.value <= -20 ? '#ef4444' : '#9ca3af';
+	            const kindLabels = {
+	              family: 'Family / kin',
+	              household: 'Household',
+	              rivalry: 'Rivalry',
+	              ally: 'Ally / coalition',
+	              mentor: 'Mentor / apprentice',
+	              romance: 'Romance / longing',
+	              debt: 'Debt / obligation',
+	              taboo: 'Taboo / forbidden',
+	              custom: 'Custom',
+	            };
+	            const kindLabel = kindLabels[tie.kind || 'custom'] || 'Custom';
+	            html += \`<div style="padding:10px 12px;border:1px solid \${clr}40;border-radius:8px;background:rgba(0,0,0,.18);">
+	              <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+	                <span style="font-weight:bold;font-size:13px;">\${tie.sourceName} -> \${target ? target.name : 'Unknown character'}</span>
+	                <span style="font-size:11px;color:\${clr};font-weight:bold;">\${kindLabel} · \${tie.label || 'Knows'} \${tie.value > 0 ? '+' + tie.value : tie.value}</span>
+	              </div>
+	              \${(tie.isMutual || tie.isSecret) ? '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;">' + (tie.isMutual ? '<span style="font-size:9px;text-transform:uppercase;letter-spacing:.05em;background:rgba(255,255,255,.08);padding:2px 6px;border-radius:999px;">Mutual</span>' : '') + (tie.isSecret ? '<span style="font-size:9px;text-transform:uppercase;letter-spacing:.05em;background:rgba(255,255,255,.08);padding:2px 6px;border-radius:999px;">Secret</span>' : '') + '</div>' : ''}
+	              \${tie.notes ? '<div style="font-size:12px;opacity:.75;line-height:1.4;margin-top:6px;white-space:pre-wrap;">' + tie.notes + '</div>' : ''}
+	            </div>\`;
+	          });
         }
         if (factions.length > 0) {
           html += '<div style="font-size:11px;font-weight:bold;text-transform:uppercase;color:var(--ui-primary);opacity:0.7;padding:8px 0 4px 0;">Factions</div>';
@@ -2210,30 +2399,30 @@ export function generateExportHtml(project: Project): string {
         setRuntimeOverlayOpen('skills-overlay', () => buildSkillsPanel());
       };
 
-      window.buildSkillsPanel = () => {
-        const list = document.getElementById('skills-list');
-        if (!list) return;
-        const skills = globalSettings.customSkills && globalSettings.customSkills.length > 0
-          ? globalSettings.customSkills
-          : Object.keys(state.skills);
-        if (skills.length === 0) {
-          list.innerHTML = '<div style="text-align:center;padding:40px;opacity:0.5;">No skills tracked yet.</div>';
-          return;
-        }
-        let html = '<div style="display:flex;flex-direction:column;gap:10px;padding:16px;">';
-        skills.forEach(skill => {
-          const level = state.skills[skill] || 0;
-          const pct = Math.round((level / 20) * 100);
-          html += \`<div style="padding:10px 12px;border:1px solid var(--ui-primary)30;border-radius:8px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-              <span style="font-size:14px;text-transform:capitalize;">\${skill}</span>
-              <span style="font-size:13px;color:var(--ui-primary);font-weight:bold;">\${level} / 20</span>
-            </div>
-            <div style="height:6px;border-radius:3px;background:rgba(255,255,255,0.1);overflow:hidden;">
-              <div style="height:100%;width:\${pct}%;background:var(--ui-primary);border-radius:3px;"></div>
-            </div>
-          </div>\`;
-        });
+	      window.buildSkillsPanel = () => {
+	        const list = document.getElementById('skills-list');
+	        if (!list) return;
+	        const skills = skillTrackDefinitions.length
+	          ? skillTrackDefinitions
+	          : Object.keys(state.skills).map(id => ({ id, label: id, min: 0, max: 20, color: 'var(--ui-primary)' }));
+	        if (skills.length === 0) {
+	          list.innerHTML = '<div style="text-align:center;padding:40px;opacity:0.5;">No skills tracked yet.</div>';
+	          return;
+	        }
+	        let html = '<div style="display:flex;flex-direction:column;gap:10px;padding:16px;">';
+	        skills.forEach(skill => {
+	          const level = state.skills[skill.id] ?? skill.defaultValue ?? 0;
+	          const pct = Math.round(percentForTrack(level, skill));
+	          html += \`<div style="padding:10px 12px;border:1px solid var(--ui-primary)30;border-radius:8px;">
+	            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+	              <span style="font-size:14px;text-transform:capitalize;">\${skill.label || skill.id}</span>
+	              <span style="font-size:13px;color:\${skill.color || 'var(--ui-primary)'};font-weight:bold;">\${level} / \${skill.max ?? 20}</span>
+	            </div>
+	            <div style="height:6px;border-radius:3px;background:rgba(255,255,255,0.1);overflow:hidden;">
+	              <div style="height:100%;width:\${pct}%;background:\${skill.color || 'var(--ui-primary)'};border-radius:3px;"></div>
+	            </div>
+	          </div>\`;
+	        });
         html += '</div>';
         list.innerHTML = html;
       };
@@ -2245,7 +2434,7 @@ export function generateExportHtml(project: Project): string {
       window.buildAlmanacPanel = () => {
         const list = document.getElementById('almanac-list');
         if (!list) return;
-        const entries = (gameData.loreEntries || []).filter(e => !e.requiredFlagId || state.flags[e.requiredFlagId]);
+        const entries = (gameData.loreEntries || []).filter(e => !e.requiredFlagId || state.flags[e.requiredFlagId] || (state.unlockedLoreEntryIds || []).includes(e.id));
         if (entries.length === 0) {
           list.innerHTML = '<div style="text-align:center;padding:40px;opacity:0.5;">Nothing recorded yet.</div>';
           return;
@@ -2436,12 +2625,7 @@ export function generateExportHtml(project: Project): string {
            if (q.objectives && q.objectives.length > 0) {
               html += \`<div style="font-size: 12px; font-weight: bold; text-transform: uppercase; color: var(--ui-primary); margin-bottom: 8px;">Objectives</div>\`;
               q.objectives.forEach(obj => {
-                 let isDone = false;
-                 if (obj.type === 'custom_flag') isDone = !!state.flags[obj.targetId];
-                 if (obj.type === 'talk_to') isDone = (state.talkCounts[obj.targetId] || 0) >= (obj.requiredAmount || 1);
-                 if (obj.type === 'collect_item') isDone = state.inventory.includes(obj.targetId);
-                 if (obj.type === 'reach_scene') isDone = state.currentSceneId === obj.targetId || !!state.flags['visited_scene_' + obj.targetId];
-                 if (obj.type === 'skill_check') isDone = (state.skills[obj.targetId] || 0) >= (obj.requiredAmount || 1);
+	                 let isDone = isQuestObjectiveDone(obj);
                  
                  html += \`<div style="margin-bottom: 4px; display: flex; align-items: center; gap: 8px; font-size: 13px;">
                     <div style="width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ui-primary); background: \${isDone ? 'var(--ui-primary)' : 'transparent'};"></div>
@@ -2728,17 +2912,21 @@ export function generateExportHtml(project: Project): string {
         }
 
       
-      ${project.globalSettings?.enableNeeds ? `<div id="needs-tracker">
-        ${(project.globalSettings.customNeeds?.length ? project.globalSettings.customNeeds : ['rest', 'hunger', 'connection', 'spiritual', 'novelty']).map(need => 
-          `<div>${need.charAt(0).toUpperCase() + need.slice(1)} <div class="need-bar"><div id="need-${need}" class="need-fill"></div></div></div>`
-        ).join('')}
-      </div>` : ''}
-      
-      ${project.globalSettings?.enableTTRPGStats ? `<div id="skills-tracker">
-        ${(project.globalSettings.customSkills?.length ? project.globalSettings.customSkills : ['naturalist', 'occultist', 'scribal']).map(skill => 
-          `<div>${skill.charAt(0).toUpperCase() + skill.slice(1)} <div class="need-bar"><div id="skill-${skill}" class="need-fill"></div></div></div>`
-        ).join('')}
-      </div>` : ''}
+	      ${project.globalSettings?.enableNeeds ? `<div id="needs-tracker">
+	        ${needTracks
+            .filter((need) => need.visibleInHud !== false)
+            .map(need => 
+	          `<div>${escapeHtml(need.label || need.id)} <div class="need-bar"><div id="need-${need.domId}" class="need-fill" style="background:${escapeHtml(need.color || "#4ade80")}"></div></div></div>`
+	        ).join('')}
+	      </div>` : ''}
+	      
+	      ${project.globalSettings?.enableTTRPGStats ? `<div id="skills-tracker">
+	        ${skillTracks
+            .filter((skill) => skill.visibleInHud !== false)
+            .map(skill => 
+	          `<div>${escapeHtml(skill.label || skill.id)} <div class="need-bar"><div id="skill-${skill.domId}" class="need-fill" style="background:${escapeHtml(skill.color || "#00ffcc")}"></div></div></div>`
+	        ).join('')}
+	      </div>` : ''}
       
       <div id="time-tracker">
         <div style="font-weight: bold; border-top: 1px solid rgba(255,255,255,0.3); padding-top: 4px; margin-top: 4px;">

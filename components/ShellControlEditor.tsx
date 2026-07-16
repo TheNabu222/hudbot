@@ -6,6 +6,7 @@ import {
   DeviceFrameControl,
   DialogueTree,
   InventoryItem,
+  LoreEntry,
   Quest,
   Scene,
 } from "../types";
@@ -20,6 +21,7 @@ interface ShellControlEditorProps {
   dialogueTrees: DialogueTree[];
   inventoryItems: InventoryItem[];
   quests: Quest[];
+  loreEntries: LoreEntry[];
   gameFlags: string[];
   uiMenus: Scene[];
   skillIds: string[];
@@ -145,6 +147,7 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
   dialogueTrees,
   inventoryItems,
   quests,
+  loreEntries,
   gameFlags,
   uiMenus,
   skillIds,
@@ -700,9 +703,10 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
                       assets={assets}
                       scenes={scenes}
                       dialogueTrees={dialogueTrees}
-                      inventoryItems={inventoryItems}
-                      quests={quests}
-                      gameFlags={gameFlags}
+	                      inventoryItems={inventoryItems}
+	                      quests={quests}
+	                      loreEntries={loreEntries}
+	                      gameFlags={gameFlags}
                       uiMenus={uiMenus}
                       skillIds={skillIds}
                       needIds={needIds}

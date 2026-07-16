@@ -48,8 +48,11 @@ export type InteractionType =
   | "open_quest_log"
   | "start_quest"
   | "complete_quest"
+  | "complete_quest_objective"
   | "open_skills"
   | "open_almanac"
+  | "unlock_lore_entry"
+  | "show_lore_entry"
   | "open_map"
   | "open_relationships"
   | "open_settings"
@@ -122,6 +125,8 @@ export interface RuntimeGameState {
   relationships: Record<string, number>;
   activeQuests: string[];
   completedQuests: string[];
+  completedQuestObjectives: string[];
+  unlockedLoreEntryIds: string[];
   collectedObjects: string[];
   activeUiMenus: string[];
   triggeredRuleIds: string[];
@@ -163,6 +168,9 @@ export interface DialogueChoice {
   setGameFlag?: string;
   startQuestId?: string;
   completeQuestId?: string;
+  completeQuestObjectiveId?: string;
+  unlockLoreEntryId?: string;
+  showLoreEntryId?: string;
   giveItemId?: string;
   consumeItemId?: string;
   playSoundAssetId?: string;
@@ -571,8 +579,11 @@ export interface GiftPreference {
 export interface CharacterRelationship {
   id: string;
   characterId: string;
+  kind?: "family" | "household" | "rivalry" | "ally" | "mentor" | "romance" | "debt" | "taboo" | "custom";
   label: string;
   value: number;
+  isMutual?: boolean;
+  isSecret?: boolean;
   notes?: string;
 }
 
@@ -633,6 +644,9 @@ export interface Project {
     dialogueWidthPercent?: number; // default 91
     dialogueMaxHeightPercent?: number; // default 90
     dialogueMaxWidthPx?: number; // default 672
+    dialogueTextSizePx?: number; // default 14
+    dialogueChoiceTextSizePx?: number; // default 13
+    dialoguePortraitSizePx?: number; // default 64
     typewriterSpeed?: number;
     hideAllDefaultHud?: boolean;
     hideDefaultInventoryBtn?: boolean;

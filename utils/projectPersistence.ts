@@ -31,6 +31,8 @@ export const stripDuplicatedAssetSources = (project: Project): Project => {
 };
 
 type PrepareProjectOptions = {
+  assetScope?: "used" | "all";
+  includeEmbeddedAssetData?: boolean;
   keepFavoriteAssets?: boolean;
 };
 
@@ -105,12 +107,27 @@ export const prepareProjectForExport = (
 ): Project => {
   const strippedProject = stripDuplicatedAssetSources(project);
   const referencedValues = collectReferencedAssetValues(strippedProject);
+  const assetScope = options.assetScope ?? "used";
+  const includeEmbeddedAssetData = options.includeEmbeddedAssetData ?? true;
   const keepFavoriteAssets = options.keepFavoriteAssets ?? false;
+  const prepareAsset = (asset: Asset): Asset => {
+    if (includeEmbeddedAssetData) return asset;
+    const strippedAsset: Asset = {
+      ...asset,
+      dataURL: undefined,
+      src: asset.src?.startsWith("data:") ? "" : asset.src,
+    };
+    return strippedAsset;
+  };
+  const assets =
+    assetScope === "all"
+      ? strippedProject.assets || []
+      : (strippedProject.assets || []).filter((asset) =>
+          isAssetReferenced(asset, referencedValues, keepFavoriteAssets),
+        );
 
   return {
     ...strippedProject,
-    assets: (strippedProject.assets || []).filter((asset) =>
-      isAssetReferenced(asset, referencedValues, keepFavoriteAssets),
-    ),
+    assets: assets.map(prepareAsset),
   };
 };

@@ -1,6 +1,7 @@
 import React from "react";
 import {
   Backpack,
+  BookOpen,
   Download,
   FolderOpen,
   Image as ImageIcon,
@@ -9,10 +10,12 @@ import {
   Map as MapIcon,
   MessageSquare,
   Play,
-  Shield,
+  ScrollText,
   Sparkles,
   Square,
   StopCircle,
+  Users,
+  Zap,
 } from "lucide-react";
 
 export type EditorMode =
@@ -30,11 +33,15 @@ type WorkspacePhase = "collect" | "compose" | "behaviors" | "connect";
 
 interface StudioWorkflowNavProps {
   editorMode: EditorMode;
+  rpgTab?: RpgSubtool;
   isPlaying: boolean;
   onModeChange: (mode: EditorMode) => void;
+  onRpgTabChange?: (tab: RpgSubtool) => void;
   onTogglePlay: () => void;
   onExport: () => void;
 }
+
+export type RpgSubtool = "quests" | "stats" | "characters" | "lore";
 
 const phaseForMode: Record<EditorMode, WorkspacePhase> = {
   assets: "collect",
@@ -71,6 +78,7 @@ const subtools: Record<
   WorkspacePhase,
   Array<{
     mode: EditorMode;
+    rpgTab?: RpgSubtool;
     label: string;
     note: string;
     icon: React.ElementType;
@@ -125,9 +133,31 @@ const subtools: Record<
     },
     {
       mode: "rpg_systems",
-      label: "World Rules",
-      note: "quests, lore & people",
-      icon: Shield,
+      rpgTab: "quests",
+      label: "Quests",
+      note: "steps & rewards",
+      icon: ScrollText,
+    },
+    {
+      mode: "rpg_systems",
+      rpgTab: "stats",
+      label: "Skills & Needs",
+      note: "checks & meters",
+      icon: Zap,
+    },
+    {
+      mode: "rpg_systems",
+      rpgTab: "characters",
+      label: "Roster",
+      note: "people & groups",
+      icon: Users,
+    },
+    {
+      mode: "rpg_systems",
+      rpgTab: "lore",
+      label: "Almanac",
+      note: "notes & journals",
+      icon: BookOpen,
     },
   ],
   connect: [
@@ -159,8 +189,10 @@ const phases: Array<{
 
 export const StudioWorkflowNav: React.FC<StudioWorkflowNavProps> = ({
   editorMode,
+  rpgTab,
   isPlaying,
   onModeChange,
+  onRpgTabChange,
   onTogglePlay,
   onExport,
 }) => {
@@ -230,12 +262,17 @@ export const StudioWorkflowNav: React.FC<StudioWorkflowNavProps> = ({
             {subtools[activePhase]
               .map((tool) => {
               const Icon = tool.icon;
-              const isActive = editorMode === tool.mode;
+              const isActive =
+                editorMode === tool.mode &&
+                (!tool.rpgTab || tool.rpgTab === rpgTab);
               return (
                 <button
-                  key={tool.mode}
+                  key={`${tool.mode}-${tool.rpgTab || tool.label}`}
                   type="button"
-                  onClick={() => onModeChange(tool.mode)}
+                  onClick={() => {
+                    if (tool.rpgTab) onRpgTabChange?.(tool.rpgTab);
+                    onModeChange(tool.mode);
+                  }}
                   className={`studio-subtool ${isActive ? "is-active" : ""}`}
                   title={tool.note}
                 >

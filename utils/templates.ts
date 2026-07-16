@@ -25,7 +25,14 @@ export const TEMPLATES: Record<string, () => Project> = {
       stageHeight: 600,
       snapToGrid: false,
       gridSize: 32,
-      showGhostOutlines: true
+      showGhostOutlines: true,
+      dialoguePosition: "bottom",
+      dialogueWidthPercent: 91.666,
+      dialogueMaxHeightPercent: 90,
+      dialogueMaxWidthPx: 672,
+      dialogueTextSizePx: 14,
+      dialogueChoiceTextSizePx: 13,
+      dialoguePortraitSizePx: 64
     },
     scenes: [
       {
@@ -92,7 +99,14 @@ export const TEMPLATES: Record<string, () => Project> = {
         stageHeight: 600,
         snapToGrid: true,
         gridSize: 32,
-        showGhostOutlines: true
+        showGhostOutlines: true,
+        dialoguePosition: "bottom",
+        dialogueWidthPercent: 91.666,
+        dialogueMaxHeightPercent: 90,
+        dialogueMaxWidthPx: 672,
+        dialogueTextSizePx: 14,
+        dialogueChoiceTextSizePx: 13,
+        dialoguePortraitSizePx: 64
       },
       scenes: [
         {
