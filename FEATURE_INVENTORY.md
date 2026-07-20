@@ -25,6 +25,101 @@ The intended product is a personal, no-code game workshop for assembling interac
 
 ---
 
+# 2026-07-16 Current Cavebot Snapshot
+
+This section reflects the current primary app after the recent Cavebot consolidation pass. Older sections below are still useful as cross-project archaeology, but this is the practical inventory for what the live app now contains.
+
+## Recently Implemented / Reworked
+
+### Export, Import, and Asset Scale
+
+- Clean JSON export can now strip embedded base64 from assets by default and keep durable asset IDs/source URLs instead.
+- JSON export supports a library scope choice: used assets only or the broader asset library when a full handoff is wanted.
+- Import hydration attempts to reconnect `_assetId` references back to asset records so canvas objects do not lose their image/audio sources.
+- Drag payloads avoid shipping giant data URLs; dropped assets are resolved by ID from the library instead.
+- GitHub Cavebot asset browsing uses repo paths/raw URLs and loads folders only when opened or refreshed instead of eagerly rendering the whole collection.
+- Vite dev watching ignores heavy local folders so the preview server does not crawl giant generated/export/assets directories.
+
+### Frame-Aware Runtime Screens
+
+- Play mode and exported HTML now use the marked playable screen/cutout as the target area for runtime overlays.
+- Map, inventory, quest log, relationships/roster, almanac, crafting, needs, and skills overlays are intended to stay inside the frame cutout instead of covering the computer shell.
+- Dialogue runtime has global styling controls for placement, width, height, text size, choice size, portrait size, and typewriter speed.
+- Map location labels are hover-oriented and map icons can be made less visually dominant so they do not cover map points as aggressively.
+
+### Shell Buttons and HUD Commands
+
+- The frame/shell control editor can draw clickable regions over computer-frame icons and assign commands.
+- Shell button destinations include map, inventory, quests, relationships/roster, lore/almanac, crafting, settings, custom interface screens, needs HUD, and skills HUD.
+- New interaction types exist for `toggle_needs_hud` and `toggle_skills_hud`.
+- Exported HTML runtime handles the new needs/skills HUD toggles, not only the editor preview.
+- Play-mode HUD panels have more stable drag math and can be toggled independently from shell buttons or click responses.
+
+### Compose and Interface Studio
+
+- The Compose tab now has a single asset picker/popup path instead of separate redundant top-button and side-rail add-asset flows.
+- Asset slots across maps, cursors, item icons, portraits, HUD overlays, sounds, and videos use a more consistent mini-inspector with preview, type badge, Change, and Remove.
+- Interface Studio includes modular code-free layout templates such as popup panel, HUD strip, journal screen, and choice bar.
+- UI screen objects can be placed like other scene/UI elements, then connected to shell controls or object actions.
+- Object interaction authoring includes behavior recipes for common cases such as talk/roster, pickup item, use item on this, open inventory, start quest, and go to room.
+
+### Conversations
+
+- Dialogue trees support create, edit, and delete.
+- Dialogue nodes/choices can trigger story events, start quests, complete quests, complete quest steps, unlock/show almanac notes, give items, change scenes, grant skills, and adjust relationships.
+- Dialogue styling controls are visible from the conversation workspace instead of being hidden only in runtime code.
+- Runtime/export dialogue can now participate in quest-step and lore/journal progression instead of only branching text.
+
+### Quests and Events
+
+- Quests now have explicit steps/objectives rather than only whole-quest start/complete toggles.
+- Quest objectives can be completed by story events, dialogue choices, item/object interactions, scene travel, skills, or other linked targets.
+- Quest rewards can apply story flags, items, or stat/need changes.
+- The Story Event Board lists flags/events with reference counts for quest, dialogue, and object usage.
+- Story events are used as a shared glue layer for dialogue, quest steps, item investigations, visibility conditions, and unlocks.
+
+### Items and Crafting
+
+- Items support icons, categories, descriptions, use messages, use sounds, stat effects, consume-on-use, and behavior/crafting hooks.
+- Crafting recipes allow multiple required inventory items with consume toggles instead of only ingredient-style crafting.
+- Crafting outcomes can connect to result items and game-state effects.
+- Item use can participate in quest progress, story events, almanac unlocks, sound playback, and runtime overlays.
+
+### Skills and Needs
+
+- Skills and needs/meters have their own authoring workspace instead of being only buried inside individual objects.
+- Skills can be referenced by quest checks, dialogue outcomes, and crafting outcomes.
+- Needs/meters can be adjusted by items, dialogue, crafting, and other behaviors.
+- Needs and skills can be surfaced through shell-button HUD toggles in the player runtime.
+
+### Roster, Groups, and Relationships
+
+- Characters, former factions, companions, relationship stages, gift preferences, and follower behavior are consolidated into the Roster workspace.
+- Groups replace the old standalone faction page and can act as factions, families, villages, shops, teams, or any reputation bucket.
+- Groups track membership counts, reputation values/labels, unlock flags, rival groups, group type, and notes about what the group wants/guards/believes.
+- Character profiles include portrait, description, group membership, relationship track, relationship stages, gift preferences, and character-to-character ties.
+- Companion behavior is separated from automatic sprite placement; enabling companion behavior no longer has to force a follower sprite into the corner of the scene.
+- Character ties can represent broad relationship logic such as knows, family, rival, ally, mentor, debt, secret, or custom labels.
+
+### Almanac / Lore / Journal
+
+- Almanac entries can act as lore, journal entries, or quest notes.
+- Entries can be unlocked or shown from dialogue choices and behavior responses.
+- Exported runtime can display almanac/lore overlays from shell controls or click responses.
+
+## Still Rough / Needs Next Pass
+
+- The Behaviors tab still has too much vertical scrolling; Roster in particular has powerful fields but does not yet guide the user through worldbuilding cleanly.
+- The inspector remains overpacked for on-click logic. The long-term direction should be a larger modal/workspace for action sequences, conditions, and rewards.
+- The Story Event Board is functionally important but still too side-rail-heavy; flags/events should be clickable and editable in the main real estate.
+- HUD/interface building is improved, but dragging and assigning custom HUD pieces still needs a clearer template-and-lego workflow.
+- Exported HTML is more functional, but it still needs repeat smoke tests around every runtime overlay, shell control, and dialogue/quest/almanac interaction.
+- `npm run build` has recently stalled in Vite on this very large single-file app; the app should be split into smaller modules/components before relying on production builds.
+- The modular Neocities-ready directory exporter is still not complete; current export is still primarily a standalone HTML/runtime path plus cleaner JSON handoff.
+- Asset library scale is better, but a true indexed asset database or manifest-backed local/repo library is still needed for very large collections.
+
+---
+
 # 1. Main Hudbot / Cavebot
 
 ## Implemented

@@ -102,6 +102,8 @@ import { ImageEditorModal } from "./components/ImageEditorModal";
 import { exportToTwee, importFromTwee } from "./utils/twineAdapter";
 import { downloadJSON, downloadText, loadJSON, loadText } from "./utils/fileHelpers";
 import {
+  inferGitHubAssetIdSrc,
+  inferGitHubAssetSrc,
   prepareProjectForExport,
   stripDuplicatedAssetSources,
 } from "./utils/projectPersistence";
@@ -154,10 +156,28 @@ export interface SaveSlotMeta {
 }
 
 const PROJECT_STORAGE_KEY = "neocities_project";
+const PROJECT_ASSET_LIBRARY_STORAGE_KEY = `${PROJECT_STORAGE_KEY}_asset_library`;
 const SAVE_SLOTS_META_KEY = "neocities_project_slots_meta";
 const saveSlotStorageKey = (slotId: number) => `neocities_project_slot_${slotId}`;
 const DEFAULT_NEED_TRACKS = ["rest", "hunger", "connection", "spiritual", "novelty"];
 const DEFAULT_SKILL_TRACKS = ["naturalist", "occultist", "scribal"];
+const EXPORTABLE_BLEND_MODES: BlendMode[] = [
+  "normal",
+  "multiply",
+  "screen",
+  "overlay",
+  "darken",
+  "lighten",
+  "color-dodge",
+  "color-burn",
+  "hard-light",
+  "soft-light",
+];
+
+const normalizeBlendMode = (value?: string): BlendMode =>
+  EXPORTABLE_BLEND_MODES.includes(value as BlendMode)
+    ? (value as BlendMode)
+    : "normal";
 
 const defaultTrackDefinition = (
   id: string,
@@ -219,31 +239,87 @@ const getQuestObjectiveTargetLabel = (
   return objective.targetId;
 };
 
-const countStoryEventReferences = (project: Project, flag: string) => {
-  const questSteps = (project.quests || []).reduce((count, quest) => {
-    const matchingSteps = (quest.objectives || []).filter(
+const getStoryEventReferences = (project: Project, flag: string) => {
+  const questSteps = (project.quests || []).flatMap((quest) =>
+    (quest.objectives || [])
+      .filter(
       (objective) =>
         objective.type === "custom_flag" && objective.targetId === flag,
-    ).length;
-    const matchingRewards = (quest.rewards || []).filter(
-      (reward) => reward.type === "set_flag" && reward.targetId === flag,
-    ).length;
-    return count + matchingSteps + matchingRewards;
-  }, 0);
-  const dialogueHooks = (project.dialogueTrees || []).reduce(
-    (count, tree) =>
-      count +
-      (tree.nodes || []).reduce(
-        (nodeCount, node) =>
-          nodeCount +
-          (node.choices || []).filter(
-            (choice) => choice.setGameFlag === flag || choice.requiredGameFlag === flag,
-          ).length,
-        0,
-      ),
-    0,
+      )
+      .map((objective, index) => ({
+        questId: quest.id,
+        questName: quest.name,
+        stepName:
+          objective.description ||
+          `Step ${(quest.objectives || []).findIndex((o) => o.id === objective.id) + 1 || index + 1}`,
+      })),
   );
-  return { questSteps, dialogueHooks, total: questSteps + dialogueHooks };
+  const questRewards = (project.quests || []).flatMap((quest) =>
+    (quest.rewards || [])
+      .filter((reward) => reward.type === "set_flag" && reward.targetId === flag)
+      .map(() => ({
+        questId: quest.id,
+        questName: quest.name,
+      })),
+  );
+  const dialogueHooks = (project.dialogueTrees || []).flatMap((tree) =>
+    (tree.nodes || []).flatMap((node) =>
+      (node.choices || [])
+        .filter(
+          (choice) =>
+            choice.setGameFlag === flag || choice.requiredGameFlag === flag,
+        )
+        .map((choice) => ({
+          treeId: tree.id,
+          treeName: tree.name,
+          nodeSpeaker: node.speaker,
+          choiceText: choice.text,
+          mode: choice.setGameFlag === flag ? "sets" : "requires",
+        })),
+    ),
+  );
+  const objectHooks: Array<{
+    sceneId: string;
+    sceneName: string;
+    objectName: string;
+    action: string;
+  }> = [];
+  const flagInteractions = new Set(["set_flag", "clear_flag", "toggle_flag"]);
+  const scanObjects = (scene: Scene) => {
+    (scene.objects || []).forEach((object) => {
+      const actions = [
+        {
+          interaction: object.interaction,
+          interactionData: object.interactionData,
+        },
+        ...(object.clickResponses || []),
+      ];
+      actions.forEach((action) => {
+        if (
+          flagInteractions.has(action.interaction) &&
+          action.interactionData === flag
+        ) {
+          objectHooks.push({
+            sceneId: scene.id,
+            sceneName: scene.name,
+            objectName: object.name,
+            action: action.interaction,
+          });
+        }
+      });
+    });
+  };
+  (project.scenes || []).forEach(scanObjects);
+  (project.uiMenus || []).forEach(scanObjects);
+  return { questSteps, questRewards, dialogueHooks, objectHooks };
+};
+
+const countStoryEventReferences = (project: Project, flag: string) => {
+  const refs = getStoryEventReferences(project, flag);
+  const quest = refs.questSteps.length + refs.questRewards.length;
+  const dialogue = refs.dialogueHooks.length;
+  const object = refs.objectHooks.length;
+  return { quest, dialogue, object, total: quest + dialogue + object };
 };
 
 const getNeedTrackIds = (project: Project) =>
@@ -447,6 +523,172 @@ const normalizeImportedArray = (payload: any) =>
 
 export const DEFAULT_ASSETS: Asset[] = [];
 
+const getAssetDisplaySrc = (
+  asset?: Pick<Asset, "id" | "src" | "dataURL"> | null,
+) => asset?.src || asset?.dataURL || inferGitHubAssetIdSrc(asset?.id) || "";
+
+const normalizeAssetForRuntime = (asset: Asset): Asset => {
+  return asset;
+};
+
+const collectScenePreloadAssetValues = (project: Project) => {
+  const assetIds = new Set<string>();
+  const assetSources = new Set<string>();
+  const collectObject = (object: SceneObject) => {
+    [
+      object._assetId,
+      object.cursorAssetId,
+      object.scriptAssetId,
+      object.audioSrc,
+    ].forEach((value) => {
+      if (value) assetIds.add(value);
+    });
+    if (object.src) assetSources.add(object.src);
+    (object.clickResponses || []).forEach((response) => {
+      [response.scriptAssetId, response.playSoundAssetId].forEach((value) => {
+        if (value) assetIds.add(value);
+      });
+    });
+  };
+  [...(project.scenes || []), ...(project.uiMenus || [])].forEach((scene) => {
+    if (scene.bgmAssetId) assetIds.add(scene.bgmAssetId);
+    (scene.objects || []).forEach(collectObject);
+  });
+  [
+    project.globalSettings?.deviceFrame?.assetId,
+    project.globalSettings?.hudOverlay?.assetId,
+    project.globalSettings?.customCursorAssetId,
+  ].forEach((value) => {
+    if (value) assetIds.add(value);
+  });
+  return { assetIds, assetSources };
+};
+
+const stripAssetLibraryForAutosave = (project: Project): Project => {
+  const { assetIds, assetSources } = collectScenePreloadAssetValues(project);
+  const assets = (project.assets || [])
+    .filter(
+      (asset) =>
+        assetIds.has(asset.id) ||
+        assetSources.has(asset.src) ||
+        Boolean(asset.dataURL && assetSources.has(asset.dataURL)),
+    )
+    .map((asset) => normalizeAssetForRuntime(asset));
+  return {
+    ...project,
+    assets,
+  };
+};
+
+type PreloadEntry = {
+  src: string;
+  type: Asset["type"];
+};
+
+const detectPreloadType = (src: string, type: Asset["type"]): Asset["type"] => {
+  if (type === "audio" || type === "video" || type === "script") return type;
+  if (/\.(mp3|wav|ogg|m4a|aac)(?:[?#].*)?$/i.test(src)) return "audio";
+  if (/\.(mp4|webm|mov)(?:[?#].*)?$/i.test(src)) return "video";
+  if (/\.(js|ts)(?:[?#].*)?$/i.test(src)) return "script";
+  return type;
+};
+
+const collectScenePreloadEntries = (project: Project): PreloadEntry[] => {
+  const { assetIds, assetSources } = collectScenePreloadAssetValues(project);
+  const entriesBySrc = new Map<string, PreloadEntry>();
+  const addEntry = (src?: string | null, type: Asset["type"] = "image") => {
+    if (!src) return;
+    const trimmed = src.trim();
+    if (!trimmed || trimmed === "#") return;
+    entriesBySrc.set(trimmed, {
+      src: trimmed,
+      type: detectPreloadType(trimmed, type),
+    });
+  };
+
+  (project.assets || []).forEach((asset) => {
+    if (
+      assetIds.has(asset.id) ||
+      assetSources.has(asset.src) ||
+      Boolean(asset.dataURL && assetSources.has(asset.dataURL))
+    ) {
+      addEntry(getAssetDisplaySrc(asset), asset.type);
+    }
+  });
+  assetIds.forEach((assetId) => {
+    addEntry(inferGitHubAssetIdSrc(assetId), "image");
+  });
+  assetSources.forEach((src) => addEntry(src, "image"));
+
+  return Array.from(entriesBySrc.values());
+};
+
+const preloadAssetEntry = (entry: PreloadEntry): Promise<boolean> => {
+  if (typeof window === "undefined") return Promise.resolve(false);
+  const resolveSoon = () => new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 0));
+  const src = entry.src;
+  if (src.startsWith("data:")) {
+    if (entry.type === "audio" || entry.type === "video") return resolveSoon();
+  }
+  if (entry.type === "script") {
+    return fetch(src, { cache: "force-cache" })
+      .then((response) => response.ok)
+      .catch(() => false);
+  }
+  if (entry.type === "audio" || entry.type === "video") {
+    return new Promise((resolve) => {
+      const media =
+        entry.type === "audio"
+          ? document.createElement("audio")
+          : document.createElement("video");
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        media.removeAttribute("src");
+        media.load();
+        resolve(ok);
+      };
+      const timeout = window.setTimeout(() => finish(true), 8000);
+      media.preload = "auto";
+      media.onloadeddata = () => {
+        window.clearTimeout(timeout);
+        finish(true);
+      };
+      media.onerror = () => {
+        window.clearTimeout(timeout);
+        finish(false);
+      };
+      media.src = src;
+      media.load();
+    });
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    const timeout = window.setTimeout(() => finish(true), 8000);
+    img.decoding = "async";
+    img.onload = () => {
+      window.clearTimeout(timeout);
+      finish(true);
+    };
+    img.onerror = () => {
+      window.clearTimeout(timeout);
+      finish(false);
+    };
+    img.src = src;
+    if (img.complete) {
+      window.clearTimeout(timeout);
+      finish(true);
+    }
+  });
+};
+
 const App: React.FC = () => {
   const [project, setProject] = useState<Project>({
     id: uuidv4(),
@@ -493,6 +735,8 @@ const App: React.FC = () => {
     companions: [],
     characters: [],
   });
+  const lastAutosavedAssetsRef = useRef<Asset[] | null>(null);
+  const [hasLoadedStoredProject, setHasLoadedStoredProject] = useState(false);
 
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [selectedMultiIds, setSelectedMultiIds] = useState<string[]>([]);
@@ -524,6 +768,7 @@ const App: React.FC = () => {
   const [clipboard, setClipboard] = useState<SceneObject[]>([]);
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
   const [repositoryFolders, setRepositoryFolders] = useState<string[]>([]);
+  const [repositoryFetchStatus, setRepositoryFetchStatus] = useState("");
   const [loadedRepositoryFolders, setLoadedRepositoryFolders] = useState<
     string[]
   >([]);
@@ -539,6 +784,7 @@ const App: React.FC = () => {
   // RPG Systems State
   const [activeQuestId, setActiveQuestId] = useState<string | null>(null);
   const [activeCompanionId, setActiveCompanionId] = useState<string | null>(null);
+  const [activeStoryEvent, setActiveStoryEvent] = useState<string | null>(null);
   const [newEventText, setNewEventText] = useState("");
   const [newSkillText, setNewSkillText] = useState("");
   const [newNeedText, setNewNeedText] = useState("");
@@ -659,6 +905,11 @@ const App: React.FC = () => {
   const [activeRosterCharacterId, setActiveRosterCharacterId] = useState<
     string | null
   >(null);
+  const [activeRosterGroupId, setActiveRosterGroupId] = useState("all");
+  const [newRosterGroupText, setNewRosterGroupText] = useState("");
+  const [activeLoreEntryId, setActiveLoreEntryId] = useState<string | null>(
+    null,
+  );
   const [playerNeeds, setPlayerNeeds] = useState<Record<string, number>>(() => {
     const defNeeds: Record<string, number> = {};
     const cNeeds = ["rest", "hunger", "connection", "spiritual", "novelty"];
@@ -708,6 +959,7 @@ const App: React.FC = () => {
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">(
     "saved",
   );
+  const preloadedSceneAssetSrcsRef = useRef<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
@@ -739,6 +991,8 @@ const App: React.FC = () => {
   const [isAlmanacOpen, setIsAlmanacOpen] = useState(false);
   const [isRelationshipsOpen, setIsRelationshipsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isNeedsHudOpen, setIsNeedsHudOpen] = useState(true);
+  const [isSkillsHudOpen, setIsSkillsHudOpen] = useState(true);
   const [playerUiColor, setPlayerUiColor] = useState<string | null>(null);
 
   const [craftSlot1, setCraftSlot1] = useState<string | null>(null);
@@ -1023,31 +1277,40 @@ const App: React.FC = () => {
       }
     };
     collectReferencedValues(parsed);
-    const assets = (parsed.assets || []).filter((asset: Asset) => {
-      const isRepositoryAsset =
-        asset.id?.startsWith("github:") ||
+	    const assets = (parsed.assets || [])
+	      .map((asset: Asset) => normalizeAssetForRuntime(asset))
+	      .filter((asset: Asset) => {
+	      const isRepositoryAsset =
+	        asset.id?.startsWith("github:") ||
         asset.src?.includes(
           "raw.githubusercontent.com/thenabu222/entropic-ai/",
         );
       if (!isRepositoryAsset) return true;
       return (
         asset.isFavorite ||
-        referencedAssetValues.has(asset.id) ||
-        referencedAssetValues.has(asset.src)
-      );
-    });
-    return {
-      ...parsed,
-      prefabs: (parsed.prefabs || []).map((o: any) => {
-        if (o._assetId) {
-          const asset = assets.find((a: any) => a.id === o._assetId);
-          if (asset) return { ...o, src: asset.src };
-        }
-        return o;
-      }),
+	        referencedAssetValues.has(asset.id) ||
+	        referencedAssetValues.has(asset.src) ||
+	        referencedAssetValues.has(asset.dataURL || "")
+	      );
+	    });
+	    const hydrateObjectAsset = (o: any) => {
+	      if (o._assetId) {
+	        const asset = assets.find((a: any) => a.id === o._assetId);
+	        if (asset) return { ...o, src: getAssetDisplaySrc(asset) };
+	      }
+	      return o;
+	    };
+	    return {
+	      ...parsed,
+	      prefabs: (parsed.prefabs || []).map(hydrateObjectAsset),
       dialogueTrees: parsed.dialogueTrees
         ? parsed.dialogueTrees.map((t: any) => ({
             ...t,
+            startNodeId:
+              t.startNodeId &&
+              (t.nodes || []).some((n: any) => n.id === t.startNodeId)
+                ? t.startNodeId
+                : (t.nodes || [])[0]?.id || null,
             nodes: t.nodes
               ? t.nodes.map((n: any) => ({
                   ...n,
@@ -1061,25 +1324,13 @@ const App: React.FC = () => {
       scenes: parsed.scenes
         ? parsed.scenes.map((s: any) => ({
             ...s,
-            objects: (s.objects || []).map((o: any) => {
-              if (o._assetId) {
-                const asset = assets.find((a: any) => a.id === o._assetId);
-                if (asset) return { ...o, src: asset.src };
-              }
-              return o;
-            }),
+	            objects: (s.objects || []).map(hydrateObjectAsset),
           }))
         : [],
       uiMenus: parsed.uiMenus
         ? parsed.uiMenus.map((s: any) => ({
             ...s,
-            objects: (s.objects || []).map((o: any) => {
-              if (o._assetId) {
-                const asset = assets.find((a: any) => a.id === o._assetId);
-                if (asset) return { ...o, src: asset.src };
-              }
-              return o;
-            }),
+	            objects: (s.objects || []).map(hydrateObjectAsset),
           }))
         : [],
       maps: (parsed.maps || []).map((map: any, index: number) => ({
@@ -1143,9 +1394,18 @@ const App: React.FC = () => {
 
   const persistRestoredProject = async (restoredProject: Project) => {
     const strippedProject = stripDuplicatedAssetSources(restoredProject);
-    await set(PROJECT_STORAGE_KEY, strippedProject);
+    const autosaveProject = stripAssetLibraryForAutosave(strippedProject);
+    await set(PROJECT_STORAGE_KEY, autosaveProject);
+    await set(PROJECT_ASSET_LIBRARY_STORAGE_KEY, autosaveProject.assets || []);
+    lastAutosavedAssetsRef.current = autosaveProject.assets || [];
     try {
-      localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(strippedProject));
+      const serializedProject = JSON.stringify(autosaveProject);
+      if (serializedProject.length < 4_500_000) {
+        localStorage.setItem(PROJECT_STORAGE_KEY, serializedProject);
+      } else {
+        localStorage.removeItem(PROJECT_STORAGE_KEY);
+      }
+      localStorage.removeItem(PROJECT_ASSET_LIBRARY_STORAGE_KEY);
     } catch (storageErr) {
       console.warn("Could not mirror restored project to localStorage", storageErr);
     }
@@ -1222,6 +1482,30 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadProject = async () => {
       try {
+        const restoreFile = new URLSearchParams(window.location.search).get(
+          "restore",
+        );
+        if (restoreFile) {
+          const response = await fetch(`/${restoreFile}`, { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`Restore file failed to load: ${response.status}`);
+          }
+          const restoredFromFile = normalizeRestoredProject(
+            await response.json(),
+            project,
+          );
+          setProject(restoredFromFile);
+          await persistRestoredProject(restoredFromFile);
+          setHasLoadedStoredProject(true);
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname,
+          );
+          showError(`Imported ${restoreFile}.`);
+          return;
+        }
+
         let saved = await get(PROJECT_STORAGE_KEY);
         if (!saved) {
           const localSaved = localStorage.getItem(PROJECT_STORAGE_KEY);
@@ -1230,22 +1514,102 @@ const App: React.FC = () => {
           }
         }
         if (saved) {
-          setProject((prev) => normalizeRestoredProject(saved, prev));
+          const restoredShellAssets = Array.isArray(saved.assets)
+            ? saved.assets.map((asset: Asset) => normalizeAssetForRuntime(asset))
+            : [];
+          setProject((prev) =>
+            normalizeRestoredProject(
+              {
+                ...saved,
+                assets: restoredShellAssets,
+              },
+              prev,
+            ),
+          );
+          lastAutosavedAssetsRef.current = restoredShellAssets;
+          setHasLoadedStoredProject(true);
+        } else {
+          setHasLoadedStoredProject(true);
         }
       } catch (e) {
         console.error("Failed to load project", e);
+        setHasLoadedStoredProject(true);
       }
     };
     loadProject();
   }, []);
 
+  useEffect(() => {
+    if (!hasLoadedStoredProject) return;
+    const entries = collectScenePreloadEntries(project).filter(
+      (entry) => !preloadedSceneAssetSrcsRef.current.has(entry.src),
+    );
+    if (!entries.length) return;
+
+    let cancelled = false;
+    entries.forEach((entry) => preloadedSceneAssetSrcsRef.current.add(entry.src));
+
+    const preloadInBatches = async () => {
+      const batchSize = 12;
+      let failed = 0;
+      for (let index = 0; index < entries.length; index += batchSize) {
+        const batch = entries.slice(index, index + batchSize);
+        const results = await Promise.all(
+          batch.map((entry) =>
+            preloadAssetEntry(entry).then((ok) => ({ entry, ok })),
+          ),
+        );
+        if (cancelled) return;
+        results.forEach(({ entry, ok }) => {
+          if (!ok) {
+            failed += 1;
+            preloadedSceneAssetSrcsRef.current.delete(entry.src);
+          }
+        });
+      }
+      if (failed) {
+        console.warn(
+          `Cavebot preload skipped ${failed} scene asset${
+            failed === 1 ? "" : "s"
+          } that could not be reached.`,
+        );
+      } else {
+        console.info(
+          `Cavebot preloaded ${entries.length} scene asset${
+            entries.length === 1 ? "" : "s"
+          }.`,
+        );
+      }
+    };
+
+    void preloadInBatches();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    hasLoadedStoredProject,
+    project.assets,
+    project.scenes,
+    project.uiMenus,
+    project.globalSettings.customCursorAssetId,
+    project.globalSettings.deviceFrame?.assetId,
+    project.globalSettings.hudOverlay?.assetId,
+  ]);
+
   // Save to IndexedDB on change
   useEffect(() => {
+    if (!hasLoadedStoredProject) return;
     const saveProject = async () => {
       setSaveStatus("saving");
       try {
         const strippedProject = stripDuplicatedAssetSources(project);
-        await set(PROJECT_STORAGE_KEY, strippedProject);
+        const autosaveProject = stripAssetLibraryForAutosave(strippedProject);
+        await set(PROJECT_STORAGE_KEY, autosaveProject);
+        if (lastAutosavedAssetsRef.current !== autosaveProject.assets) {
+          await set(PROJECT_ASSET_LIBRARY_STORAGE_KEY, autosaveProject.assets || []);
+          localStorage.removeItem(PROJECT_ASSET_LIBRARY_STORAGE_KEY);
+          lastAutosavedAssetsRef.current = autosaveProject.assets || [];
+        }
         setSaveStatus("saved");
       } catch (e) {
         console.error("Failed to save project to IndexedDB", e);
@@ -1257,7 +1621,7 @@ const App: React.FC = () => {
     // Debounce save slightly to avoid thrashing
     const timeoutId = setTimeout(saveProject, 2000);
     return () => clearTimeout(timeoutId);
-  }, [project]);
+  }, [hasLoadedStoredProject, project]);
 
   const handleExportProject = (
     mode: "used" | "references" | "library" = "used",
@@ -1265,7 +1629,8 @@ const App: React.FC = () => {
     try {
       const strippedProject = prepareProjectForExport(project, {
         assetScope: mode === "library" ? "all" : "used",
-        includeEmbeddedAssetData: mode !== "references",
+        includeEmbeddedAssetData:
+          mode === "library" ? true : mode === "references" ? false : "fallback",
         keepFavoriteAssets: mode === "library",
       });
       const jsonStr = JSON.stringify(strippedProject);
@@ -1341,9 +1706,10 @@ const App: React.FC = () => {
       const audioAsset = project.assets.find(
         (a) => a.id === currentScene.bgmAssetId,
       );
-      if (audioAsset) {
+      const audioSrc = getAssetDisplaySrc(audioAsset);
+      if (audioAsset && audioSrc) {
         const mediaFragment = audioAsset.trimStart || audioAsset.trimEnd ? `#t=${audioAsset.trimStart || 0}${audioAsset.trimEnd ? ',' + audioAsset.trimEnd : ''}` : '';
-        const fullSrc = audioAsset.src + mediaFragment;
+        const fullSrc = audioSrc + mediaFragment;
         if (!bgmRef.current) {
           bgmRef.current = new Audio(fullSrc);
           bgmRef.current.loop = true;
@@ -1527,8 +1893,12 @@ const App: React.FC = () => {
   const [draggingHudWidget, setDraggingHudWidget] = useState<{
     key: HudPositionKey;
     pointerId: number;
-    offsetX: number;
-    offsetY: number;
+    startClientX: number;
+    startClientY: number;
+    startX: number;
+    startY: number;
+    width: number;
+    height: number;
   } | null>(null);
   type HudResizeState = {
     widget: HudWidgetId;
@@ -1605,11 +1975,17 @@ const App: React.FC = () => {
     const scaleY = logicalStageHeight / stageRect.height;
     const widgetX = (widgetRect.left - stageRect.left) * scaleX;
     const widgetY = (widgetRect.top - stageRect.top) * scaleY;
+    const widgetWidth = widgetRect.width * scaleX;
+    const widgetHeight = widgetRect.height * scaleY;
     setDraggingHudWidget({
       key,
       pointerId: event.pointerId,
-      offsetX: (event.clientX - stageRect.left) * scaleX - widgetX,
-      offsetY: (event.clientY - stageRect.top) * scaleY - widgetY,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startX: widgetX,
+      startY: widgetY,
+      width: widgetWidth,
+      height: widgetHeight,
     });
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -1630,21 +2006,18 @@ const App: React.FC = () => {
     const scaleX = logicalStageWidth / stageRect.width;
     const scaleY = logicalStageHeight / stageRect.height;
     const x =
-      (event.clientX - stageRect.left) * scaleX -
-      draggingHudWidget.offsetX;
+      draggingHudWidget.startX +
+      (event.clientX - draggingHudWidget.startClientX) * scaleX;
     const y =
-      (event.clientY - stageRect.top) * scaleY -
-      draggingHudWidget.offsetY;
-    const widgetRect = event.currentTarget.getBoundingClientRect();
-    const widgetWidth = widgetRect.width * scaleX;
-    const widgetHeight = widgetRect.height * scaleY;
+      draggingHudWidget.startY +
+      (event.clientY - draggingHudWidget.startClientY) * scaleY;
     const clampedX = Math.max(
       0,
-      Math.min(logicalStageWidth - widgetWidth, x),
+      Math.min(logicalStageWidth - draggingHudWidget.width, x),
     );
     const clampedY = Math.max(
       0,
-      Math.min(logicalStageHeight - widgetHeight, y),
+      Math.min(logicalStageHeight - draggingHudWidget.height, y),
     );
     setProject((current) => ({
       ...current,
@@ -1808,12 +2181,67 @@ const App: React.FC = () => {
     (o) => o.id === selectedObjectId,
   );
   const hasPlayableCursorAsset = (assetId?: string | null) =>
-    Boolean(assetId && project.assets.some((asset) => asset.id === assetId && asset.src));
+    Boolean(
+      assetId &&
+        project.assets.some(
+          (asset) => asset.id === assetId && getAssetDisplaySrc(asset),
+        ),
+    );
   const activeCursorAssetId =
     hoverCursorAssetId || project.globalSettings.customCursorAssetId || null;
   const activeCursorAsset = activeCursorAssetId
-    ? project.assets.find((asset) => asset.id === activeCursorAssetId && asset.src)
+    ? project.assets.find(
+        (asset) => asset.id === activeCursorAssetId && getAssetDisplaySrc(asset),
+      )
     : undefined;
+  const getObjectMediaSrc = (object: SceneObject) => {
+    const linkedAsset = object._assetId
+      ? project.assets.find((asset) => asset.id === object._assetId)
+      : undefined;
+    return (
+      getAssetDisplaySrc(linkedAsset) ||
+      inferGitHubAssetIdSrc(object._assetId) ||
+      object.src ||
+      ""
+    );
+  };
+  const renderObjectMedia = (
+    object: SceneObject,
+    className?: string,
+  ) => {
+    const mediaSrc = getObjectMediaSrc(object);
+    if (!mediaSrc) return null;
+    const objectFitClass =
+      object.objectFit === "contain"
+        ? "object-contain"
+        : object.objectFit === "cover"
+          ? "object-cover"
+          : "object-fill";
+    const mediaClassName =
+      className || `w-full h-full pointer-events-none ${objectFitClass}`;
+    const transform = `scaleX(${object.flipX ? -1 : 1}) scaleY(${
+      object.flipY ? -1 : 1
+    })`;
+    return object.isVideo ? (
+      <video
+        src={mediaSrc}
+        className={mediaClassName}
+        autoPlay
+        loop
+        muted={!isPlaying}
+        playsInline
+        style={{ transform }}
+      />
+    ) : (
+      <img
+        src={mediaSrc}
+        alt=""
+        className={mediaClassName}
+        draggable={false}
+        style={{ transform }}
+      />
+    );
+  };
 
   const updateScene = (updates: Partial<typeof currentScene>) => {
     if (!currentScene) return;
@@ -1928,10 +2356,10 @@ const App: React.FC = () => {
       }
     }
 
-    let actualSrc = asset.src || "";
-    if (asset.id && !asset.src) {
+    let actualSrc = getAssetDisplaySrc(asset);
+    if (asset.id && !actualSrc) {
       const matchedAsset = project.assets.find((a: any) => a.id === asset.id);
-      if (matchedAsset) actualSrc = matchedAsset.src;
+      if (matchedAsset) actualSrc = getAssetDisplaySrc(matchedAsset);
     }
 
     const currentArr = targetScene.objects || [];
@@ -2056,7 +2484,7 @@ const App: React.FC = () => {
     // We will retrieve the src later by using the asset.id from the project.assets list
     const transferPayload = {
       ...asset,
-      src: asset.id ? undefined : asset.src,
+      src: asset.id ? undefined : getAssetDisplaySrc(asset),
     };
     e.dataTransfer.setData("application/json", JSON.stringify(transferPayload));
   };
@@ -2226,7 +2654,7 @@ const App: React.FC = () => {
           ({ asset, width, height }, index) => ({
             id: uuidv4(),
             name: asset.name,
-            src: asset.src,
+            src: getAssetDisplaySrc(asset),
             _assetId: asset.id,
             x: Math.max(0, x - width / 2 + index * 22),
             y: Math.max(0, y - height / 2 + index * 22),
@@ -2336,12 +2764,12 @@ const App: React.FC = () => {
           }
         }
 
-        let actualSrc = asset.src || "";
-        if (asset.id && !asset.src) {
+        let actualSrc = getAssetDisplaySrc(asset);
+        if (asset.id && !actualSrc) {
           const matchedAsset = project.assets.find(
             (a: any) => a.id === asset.id,
           );
-          if (matchedAsset) actualSrc = matchedAsset.src;
+          if (matchedAsset) actualSrc = getAssetDisplaySrc(matchedAsset);
         }
 
         const newObj: SceneObject = {
@@ -3172,6 +3600,8 @@ const App: React.FC = () => {
       );
       setCompletedQuests([]);
       setTriggeredResponseIds(new Set());
+      setIsNeedsHudOpen(true);
+      setIsSkillsHudOpen(true);
       const defaultFactions: Record<string, number> = {};
       (project.factions || []).forEach((faction) => {
         defaultFactions[faction.id] = faction.defaultAffinity ?? 0;
@@ -3220,14 +3650,73 @@ const App: React.FC = () => {
   };
 
   const CAVEBOT_ASSET_ROOT = "assets/_cavebot-assets";
+  const REPOSITORY_MEDIA_EXTENSION =
+    /\.(png|jpe?g|gif|webp|svg|mp3|wav|ogg|m4a|mp4|webm|js|ts)$/i;
+  const normalizeRepoFileMatchName = (value?: string | null) =>
+    (value || "")
+      .trim()
+      .replace(/^.*\//, "")
+      .replace(
+        /^(.+?\.(?:png|jpe?g|gif|webp|svg|mp3|wav|ogg|m4a|mp4|webm|js|ts))(?:_crop.*)?$/i,
+        "$1",
+      )
+      .toLowerCase();
+  const normalizeRepoFileMatchStem = (value?: string | null) =>
+    normalizeRepoFileMatchName(value).replace(REPOSITORY_MEDIA_EXTENSION, "");
+  const createRepositoryAsset = (file: {
+    name?: string;
+    path: string;
+    download_url?: string;
+  }): Asset => {
+    const name = file.name || file.path.split("/").pop() || file.path;
+    const relativePath = file.path.startsWith(CAVEBOT_ASSET_ROOT)
+      ? file.path.slice(CAVEBOT_ASSET_ROOT.length).replace(/^\/+/, "")
+      : file.path.replace(/^assets\/?/, "");
+    const parts = relativePath.split("/");
+    parts.pop();
+    const category = parts.length > 0 ? parts.join("/") : "root";
+    const encodedPath = file.path
+      .split("/")
+      .map((p: string) => encodeURIComponent(p))
+      .join("/");
+    const isScript = file.path.match(/\.(js|ts)$/i);
+    const isAudio = file.path.match(/\.(mp3|wav|ogg|m4a)$/i);
+    const isVideo = file.path.match(/\.(mp4|webm)$/i);
+
+    return {
+      id: `github:${file.path}`,
+      type: isScript
+        ? "script"
+        : isAudio
+          ? "audio"
+          : isVideo
+            ? "video"
+            : "image",
+      category,
+      src:
+        file.download_url ||
+        `https://raw.githubusercontent.com/thenabu222/entropic-ai/main/${encodedPath}`,
+      name,
+    };
+  };
 
   const fetchFromGitHub = async (folderPath = "", force = false) => {
     const relativeFolder = folderPath
       .split("/")
       .filter((part) => part && part !== "." && part !== "..")
       .join("/");
-    if (!force && loadedRepositoryFolders.includes(relativeFolder)) return;
+    if (!force && loadedRepositoryFolders.includes(relativeFolder)) {
+      setRepositoryFetchStatus(
+        relativeFolder
+          ? `Already loaded ${relativeFolder}.`
+          : "Repo root already loaded.",
+      );
+      return;
+    }
     setIsFetchingGithub(true);
+    setRepositoryFetchStatus(
+      relativeFolder ? `Loading ${relativeFolder}…` : "Loading repo files…",
+    );
     try {
       const headers: HeadersInit = {};
       if (import.meta.env.VITE_GITHUB_TOKEN) {
@@ -3268,43 +3757,61 @@ const App: React.FC = () => {
         (file: any) =>
           file.type === "file" &&
           file.path &&
-          file.path.match(
-            /\.(png|jpg|jpeg|gif|webp|svg|mp3|wav|ogg|m4a|mp4|webm|js|ts)$/i,
-          ),
+          file.path.match(REPOSITORY_MEDIA_EXTENSION),
       );
 
-      const newAssets: Asset[] = validFiles.map((file: any) => {
-        const name = file.name || file.path.split("/").pop();
-        const relativePath = file.path
-          .slice(CAVEBOT_ASSET_ROOT.length)
-          .replace(/^\/+/, "");
-        const parts = relativePath.split("/");
-        parts.pop();
-        const category = parts.length > 0 ? parts.join("/") : "root";
-        const encodedPath = file.path
-          .split("/")
-          .map((p: string) => encodeURIComponent(p))
-          .join("/");
-        const isScript = file.path.match(/\.(js|ts)$/i);
-        const isAudio = file.path.match(/\.(mp3|wav|ogg|m4a)$/i);
-        const isVideo = file.path.match(/\.(mp4|webm)$/i);
-
-        return {
-          id: `github:${file.path}`,
-          type: isScript
-            ? "script"
-            : isAudio
-              ? "audio"
-              : isVideo
-                ? "video"
-                : "image",
-          category,
-          src:
-            file.download_url ||
-            `https://raw.githubusercontent.com/thenabu222/entropic-ai/main/${encodedPath}`,
-          name: name,
-        };
+      const visibleScenes = [...(project.scenes || []), ...(project.uiMenus || [])];
+      const orphanNames = new Set<string>();
+      const orphanStems = new Set<string>();
+      visibleScenes.forEach((scene) => {
+        (scene.objects || []).forEach((obj) => {
+          if (!obj._assetId || obj.src || obj.isText || obj.isHitbox || obj.isUiElement) {
+            return;
+          }
+          const name = normalizeRepoFileMatchName(obj.name);
+          const stem = normalizeRepoFileMatchStem(obj.name);
+          if (name) orphanNames.add(name);
+          if (stem) orphanStems.add(stem);
+        });
       });
+
+      let recoveredAssets: Asset[] = [];
+      if (orphanNames.size > 0 || orphanStems.size > 0) {
+        try {
+          const treeResponse = await fetch(
+            "https://api.github.com/repos/thenabu222/entropic-ai/git/trees/main?recursive=1",
+            { headers },
+          );
+          if (treeResponse.ok) {
+            const treeData = await treeResponse.json();
+            const treeFiles = Array.isArray(treeData.tree) ? treeData.tree : [];
+            recoveredAssets = treeFiles
+              .filter(
+                (file: any) =>
+                  file.type === "blob" &&
+                  typeof file.path === "string" &&
+                  file.path.startsWith("assets/") &&
+                  file.path.match(REPOSITORY_MEDIA_EXTENSION),
+              )
+              .filter((file: any) => {
+                const name = normalizeRepoFileMatchName(file.path);
+                const stem = normalizeRepoFileMatchStem(file.path);
+                return orphanNames.has(name) || orphanStems.has(stem);
+              })
+              .map((file: any) => createRepositoryAsset({ path: file.path }));
+          }
+        } catch (recoveryError) {
+          console.warn("Repository relink scan failed", recoveryError);
+        }
+      }
+
+      const newAssets: Asset[] = Array.from(
+        new Map(
+          [...validFiles.map((file: any) => createRepositoryAsset(file)), ...recoveredAssets].map(
+            (asset) => [asset.id, asset],
+          ),
+        ).values(),
+      );
 
       setProject((p) => {
         let updatedAssets = [...p.assets];
@@ -3327,16 +3834,37 @@ const App: React.FC = () => {
               ...newA,
             };
           } else {
-            updatedAssets.push(newA);
+            updatedAssets = [newA, ...updatedAssets];
           }
         });
+        const updatedAssetsById = new Map(
+          updatedAssets.map((asset) => [asset.id, asset]),
+        );
+        const newAssetsByName = new Map(
+          newAssets
+            .map((asset) => [normalizeRepoFileMatchName(asset.name), asset] as const)
+            .filter(([name]) => Boolean(name)),
+        );
 
         const migrateObjects = (scenes: Scene[]) => {
           return scenes.map((scene) => ({
             ...scene,
             objects: scene.objects.map((obj) => {
               const updatedSrc = srcReplacements.get(obj.src);
-              return updatedSrc ? { ...obj, src: updatedSrc } : obj;
+              if (updatedSrc) return { ...obj, src: updatedSrc };
+              const hasLiveAsset =
+                obj._assetId && updatedAssetsById.has(obj._assetId);
+              if (hasLiveAsset || obj.src || !obj._assetId) return obj;
+              const nameMatchedAsset = newAssetsByName.get(
+                normalizeRepoFileMatchName(obj.name),
+              );
+              return nameMatchedAsset
+                ? {
+                    ...obj,
+                    _assetId: nameMatchedAsset.id,
+                    src: nameMatchedAsset.src,
+                  }
+                : obj;
             }),
           }));
         };
@@ -3351,8 +3879,25 @@ const App: React.FC = () => {
       setLoadedRepositoryFolders((current) =>
         Array.from(new Set([...current, relativeFolder])),
       );
+      setRepositoryFetchStatus(
+        `${relativeFolder || "Repo root"}: ${validFiles.length} file${
+          validFiles.length === 1 ? "" : "s"
+        }, ${discoveredFolders.length} folder${
+          discoveredFolders.length === 1 ? "" : "s"
+        }${recoveredAssets.length ? `, ${recoveredAssets.length} relinked` : ""}.`,
+      );
+      showError(
+        `${relativeFolder || "Repo root"} loaded: ${validFiles.length} file${
+          validFiles.length === 1 ? "" : "s"
+        }, ${discoveredFolders.length} folder${
+          discoveredFolders.length === 1 ? "" : "s"
+        }.`,
+      );
     } catch (error: any) {
       console.error("GitHub fetch failed", error);
+      setRepositoryFetchStatus(
+        `Repo load failed: ${error.message || "Network Error"}.`,
+      );
       showError(
         `Failed to open repo folder: ${error.message || "Network Error"}.`,
       );
@@ -3400,7 +3945,7 @@ const App: React.FC = () => {
           const newWidth = document.body.clientWidth - e.clientX;
           if (newWidth < 120) return 0;
           if (w === 0 && newWidth > 30) return 288;
-          return Math.max(0, Math.min(520, newWidth));
+          return Math.max(0, Math.min(760, newWidth));
         });
       }
     };
@@ -3581,12 +4126,13 @@ const App: React.FC = () => {
 
     if (obj.audioSrc) {
       const audioAsset = project.assets.find((a) => a.id === obj.audioSrc);
-      if (audioAsset) {
+      const audioSrc = getAssetDisplaySrc(audioAsset);
+      if (audioAsset && audioSrc) {
         const mediaFragment =
           audioAsset.trimStart || audioAsset.trimEnd
             ? `#t=${audioAsset.trimStart || 0}${audioAsset.trimEnd ? `,${audioAsset.trimEnd}` : ""}`
             : "";
-        const audio = new Audio(audioAsset.src + mediaFragment);
+        const audio = new Audio(audioSrc + mediaFragment);
         audio.volume = Math.min(1, audioAsset.volume ?? 1);
         audio.play().catch((e) => console.error("SFX playback failed", e));
       }
@@ -3692,7 +4238,11 @@ const App: React.FC = () => {
         const tree = project.dialogueTrees.find(
           (t) => t.id === obj.dialogueTreeId,
         );
-        if (tree && tree.startNodeId) {
+        const startNodeId =
+          tree && tree.nodes.some((node) => node.id === tree.startNodeId)
+            ? tree.startNodeId
+            : tree?.nodes[0]?.id || null;
+        if (tree && startNodeId) {
           setPlayerTalkCounts((prev) => ({
             ...prev,
             [tree.id]: (prev[tree.id] || 0) + 1,
@@ -3703,7 +4253,7 @@ const App: React.FC = () => {
               : [...prev, `talked_${tree.id}`],
           );
           setPreviewDialogue(null);
-          setActiveDialogue({ treeId: tree.id, nodeId: tree.startNodeId });
+          setActiveDialogue({ treeId: tree.id, nodeId: startNodeId });
         }
       } else if (obj.interactionData) {
         setPreviewDialogue(obj.interactionData);
@@ -3792,6 +4342,28 @@ const App: React.FC = () => {
       }
     } else if (obj.interaction === "toggle_inventory") {
       togglePlayOverlay("inventory");
+    } else if (obj.interaction === "toggle_needs_hud") {
+      if (!project.globalSettings.enableNeeds) {
+        setPreviewDialogue("Needs HUD is not enabled for this game.");
+      } else {
+        if (hideEditorHud || !isNeedsHudOpen) {
+          setHideEditorHud(false);
+          setIsNeedsHudOpen(true);
+        } else {
+          setIsNeedsHudOpen(false);
+        }
+      }
+    } else if (obj.interaction === "toggle_skills_hud") {
+      if (!project.globalSettings.enableTTRPGStats) {
+        setPreviewDialogue("Skills HUD is not enabled for this game.");
+      } else {
+        if (hideEditorHud || !isSkillsHudOpen) {
+          setHideEditorHud(false);
+          setIsSkillsHudOpen(true);
+        } else {
+          setIsSkillsHudOpen(false);
+        }
+      }
     } else if (obj.interaction === "restart_scene") {
       setPreviewDialogue("");
       setPlayerInventory([]);
@@ -3818,6 +4390,8 @@ const App: React.FC = () => {
       setIsRelationshipsOpen(false);
       setIsSettingsOpen(false);
       setIsMapOpen(false);
+      setIsNeedsHudOpen(true);
+      setIsSkillsHudOpen(true);
       const firstScene = (project.scenes && project.scenes[0]) || null;
       if (firstScene) {
         setProject((p) => ({ ...p, currentSceneId: firstScene.id }));
@@ -4040,9 +4614,10 @@ const App: React.FC = () => {
       const audioAsset = project.assets.find(
         (a) => a.id === obj.interactionData,
       );
-      if (audioAsset) {
+      const audioSrc = getAssetDisplaySrc(audioAsset);
+      if (audioAsset && audioSrc) {
         const mediaFragment = audioAsset.trimStart || audioAsset.trimEnd ? `#t=${audioAsset.trimStart || 0}${audioAsset.trimEnd ? ',' + audioAsset.trimEnd : ''}` : '';
-        const audio = new Audio(audioAsset.src + mediaFragment);
+        const audio = new Audio(audioSrc + mediaFragment);
         audio.volume = Math.min(1, audioAsset.volume ?? 1);
         audio.play().catch((e) => console.error("SFX playback failed", e));
       }
@@ -4050,8 +4625,9 @@ const App: React.FC = () => {
       const scriptAsset = project.assets.find(
         (a) => a.id === obj.scriptAssetId,
       );
-      if (scriptAsset && scriptAsset.src) {
-        fetch(scriptAsset.src)
+      const scriptSrc = getAssetDisplaySrc(scriptAsset);
+      if (scriptAsset && scriptSrc) {
+        fetch(scriptSrc)
           .then((res) => res.text())
           .then((code) => {
             try {
@@ -4078,9 +4654,10 @@ const App: React.FC = () => {
       const videoAsset = project.assets.find(
         (a) => a.id === obj.interactionData,
       );
-      if (videoAsset) {
+      const videoSrc = getAssetDisplaySrc(videoAsset);
+      if (videoAsset && videoSrc) {
         setActiveCutscene({
-          src: videoAsset.src,
+          src: videoSrc,
           targetSceneId: obj.scriptAssetId || undefined,
         });
       }
@@ -4233,7 +4810,7 @@ const App: React.FC = () => {
   };
 
   const usedAssetSrcs = new Set(
-    project.scenes.flatMap((s) => s.objects.map((o) => o.src)),
+    project.scenes.flatMap((s) => s.objects.map((o) => o.src).filter(Boolean)),
   );
   const uiBg = project.globalSettings.uiColorBackground || "#08060d";
   const uiPrimary =
@@ -4266,6 +4843,7 @@ const App: React.FC = () => {
   const hudOverlayAsset = hudOverlay?.assetId
     ? project.assets.find((asset) => asset.id === hudOverlay.assetId)
     : undefined;
+  const hudOverlaySrc = getAssetDisplaySrc(hudOverlayAsset);
   const getHudOverlayStyle = (): React.CSSProperties => {
     const position = hudOverlay?.position || "stretch";
     const legacySize = (hudOverlay?.scale ?? 1) * 100;
@@ -4309,8 +4887,8 @@ const App: React.FC = () => {
             height: `${heightPercent}%`,
             ...anchors[position],
           }),
-      backgroundImage: hudOverlayAsset
-        ? `url('${hudOverlayAsset.src}')`
+      backgroundImage: hudOverlaySrc
+        ? `url('${hudOverlaySrc}')`
         : undefined,
       backgroundSize:
         hudOverlay?.fit === "contain" ? "contain" : "100% 100%",
@@ -4325,9 +4903,11 @@ const App: React.FC = () => {
   const deviceFrameAsset = deviceFrame
     ? project.assets.find((asset) => asset.id === deviceFrame.assetId)
     : undefined;
+  const deviceFrameSrc = getAssetDisplaySrc(deviceFrameAsset);
   const showDeviceFrame = !!(
     deviceFrame &&
     deviceFrameAsset &&
+    deviceFrameSrc &&
     (isPlaying || editorMode === "stage" || editorMode === "ui_stage")
   );
   const coordinateScene =
@@ -4651,6 +5231,112 @@ const App: React.FC = () => {
     setEditorMode("ui_stage");
   };
 
+  const openEditableHudOverlayScreen = (assetId?: string) => {
+    const resolvedAssetId = assetId || project.globalSettings.hudOverlay?.assetId;
+    if (!resolvedAssetId) {
+      setAssetPickerCb({
+        filterType: "image",
+        onSelect: (id) => {
+          setAssetPickerCb(null);
+          openEditableHudOverlayScreen(id);
+        },
+      });
+      return;
+    }
+
+    const asset = project.assets.find((candidate) => candidate.id === resolvedAssetId);
+    if (!asset) {
+      showError("Choose an overlay image first.");
+      return;
+    }
+
+    const existingEditableMenu = (project.uiMenus || []).find(
+      (menu) =>
+        menu.name === "Editable HUD Overlay" ||
+        menu.objects.some(
+          (object) =>
+            object.name === "HUD Overlay Artwork" &&
+            object._assetId === resolvedAssetId,
+        ),
+    );
+    if (existingEditableMenu) {
+      pushHistory({
+        ...project,
+        currentUiMenuId: existingEditableMenu.id,
+      });
+      setEditorMode("ui_stage");
+      setHideEditorHud(false);
+      setSelectedObjectId(
+        existingEditableMenu.objects.find(
+          (object) => object.name === "HUD Overlay Artwork",
+        )?.id || null,
+      );
+      showError("Opened the editable HUD overlay screen.");
+      return;
+    }
+
+    const menuId = uuidv4();
+    const stageW = logicalStageWidth || project.globalSettings.stageWidth || 800;
+    const stageH = logicalStageHeight || project.globalSettings.stageHeight || 600;
+    const overlay = project.globalSettings.hudOverlay || {};
+    const overlayObject: SceneObject = {
+      id: uuidv4(),
+      name: "HUD Overlay Artwork",
+      src: getAssetDisplaySrc(asset),
+      _assetId: asset.id,
+      x: 0,
+      y: 0,
+      width: stageW,
+      height: stageH,
+      rotation: 0,
+      zIndex: 0,
+      opacity: overlay.opacity ?? 1,
+      locked: true,
+      cursor: "default",
+      animation: "none",
+      interaction: "none",
+      isVideo: false,
+      isHitbox: false,
+      isScript: false,
+      isText: false,
+      isUiElement: false,
+      blendMode: normalizeBlendMode(overlay.blendMode),
+      parallaxSpeed: 1,
+      hasPhysics: false,
+      ignoreClicks: true,
+      stretchToScreen: true,
+      objectFit: overlay.fit === "contain" ? "contain" : "fill",
+    };
+    const newMenu: Scene = {
+      id: menuId,
+      name: "Editable HUD Overlay",
+      width: stageW,
+      height: stageH,
+      backgroundColor: "transparent",
+      objects: [overlayObject],
+      blocksClicks: false,
+      isOpenByDefault: true,
+      closeOnClickOutside: false,
+    };
+
+    pushHistory({
+      ...project,
+      uiMenus: [...(project.uiMenus || []), newMenu],
+      currentUiMenuId: menuId,
+      globalSettings: {
+        ...project.globalSettings,
+        hudOverlay: {
+          ...project.globalSettings.hudOverlay,
+          assetId: undefined,
+        },
+      },
+    });
+    setEditorMode("ui_stage");
+    setHideEditorHud(false);
+    setSelectedObjectId(overlayObject.id);
+    showError("Overlay artwork is now an editable HUD screen. Drop buttons, text, images, and widgets on top of it.");
+  };
+
   const createInterfaceTemplate = (
     template: "modal" | "hud" | "journal" | "choiceBar",
   ) => {
@@ -4810,6 +5496,11 @@ const App: React.FC = () => {
       uiMenus: [...(project.uiMenus || []), newMenu],
       currentUiMenuId: menuId,
     });
+    if (template === "hud") {
+      setHideEditorHud(false);
+      setIsHudPlacementMode(true);
+      setSelectedHudWidget("buttons");
+    }
     setEditorMode("ui_stage");
   };
 
@@ -5532,11 +6223,11 @@ const App: React.FC = () => {
               )
             }
             className="studio-theme-button flex items-center gap-1 px-3 py-1.5 text-sm font-bold transition-colors"
-            title={`Switch to ${studioTheme === "sunny" ? "Midnight" : "Sunny"} mode`}
+            title={`Current mode: ${studioTheme === "sunny" ? "Sunny" : "Midnight"}. Click to switch to ${studioTheme === "sunny" ? "Midnight" : "Sunny"}.`}
           >
-            {studioTheme === "sunny" ? <Moon size={16} /> : <Sun size={16} />}
+            {studioTheme === "sunny" ? <Sun size={16} /> : <Moon size={16} />}
             <span className="hidden lg:inline">
-              {studioTheme === "sunny" ? "Midnight" : "Sunny"}
+              {studioTheme === "sunny" ? "Sunny" : "Midnight"}
             </span>
           </button>
 
@@ -5715,6 +6406,36 @@ const App: React.FC = () => {
                           <FolderOpen size={14} /> Repo files
                         </button>
                       </div>
+                      {(repositoryFetchStatus || repositoryFolders.length > 0) && (
+                        <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/5 p-2">
+                          {repositoryFetchStatus && (
+                            <div className="text-[11px] font-bold text-cyan-100">
+                              {repositoryFetchStatus}
+                            </div>
+                          )}
+                          {repositoryFolders.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {repositoryFolders.slice(0, 18).map((folder) => (
+                                <button
+                                  key={folder}
+                                  type="button"
+                                  onClick={() => fetchFromGitHub(folder, true)}
+                                  disabled={isFetchingGithub}
+                                  className="rounded border border-cyan-300/25 bg-neutral-950 px-2 py-1 text-[10px] font-bold text-cyan-100 hover:border-cyan-200 disabled:opacity-50"
+                                  title={`Load ${folder}`}
+                                >
+                                  {folder.split("/").pop()}
+                                </button>
+                              ))}
+                              {repositoryFolders.length > 18 && (
+                                <span className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[10px] font-bold text-neutral-400">
+                                  +{repositoryFolders.length - 18} more
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="flex gap-2">
                         <label className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded border border-yellow-400/45 bg-yellow-500/10 px-2 py-2 text-sm font-bold text-yellow-100 hover:bg-yellow-500/20">
                           <FolderOpen size={14} /> Add folder
@@ -6285,6 +7006,19 @@ const App: React.FC = () => {
                       <span>{hideEditorHud ? "HUD: Hidden" : "HUD: Visible"}</span>
                     </button>
 
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHideEditorHud(false);
+                        setEditorMode("ui_maker");
+                      }}
+                      className="flex items-center gap-1.5 rounded-md border border-cyan-300/45 bg-cyan-400/10 px-3 py-1.5 text-xs font-bold text-cyan-100 transition-all hover:bg-cyan-400/20"
+                      title="Open the HUD and interface builder"
+                    >
+                      <LayoutTemplate size={14} />
+                      <span>HUD Builder</span>
+                    </button>
+
                     {!hideEditorHud && (
                       <button
                         type="button"
@@ -6366,7 +7100,7 @@ const App: React.FC = () => {
                               !deviceFrame ||
                               !deviceFrameAsset ||
                               (obj._assetId !== deviceFrame.assetId &&
-                                obj.src !== deviceFrameAsset.src),
+                                obj.src !== deviceFrameSrc),
                           )
                           .sort((a, b) => a.zIndex - b.zIndex)
                           .map((obj) => (
@@ -6384,17 +7118,10 @@ const App: React.FC = () => {
                               {!obj.isUiElement &&
                                 !obj.isHitbox &&
                                 !obj.isText &&
-                                (obj.isVideo ? (
-                                  <video
-                                    src={obj.src || undefined}
-                                    className="w-full h-full object-fill opacity-50 pointer-events-none"
-                                  />
-                                ) : (
-                                  <img
-                                    src={obj.src || undefined}
-                                    className="w-full h-full object-fill opacity-50 pointer-events-none"
-                                  />
-                                ))}
+                                renderObjectMedia(
+                                  obj,
+                                  "w-full h-full object-fill opacity-50 pointer-events-none",
+                                )}
                             </div>
                           ))}
                       </div>
@@ -7231,29 +7958,7 @@ const App: React.FC = () => {
                                 !obj.isScript &&
                                 !obj.isText &&
                                 !obj.isUiElement &&
-                                (obj.isVideo ? (
-                                  <video
-                                    src={obj.src || undefined}
-                                    className={`w-full h-full pointer-events-none ${obj.objectFit === "contain" ? "object-contain" : obj.objectFit === "cover" ? "object-cover" : "object-fill"}`}
-                                    autoPlay
-                                    loop
-                                    muted={!isPlaying}
-                                    playsInline
-                                    style={{
-                                      transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
-                                    }}
-                                  />
-                                ) : (
-                                  <img
-                                    src={obj.src || undefined}
-                                    alt={obj.name}
-                                    className={`w-full h-full pointer-events-none ${obj.objectFit === "contain" ? "object-contain" : obj.objectFit === "cover" ? "object-cover" : "object-fill"}`}
-                                    draggable={false}
-                                    style={{
-                                      transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
-                                    }}
-                                  />
-                                ))}
+                                renderObjectMedia(obj)}
                               {obj.isText &&
                                 (() => {
                                   const txtBaseStyle: React.CSSProperties = {
@@ -7466,13 +8171,12 @@ const App: React.FC = () => {
                               transform: `rotate(${obj.rotation}deg)`,
                             }}
                           >
-                            {!!obj.src && !obj.isHitbox && !obj.isText && (
-                              <img
-                                src={obj.src}
-                                alt=""
-                                className="h-full w-full object-contain opacity-60"
-                              />
-                            )}
+                            {!obj.isHitbox &&
+                              !obj.isText &&
+                              renderObjectMedia(
+                                obj,
+                                "h-full w-full object-contain opacity-60 pointer-events-none",
+                              )}
                             <span className="absolute -top-5 left-0 text-[8px] text-emerald-200 bg-neutral-950/90 px-1 rounded truncate max-w-full">
                               UI preview · {obj.name}
                             </span>
@@ -7986,29 +8690,7 @@ const App: React.FC = () => {
                                   !obj.isScript &&
                                   !obj.isText &&
                                   !obj.isUiElement &&
-                                  (obj.isVideo ? (
-                                    <video
-                                      src={obj.src || undefined}
-                                      className={`w-full h-full pointer-events-none ${obj.objectFit === "contain" ? "object-contain" : obj.objectFit === "cover" ? "object-cover" : "object-fill"}`}
-                                      autoPlay
-                                      loop
-                                      muted={!isPlaying}
-                                      playsInline
-                                      style={{
-                                        transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
-                                      }}
-                                    />
-                                  ) : (
-                                    <img
-                                      src={obj.src || undefined}
-                                      alt={obj.name}
-                                      className={`w-full h-full pointer-events-none ${obj.objectFit === "contain" ? "object-contain" : obj.objectFit === "cover" ? "object-cover" : "object-fill"}`}
-                                      draggable={false}
-                                      style={{
-                                        transform: `scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1})`,
-                                      }}
-                                    />
-                                  ))}
+                                  renderObjectMedia(obj)}
                                 {obj.isText &&
                                   (() => {
                                     const txtBaseStyle: React.CSSProperties = {
@@ -8508,9 +9190,10 @@ const App: React.FC = () => {
                                       const sound = project.assets.find(
                                         (a) => a.id === choice.playSoundAssetId,
                                       );
-                                      if (sound) {
+                                      const soundSrc = getAssetDisplaySrc(sound);
+                                      if (sound && soundSrc) {
                                         const mediaFragment = sound.trimStart || sound.trimEnd ? `#t=${sound.trimStart || 0}${sound.trimEnd ? ',' + sound.trimEnd : ''}` : '';
-                                        const audio = new Audio(sound.src + mediaFragment);
+                                        const audio = new Audio(soundSrc + mediaFragment);
                                         audio.volume = sound.volume ?? 1;
                                         audio.play().catch((e) => console.error(e));
                                       }
@@ -8638,7 +9321,9 @@ const App: React.FC = () => {
                   !["dialogue", "items", "scenes"].includes(editorMode)) && (
                   <>
                     {/* Needs Tracker */}
-                    {project.globalSettings.enableNeeds && !hideEditorHud && (
+                    {project.globalSettings.enableNeeds &&
+                      !hideEditorHud &&
+                      isNeedsHudOpen && (
                       <div
                         onClick={() => {
                           if (didDragRef.current) return;
@@ -8751,7 +9436,9 @@ const App: React.FC = () => {
                     )}
  
                     {/* Skills Tracker */}
-                    {project.globalSettings.enableTTRPGStats && !hideEditorHud && (
+                    {project.globalSettings.enableTTRPGStats &&
+                      !hideEditorHud &&
+                      isSkillsHudOpen && (
                       <div
                         onClick={() => {
                           if (didDragRef.current) return;
@@ -8782,7 +9469,8 @@ const App: React.FC = () => {
                             : {
                                 right:
                                   project.globalSettings.enableNeeds &&
-                                  !hideEditorHud
+                                  !hideEditorHud &&
+                                  isNeedsHudOpen
                                     ? "180px"
                                     : "16px",
                               }),
@@ -9497,9 +10185,11 @@ const App: React.FC = () => {
                                                       a.id ===
                                                       item.useSoundAssetId,
                                                   );
-                                                if (sound) {
+                                                const soundSrc =
+                                                  getAssetDisplaySrc(sound);
+                                                if (sound && soundSrc) {
                                                   const mediaFragment = sound.trimStart || sound.trimEnd ? `#t=${sound.trimStart || 0}${sound.trimEnd ? ',' + sound.trimEnd : ''}` : '';
-                                                  const audio = new Audio(sound.src + mediaFragment);
+                                                  const audio = new Audio(soundSrc + mediaFragment);
                                                   audio.volume = sound.volume ?? 1;
                                                   audio
                                                     .play()
@@ -9813,10 +10503,11 @@ const App: React.FC = () => {
                                   const stageLabel = activeStage?.label ?? "Unknown";
                                   const stageColor = activeStage?.color ?? uiPrimary;
                                   const portrait = char.portraitAssetId ? project.assets.find((a) => a.id === char.portraitAssetId) : null;
+                                  const portraitSrc = getAssetDisplaySrc(portrait);
                                   return (
                                     <div key={char.id} className="bg-black/20 p-3 rounded border flex gap-3 items-center" style={{ borderColor: `${uiPrimary}20` }}>
-                                      {portrait && (
-                                        <img src={portrait.src} className="w-10 h-10 rounded object-cover shrink-0" alt="" />
+                                      {portraitSrc && (
+                                        <img src={portraitSrc} className="w-10 h-10 rounded object-cover shrink-0" alt="" />
                                       )}
                                       <div className="flex-1 min-w-0">
                                         <div className="flex justify-between items-center">
@@ -10627,7 +11318,7 @@ const App: React.FC = () => {
                 {showDeviceFrame && (
                   <DeviceFrameOverlay
                     calibration={deviceFrame!}
-                    imageSrc={deviceFrameAsset!.src}
+                    imageSrc={deviceFrameSrc}
                     className="pointer-events-none z-[4000]"
                     screenInset={deviceFramePlayInset}
                   />
@@ -10891,7 +11582,7 @@ const App: React.FC = () => {
               className={`studio-inspector flex-shrink-0 bg-neutral-900 border-l border-neutral-800 flex flex-col z-20 relative ${rightSidebarWidth === 0 ? "hidden" : ""}`}
               style={{
                 width: rightSidebarWidth,
-                maxWidth: "min(420px, 42vw)",
+                maxWidth: "min(760px, 62vw)",
                 minWidth: rightSidebarWidth === 0 ? 0 : 300,
               }}
             >
@@ -11327,6 +12018,36 @@ const App: React.FC = () => {
                         <FolderOpen size={14} /> Repo files
                       </button>
                     </div>
+                    {(repositoryFetchStatus || repositoryFolders.length > 0) && (
+                      <div className="rounded-lg border border-[#00ffcc]/15 bg-[#00ffcc]/5 p-2">
+                        {repositoryFetchStatus && (
+                          <div className="text-[10px] font-bold text-[#00ffcc]">
+                            {repositoryFetchStatus}
+                          </div>
+                        )}
+                        {repositoryFolders.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {repositoryFolders.slice(0, 12).map((folder) => (
+                              <button
+                                key={folder}
+                                type="button"
+                                onClick={() => fetchFromGitHub(folder, true)}
+                                disabled={isFetchingGithub}
+                                className="rounded border border-[#00ffcc]/20 bg-neutral-950 px-1.5 py-1 text-[9px] font-bold text-[#00ffcc] hover:border-[#00ffcc]/60 disabled:opacity-50"
+                                title={`Load ${folder}`}
+                              >
+                                {folder.split("/").pop()}
+                              </button>
+                            ))}
+                            {repositoryFolders.length > 12 && (
+                              <span className="rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-[9px] font-bold text-neutral-400">
+                                +{repositoryFolders.length - 12}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="relative">
                       <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-500" />
                       <input
@@ -12164,10 +12885,10 @@ const App: React.FC = () => {
                               </p>
                             </div>
 
-                            {deviceFrame && deviceFrameAsset ? (
+                            {deviceFrame && deviceFrameAsset && deviceFrameSrc ? (
                               <div className="flex items-center gap-3 rounded border border-emerald-500/25 bg-emerald-500/5 p-2">
                                 <img
-                                  src={deviceFrameAsset.src}
+                                  src={deviceFrameSrc}
                                   alt=""
                                   className="h-16 w-20 rounded border border-neutral-700 bg-black object-contain"
                                 />
@@ -12315,7 +13036,7 @@ const App: React.FC = () => {
                                 </div>
                                 <DeviceFrameOverlay
                                   calibration={deviceFrame}
-                                  imageSrc={deviceFrameAsset.src}
+                                  imageSrc={deviceFrameSrc}
                                   className="pointer-events-none"
                                 />
                               </div>
@@ -12335,8 +13056,15 @@ const App: React.FC = () => {
                             </p>
                             <button
                               type="button"
+                              onClick={() => openEditableHudOverlayScreen()}
+                              className="my-1 w-full rounded border border-emerald-300/45 bg-emerald-400/10 px-3 py-2 font-comic text-xs font-bold text-emerald-100 hover:bg-emerald-400/20"
+                            >
+                              Build on overlay image →
+                            </button>
+                            <button
+                              type="button"
                               onClick={openScreenControlsEditor}
-                              className="my-1 w-full rounded border border-pink-400/40 bg-pink-500/10 px-3 py-2 font-comic text-xs font-bold text-pink-300 hover:bg-pink-500/20"
+                              className="mb-1 w-full rounded border border-pink-400/40 bg-pink-500/10 px-3 py-2 font-comic text-xs font-bold text-pink-300 hover:bg-pink-500/20"
                             >
                               Place clickable screen controls →
                             </button>
@@ -12965,16 +13693,29 @@ const App: React.FC = () => {
                           {!selectedObject.isHitbox && !selectedObject.isText && !selectedObject.isScript && (
                             <AssetInspectorSlot
                               label="Object asset"
-                              asset={project.assets.find(a => a.src === selectedObject.src) || null}
+                              asset={
+                                project.assets.find(
+                                  (a) =>
+                                    a.id === selectedObject._assetId ||
+                                    getAssetDisplaySrc(a) === selectedObject.src,
+                                ) || null
+                              }
                               emptyLabel="No asset assigned"
                               chooseLabel="Choose asset"
-                              previewShape={project.assets.find(a => a.src === selectedObject.src)?.type === 'video' ? 'wide' : 'square'}
+                              previewShape={
+                                project.assets.find(
+                                  (a) =>
+                                    a.id === selectedObject._assetId ||
+                                    getAssetDisplaySrc(a) === selectedObject.src,
+                                )?.type === 'video' ? 'wide' : 'square'
+                              }
                               onChoose={() => setAssetPickerCb({
                                 filterType: undefined,
                                 onSelect: (id) => {
                                   const asset = project.assets.find(a => a.id === id);
                                   if (asset) updateObject(selectedObject.id, {
-                                    src: asset.src,
+                                    src: getAssetDisplaySrc(asset),
+                                    _assetId: asset.id,
                                     ...(selectedObject.isUiElement ? {} : { width: asset.type === 'video' ? 320 : 100, height: asset.type === 'video' ? 180 : 100 }),
                                   });
                                   setAssetPickerCb(null);
@@ -14166,11 +14907,13 @@ const App: React.FC = () => {
                               !selectedObject.isScript && (
                                 <button
                                   onClick={() =>
-                                    setEditingAssetId(
-                                      project.assets.find(
-                                        (a) => a.src === selectedObject.src,
-                                      )?.id || null,
-                                    )
+	                                    setEditingAssetId(
+	                                      project.assets.find(
+	                                        (a) =>
+	                                          a.id === selectedObject._assetId ||
+	                                          getAssetDisplaySrc(a) === selectedObject.src,
+	                                      )?.id || null,
+	                                    )
                                   }
                                   className="text-sm bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded hover:bg-emerald-500/30 flex items-center gap-1 font-bold"
                                   title="Open Image Editor to remove background, crop, or recolor"
@@ -14968,6 +15711,8 @@ const App: React.FC = () => {
                                   <option value="open_ui">Open Screen UI</option>
                                   <option value="close_ui">Close Screen UI</option>
                                   <option value="toggle_inventory">Toggle Built-in Inventory</option>
+                                  <option value="toggle_needs_hud">Toggle Needs HUD</option>
+                                  <option value="toggle_skills_hud">Toggle Skills HUD</option>
                                   <option value="open_skills">Open Skills Menu</option>
                                   <option value="open_settings">Open Player Settings</option>
                                   <option value="gift_item">Give Selected Item to Character</option>
@@ -15628,12 +16373,13 @@ const App: React.FC = () => {
                                             name:
                                               selectedObject.name || "New Item",
                                             description: "",
-                                            iconAssetId: selectedObject.src
-                                              ? project.assets.find(
-                                                  (a) =>
-                                                    a.src === selectedObject.src,
-                                                )?.id || null
-                                              : null,
+	                                            iconAssetId: selectedObject.src
+	                                              ? project.assets.find(
+	                                                  (a) =>
+	                                                    a.id === selectedObject._assetId ||
+	                                                    getAssetDisplaySrc(a) === selectedObject.src,
+	                                                )?.id || null
+	                                              : null,
                                             collectionCategory: "Scene pickups",
                                           };
                                           const isUI = editorMode === "ui_stage";
@@ -17885,6 +18631,13 @@ const App: React.FC = () => {
                     </button>
                     <button
                       type="button"
+                      onClick={() => openEditableHudOverlayScreen()}
+                      className="rounded-xl border border-emerald-300/45 bg-emerald-400/10 px-3 py-2 font-comic text-sm font-bold text-emerald-100 hover:bg-emerald-400/20"
+                    >
+                      Build on overlay image
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => {
                         setEditorMode("stage");
                         setHideEditorHud(false);
@@ -18180,14 +18933,14 @@ const App: React.FC = () => {
             />
 
             <div
-              className={`studio-page-content flex-1 gap-6 overflow-hidden p-6 ${
+              className={`studio-page-content behavior-page-content flex-1 gap-6 overflow-hidden p-6 ${
                 worldRulesUsesDetailPane
                   ? "flex"
                   : "overflow-y-auto custom-scrollbar"
               }`}
             >
               <div
-                className={`studio-rail relative flex flex-col gap-4 overflow-y-auto custom-scrollbar ${
+                className={`studio-rail behavior-tab-body relative flex flex-col gap-4 overflow-y-auto custom-scrollbar ${
                   !worldRulesUsesDetailPane
                     ? "w-full min-w-0 overflow-visible px-0"
                     : "flex-shrink-0 border-r border-neutral-800 pr-6"
@@ -18198,7 +18951,7 @@ const App: React.FC = () => {
                     : undefined
                 }
               >
-                {worldRulesUsesDetailPane && rpgTab !== "companions" && (
+                {worldRulesUsesDetailPane && (rpgTab as string) !== "companions" && (
                   <div
                     className="absolute top-0 bottom-0 -right-[3px] w-[6px] cursor-col-resize z-[100] hover:bg-emerald-500/50"
                     onPointerDown={() =>
@@ -18308,6 +19061,8 @@ const App: React.FC = () => {
                                   newEventText.trim(),
                                 ],
                               });
+                              setActiveStoryEvent(newEventText.trim());
+                              setActiveQuestId(null);
                               setNewEventText("");
                             }
                           }}
@@ -18328,7 +19083,24 @@ const App: React.FC = () => {
                           return (
                             <div
                               key={flag}
-                              className="rounded border border-neutral-800 bg-neutral-900 p-3 text-sm text-neutral-200"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => {
+                                setActiveStoryEvent(flag);
+                                setActiveQuestId(null);
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  setActiveStoryEvent(flag);
+                                  setActiveQuestId(null);
+                                }
+                              }}
+                              className={`cursor-pointer rounded border p-3 text-sm transition-all ${
+                                activeStoryEvent === flag
+                                  ? "border-emerald-300 bg-emerald-500/15 text-emerald-100"
+                                  : "border-neutral-800 bg-neutral-900 text-neutral-200 hover:border-emerald-400/40 hover:bg-neutral-800"
+                              }`}
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
@@ -18337,13 +19109,15 @@ const App: React.FC = () => {
                                   </div>
                                   <div className="mt-1 text-xs text-neutral-500">
                                     {eventUses.total} links ·{" "}
-                                    {eventUses.questSteps} quest ·{" "}
-                                    {eventUses.dialogueHooks} dialogue
+                                    {eventUses.quest} quest ·{" "}
+                                    {eventUses.dialogue} dialogue ·{" "}
+                                    {eventUses.object} object
                                   </div>
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => {
+                                  onClick={(event) => {
+                                    event.stopPropagation();
                                     const currentFlags = Array.isArray(
                                       project.gameFlags,
                                     )
@@ -18355,6 +19129,9 @@ const App: React.FC = () => {
                                         (f) => f !== flag,
                                       ),
                                     });
+                                    if (activeStoryEvent === flag) {
+                                      setActiveStoryEvent(null);
+                                    }
                                   }}
                                   className="text-red-400 hover:text-red-300"
                                   aria-label={`Delete ${flag}`}
@@ -18378,9 +19155,9 @@ const App: React.FC = () => {
                   </>
                 )}
 
-                {rpgTab === "stats" && (
-                  <div className="grid gap-5 xl:grid-cols-2">
-                    <div className="rounded-lg border border-emerald-400/20 bg-neutral-900 p-5">
+                {(rpgTab as string) === "stats" && (
+                  <div className="behavior-section-grid grid gap-5 xl:grid-cols-2">
+                    <div className="behavior-editor-panel rounded-lg border border-emerald-400/20 bg-neutral-900 p-5">
                       <div className="mb-4 flex items-center gap-2 text-emerald-300">
                         <Zap size={18} />
                         <h2 className="text-xl font-bold">Skills</h2>
@@ -18629,7 +19406,7 @@ const App: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="rounded-lg border border-pink-400/20 bg-neutral-900 p-5">
+                    <div className="behavior-editor-panel rounded-lg border border-pink-400/20 bg-neutral-900 p-5">
                       <div className="mb-4 flex items-center gap-2 text-pink-300">
                         <Activity size={18} />
                         <h2 className="text-xl font-bold">Needs & Meters</h2>
@@ -18873,7 +19650,89 @@ const App: React.FC = () => {
                   </div>
                 )}
 
-                {rpgTab === "characters" && (
+                {rpgTab === "characters" &&
+                  (() => {
+                    const characters = project.characters || [];
+                    const groups = project.factions || [];
+                    const totalTies = characters.reduce(
+                      (total, character) =>
+                        total + (character.relationships || []).length,
+                      0,
+                    );
+                    const activeGroup = groups.find(
+                      (group) => group.id === activeRosterGroupId,
+                    );
+                    const visibleCharacters = characters.filter((character) => {
+                      if (activeRosterGroupId === "all") return true;
+                      if (activeRosterGroupId === "ungrouped") {
+                        return !character.factionId;
+                      }
+                      return character.factionId === activeRosterGroupId;
+                    });
+                    const selectedCharacterId =
+                      activeRosterCharacterId &&
+                      characters.some(
+                        (character) => character.id === activeRosterCharacterId,
+                      )
+                        ? activeRosterCharacterId
+                        : visibleCharacters[0]?.id || characters[0]?.id || null;
+                    const selectRosterGroup = (groupId: string) => {
+                      const matchingCharacters = characters.filter((character) => {
+                        if (groupId === "all") return true;
+                        if (groupId === "ungrouped") return !character.factionId;
+                        return character.factionId === groupId;
+                      });
+                      setActiveRosterGroupId(groupId);
+                      setActiveRosterCharacterId(
+                        matchingCharacters[0]?.id || characters[0]?.id || null,
+                      );
+                    };
+                    const addRosterCharacter = () => {
+                      const newChar: Character = {
+                        id: uuidv4(),
+                        name: "New Character",
+                        description: "",
+                        factionId:
+                          activeRosterGroupId !== "all" &&
+                          activeRosterGroupId !== "ungrouped"
+                            ? activeRosterGroupId
+                            : undefined,
+                        relationshipTrackName: "Affinity",
+                        defaultAffinity: 0,
+                        thresholds: [
+                          { value: -100, label: "Hostile", color: "#ef4444" },
+                          { value: -30, label: "Unfriendly", color: "#f97316" },
+                          { value: -10, label: "Wary", color: "#eab308" },
+                          { value: 10, label: "Neutral", color: "#9ca3af" },
+                          { value: 30, label: "Friendly", color: "#22c55e" },
+                          { value: 60, label: "Trusted", color: "#00ffcc" },
+                        ],
+                        giftPreferences: [],
+                      };
+                      setProject((p) => ({
+                        ...p,
+                        characters: [...(p.characters || []), newChar],
+                      }));
+                      setActiveRosterCharacterId(newChar.id);
+                    };
+                    const createRosterGroup = () => {
+                      const name = newRosterGroupText.trim() || "New Group";
+                      const newFaction: Faction = {
+                        id: uuidv4(),
+                        name,
+                        description: "",
+                        defaultAffinity: 0,
+                        role: "faction",
+                        reputationLabel: "Reputation",
+                      };
+                      pushHistory({
+                        ...project,
+                        factions: [...groups, newFaction],
+                      });
+                      setNewRosterGroupText("");
+                      setActiveRosterGroupId(newFaction.id);
+                    };
+                    return (
                   <>
                     <div className="mt-8 flex items-center justify-between mb-2">
                       <div>
@@ -18884,35 +19743,301 @@ const App: React.FC = () => {
                       </div>
                       <button
                         className="rounded border border-cyan-400/50 bg-cyan-500/10 px-3 py-1.5 font-comic text-xs font-bold text-cyan-200 hover:bg-cyan-500/20"
-                        onClick={() => {
-                          const newChar: Character = {
-                            id: uuidv4(),
-                            name: "New Character",
-                            description: "",
-                            relationshipTrackName: "Affinity",
-                            defaultAffinity: 0,
-                            thresholds: [
-                              { value: -100, label: "Hostile", color: "#ef4444" },
-                              { value: -30, label: "Unfriendly", color: "#f97316" },
-                              { value: -10, label: "Wary", color: "#eab308" },
-                              { value: 10, label: "Neutral", color: "#9ca3af" },
-                              { value: 30, label: "Friendly", color: "#22c55e" },
-                              { value: 60, label: "Trusted", color: "#00ffcc" },
-                            ],
-                            giftPreferences: [],
-                          };
-	                          setProject((p) => ({
-	                            ...p,
-	                            characters: [...(p.characters || []), newChar],
-	                          }));
-	                          setActiveRosterCharacterId(newChar.id);
-	                        }}
+                        onClick={addRosterCharacter}
 	                      >
                         + Add Character
                       </button>
                     </div>
 
-                    <div className="rounded-lg border border-amber-400/20 bg-amber-500/5 p-4">
+                    <div className="behavior-library-layout roster-behavior-layout">
+                      <aside className="behavior-library-rail roster-library-rail">
+                        <div className="behavior-rail-header">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <h3 className="font-comic text-base font-bold text-cyan-200">
+                                Roster Library
+                              </h3>
+                              <p className="text-xs text-neutral-500">
+                                Filter people by group, then edit one profile.
+                              </p>
+                            </div>
+                            <div className="grid grid-cols-3 gap-1 text-center text-[9px] uppercase tracking-wide text-neutral-500">
+                              <span className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1">
+                                <b className="block text-sm text-cyan-100">
+                                  {characters.length}
+                                </b>
+                                People
+                              </span>
+                              <span className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1">
+                                <b className="block text-sm text-amber-100">
+                                  {groups.length}
+                                </b>
+                                Groups
+                              </span>
+                              <span className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1">
+                                <b className="block text-sm text-pink-100">
+                                  {totalTies}
+                                </b>
+                                Ties
+                              </span>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid grid-cols-[minmax(0,1fr)_2.25rem] gap-2">
+                            <input
+                              value={newRosterGroupText}
+                              onChange={(e) => setNewRosterGroupText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") createRosterGroup();
+                              }}
+                              className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-200 outline-none focus:border-amber-400"
+                              placeholder="New group..."
+                            />
+                            <button
+                              type="button"
+                              onClick={createRosterGroup}
+                              className="rounded border border-amber-400/50 bg-amber-500/20 px-2 font-comic text-sm font-bold text-amber-100 hover:bg-amber-500/30"
+                              title="Create group"
+                            >
+                              +
+                            </button>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-1">
+                            <button
+                              type="button"
+                              onClick={() => selectRosterGroup("all")}
+                              className={`rounded border px-2 py-1 text-[10px] font-bold uppercase ${
+                                activeRosterGroupId === "all"
+                                  ? "border-cyan-300 bg-cyan-400/20 text-cyan-100"
+                                  : "border-neutral-800 bg-neutral-950 text-neutral-400 hover:border-cyan-400/50"
+                              }`}
+                            >
+                              All
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => selectRosterGroup("ungrouped")}
+                              className={`rounded border px-2 py-1 text-[10px] font-bold uppercase ${
+                                activeRosterGroupId === "ungrouped"
+                                  ? "border-cyan-300 bg-cyan-400/20 text-cyan-100"
+                                  : "border-neutral-800 bg-neutral-950 text-neutral-400 hover:border-cyan-400/50"
+                              }`}
+                            >
+                              Ungrouped
+                            </button>
+                            {groups.map((group) => {
+                              const memberCount = characters.filter(
+                                (character) => character.factionId === group.id,
+                              ).length;
+                              return (
+                                <button
+                                  key={group.id}
+                                  type="button"
+                                  onClick={() => selectRosterGroup(group.id)}
+                                  className={`rounded border px-2 py-1 text-[10px] font-bold uppercase ${
+                                    activeRosterGroupId === group.id
+                                      ? "border-amber-300 bg-amber-400/20 text-amber-100"
+                                      : "border-neutral-800 bg-neutral-950 text-neutral-400 hover:border-amber-400/50"
+                                  }`}
+                                  title={`${memberCount} ${memberCount === 1 ? "member" : "members"}`}
+                                >
+                                  {group.name || "Group"} · {memberCount}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <div className="behavior-rail-list">
+                          <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                            {activeGroup
+                              ? activeGroup.name
+                              : activeRosterGroupId === "ungrouped"
+                                ? "Ungrouped"
+                                : "All characters"}
+                          </div>
+                          {visibleCharacters.map((character) => {
+                            const portrait = character.portraitAssetId
+                              ? project.assets.find(
+                                  (asset) => asset.id === character.portraitAssetId,
+                                )
+                              : null;
+                            const group = character.factionId
+                              ? groups.find(
+                                  (faction) => faction.id === character.factionId,
+                                )
+                              : null;
+                            const tieCount = (character.relationships || []).length;
+                            const follower = (project.companions || []).some(
+                              (companion) => companion.characterId === character.id,
+                            );
+                            const portraitSrc = getAssetDisplaySrc(portrait);
+                            return (
+                              <button
+                                key={character.id}
+                                type="button"
+                                onClick={() => setActiveRosterCharacterId(character.id)}
+                                className={`behavior-rail-item roster-rail-character ${
+                                  character.id === selectedCharacterId ? "is-active" : ""
+                                }`}
+                              >
+                                <span className="flex min-w-0 items-center gap-3">
+                                  <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center overflow-hidden rounded border border-neutral-700 bg-neutral-950">
+                                    {portraitSrc ? (
+                                      <img
+                                        src={portraitSrc}
+                                        alt=""
+                                        className="h-full w-full object-cover"
+                                      />
+                                    ) : (
+                                      <Users size={17} className="text-neutral-500" />
+                                    )}
+                                  </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate font-comic text-sm font-bold text-cyan-100">
+                                      {character.name || "Unnamed character"}
+                                    </span>
+                                    <span className="block truncate text-[11px] text-neutral-400">
+                                      {group?.name || "No group"}
+                                    </span>
+                                    <span className="mt-1 flex flex-wrap gap-1 text-[9px] font-bold uppercase tracking-wide">
+                                      <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-neutral-300">
+                                        {tieCount} {tieCount === 1 ? "tie" : "ties"}
+                                      </span>
+                                      {follower && (
+                                        <span className="rounded bg-amber-400/15 px-1.5 py-0.5 text-amber-200">
+                                          Follower
+                                        </span>
+                                      )}
+                                    </span>
+                                  </span>
+                                </span>
+                              </button>
+                            );
+                          })}
+                          {visibleCharacters.length === 0 && (
+                            <div className="rounded border border-dashed border-neutral-800 p-3 text-xs italic text-neutral-500">
+                              No characters in this group yet.
+                            </div>
+                          )}
+                        </div>
+                      </aside>
+
+                      <div className="behavior-main-editor roster-inspector-pane">
+                        {activeGroup && (
+                          <details className="behavior-editor-panel mb-3 rounded-lg border border-amber-400/20 bg-amber-500/5">
+                            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-bold text-amber-200 hover:bg-amber-500/10">
+                              <span className="font-comic text-base">
+                                Group Inspector: {activeGroup.name || "Group"}
+                              </span>
+                              <span className="rounded border border-amber-400/20 bg-neutral-950 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400">
+                                {
+                                  characters.filter(
+                                    (character) =>
+                                      character.factionId === activeGroup.id,
+                                  ).length
+                                }{" "}
+                                members
+                              </span>
+                            </summary>
+                            <div className="grid gap-2 border-t border-amber-400/10 p-4 md:grid-cols-2">
+                              <input
+                                type="text"
+                                value={activeGroup.name}
+                                onChange={(e) => {
+                                  const updated = groups.map((group) =>
+                                    group.id === activeGroup.id
+                                      ? { ...group, name: e.target.value }
+                                      : group,
+                                  );
+                                  pushHistory({ ...project, factions: updated });
+                                }}
+                                className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm font-bold text-white outline-none focus:border-amber-400"
+                                placeholder="Group name"
+                              />
+                              <input
+                                type="text"
+                                value={activeGroup.reputationLabel || ""}
+                                onChange={(e) => {
+                                  const updated = groups.map((group) =>
+                                    group.id === activeGroup.id
+                                      ? {
+                                          ...group,
+                                          reputationLabel: e.target.value,
+                                        }
+                                      : group,
+                                  );
+                                  pushHistory({ ...project, factions: updated });
+                                }}
+                                className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-200 outline-none focus:border-amber-400"
+                                placeholder="Reputation label"
+                              />
+                              <select
+                                value={activeGroup.role || "faction"}
+                                onChange={(e) => {
+                                  const updated = groups.map((group) =>
+                                    group.id === activeGroup.id
+                                      ? {
+                                          ...group,
+                                          role: e.target.value as Faction["role"],
+                                        }
+                                      : group,
+                                  );
+                                  pushHistory({ ...project, factions: updated });
+                                }}
+                                className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-200 outline-none focus:border-amber-400"
+                              >
+                                <option value="faction">Faction</option>
+                                <option value="family">Family</option>
+                                <option value="guild">Guild</option>
+                                <option value="village">Village</option>
+                                <option value="shop">Shop</option>
+                                <option value="species">Species</option>
+                                <option value="team">Team</option>
+                                <option value="other">Other</option>
+                              </select>
+                              <input
+                                type="number"
+                                value={activeGroup.defaultAffinity}
+                                onChange={(e) => {
+                                  const updated = groups.map((group) =>
+                                    group.id === activeGroup.id
+                                      ? {
+                                          ...group,
+                                          defaultAffinity: Number(e.target.value),
+                                        }
+                                      : group,
+                                  );
+                                  pushHistory({ ...project, factions: updated });
+                                }}
+                                className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-200 outline-none focus:border-amber-400"
+                                title="Default affinity"
+                              />
+                              <textarea
+                                value={activeGroup.description || ""}
+                                onChange={(e) => {
+                                  const updated = groups.map((group) =>
+                                    group.id === activeGroup.id
+                                      ? { ...group, description: e.target.value }
+                                      : group,
+                                  );
+                                  pushHistory({ ...project, factions: updated });
+                                }}
+                                className="min-h-16 rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-300 outline-none focus:border-amber-400 md:col-span-2"
+                                placeholder="What does this group want, guard, sell, or believe?"
+                              />
+                            </div>
+                          </details>
+                        )}
+
+                    {false && (
+                    <details className="hidden behavior-editor-panel rounded-lg border border-amber-400/20 bg-amber-500/5">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-bold text-amber-200 hover:bg-amber-500/10">
+                        <span className="font-comic text-lg">Groups</span>
+                        <span className="rounded border border-amber-400/20 bg-neutral-950 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400">
+                          {(project.factions || []).length} groups ·{" "}
+                          {(project.characters || []).length} people
+                        </span>
+                      </summary>
+                      <div className="max-h-[16rem] overflow-y-auto border-t border-amber-400/10 p-4 custom-scrollbar">
                       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                         <div>
                           <h3 className="font-comic text-lg font-bold text-amber-300">
@@ -19137,7 +20262,9 @@ const App: React.FC = () => {
                           </div>
                         )}
                       </div>
-                    </div>
+                      </div>
+                    </details>
+                    )}
 
 	                    {(project.characters || []).length === 0 && (
 	                      <p className="text-neutral-500 italic text-sm py-4">
@@ -19145,8 +20272,8 @@ const App: React.FC = () => {
 	                      </p>
 	                    )}
 
-	                    {(project.characters || []).length > 0 && (
-	                      <div className="rounded-lg border border-cyan-400/20 bg-cyan-500/5 p-3">
+	                    {false && (project.characters || []).length > 0 && (
+	                      <div className="hidden behavior-editor-panel rounded-lg border border-cyan-400/20 bg-cyan-500/5 p-3">
 	                        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
 	                          <div>
 	                            <h3 className="font-comic text-lg font-bold text-cyan-200">
@@ -19181,7 +20308,7 @@ const App: React.FC = () => {
 	                            </div>
 	                          </div>
 	                        </div>
-	                        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+	                        <div className="grid max-h-[18rem] gap-2 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 custom-scrollbar">
 	                          {(project.characters || []).map((character) => {
 	                            const portrait = character.portraitAssetId
 	                              ? project.assets.find((asset) => asset.id === character.portraitAssetId)
@@ -19199,6 +20326,7 @@ const App: React.FC = () => {
 	                            const follower = (project.companions || []).some(
 	                              (companion) => companion.characterId === character.id,
 	                            );
+	                            const portraitSrc = getAssetDisplaySrc(portrait);
 	                            return (
 	                              <button
 	                                key={character.id}
@@ -19211,9 +20339,9 @@ const App: React.FC = () => {
 	                                }`}
 	                              >
 	                                <span className="flex h-12 w-12 items-center justify-center overflow-hidden rounded border border-neutral-700 bg-neutral-900">
-	                                  {portrait?.src ? (
+	                                  {portraitSrc ? (
 	                                    <img
-	                                      src={portrait.src}
+	                                      src={portraitSrc}
 	                                      alt=""
 	                                      className="h-full w-full object-cover"
 	                                    />
@@ -19253,8 +20381,7 @@ const App: React.FC = () => {
 	                        .filter(
 	                          (char) =>
 	                            char.id ===
-	                            (activeRosterCharacterId ||
-	                              (project.characters || [])[0]?.id),
+	                            selectedCharacterId,
 	                        )
 	                        .map((char) => {
                         const portrait = char.portraitAssetId
@@ -19266,7 +20393,7 @@ const App: React.FC = () => {
                         return (
                           <div
                             key={char.id}
-                            className="rounded-lg border border-neutral-800 bg-neutral-900 p-4 flex flex-col gap-3"
+                            className="behavior-editor-panel rounded-lg border border-neutral-800 bg-neutral-900 p-4 flex flex-col gap-3"
                           >
                             <div className="grid gap-3 md:grid-cols-[12rem_minmax(0,1fr)]">
                               <AssetInspectorSlot
@@ -19471,7 +20598,7 @@ const App: React.FC = () => {
                                       <option value="">No dialogue hook</option>
                                       {project.dialogueTrees.map((tree) => (
                                         <option key={tree.id} value={tree.id}>
-                                          {tree.title}
+                                          {tree.name}
                                         </option>
                                       ))}
                                     </select>
@@ -20147,8 +21274,11 @@ const App: React.FC = () => {
                         );
                       })}
                     </div>
+                      </div>
+                    </div>
                   </>
-                )}
+                    );
+                  })()}
 
                 {rpgTab === "factions" && (
                   <>
@@ -20269,260 +21399,292 @@ const App: React.FC = () => {
                   </>
                 )}
 
-                {rpgTab === "lore" && (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h2 className="text-xl font-bold text-blue-400">
-                          Almanac
-                        </h2>
-                        <p className="text-sm text-neutral-500">
-                          Player-facing lore, journal pages, and quest notes that can unlock from story flags.
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {[
-                          {
-                            type: "journal" as const,
-                            label: "+ Journal",
-                            title: "New Journal Entry",
-                            category: "Journal",
-                          },
-                          {
-                            type: "quest_note" as const,
-                            label: "+ Quest Note",
-                            title: "New Quest Note",
-                            category: "Quest Notes",
-                          },
-                          {
-                            type: "lore" as const,
-                            label: "+ Lore",
-                            title: "New Lore Page",
-                            category: "Lore",
-                          },
-                        ].map((template) => (
-                          <button
-                            key={template.type}
-                            type="button"
-                            onClick={() => {
-                              const newEntry: LoreEntry = {
-                                id: uuidv4(),
-                                title: template.title,
-                                content: "",
-                                entryType: template.type,
-                                category: template.category,
-                                questId:
-                                  template.type === "quest_note"
-                                    ? project.quests[0]?.id
-                                    : undefined,
-                              };
-                              pushHistory({
-                                ...project,
-                                loreEntries: [
-                                  ...(project.loreEntries || []),
-                                  newEntry,
-                                ],
-                              });
-                            }}
-                            className="rounded border border-blue-400/50 bg-blue-500/20 px-3 py-2 text-xs font-bold text-blue-100 transition-colors hover:bg-blue-500/30"
-                          >
-                            {template.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        {(project.loreEntries || []).map((entry) => (
-                          <div
-                            key={entry.id}
-                            className="group relative flex min-h-[20rem] flex-col rounded-lg border border-blue-400/20 bg-neutral-900 p-4"
-                          >
-                            <div className="mb-2 flex items-center gap-2 pr-6">
-                              <select
-                                value={entry.entryType || "lore"}
-                                onChange={(e) => {
-                                  const entryType = e.target
-                                    .value as LoreEntry["entryType"];
-                                  const updated = (project.loreEntries || []).map(
-                                    (e2) =>
-                                      e2.id === entry.id
-                                        ? {
-                                            ...e2,
-                                            entryType,
-                                            category:
-                                              e2.category ||
-                                              (entryType === "journal"
-                                                ? "Journal"
-                                                : entryType === "quest_note"
-                                                  ? "Quest Notes"
-                                                  : "Lore"),
-                                          }
-                                        : e2,
-                                  );
-                                  pushHistory({
-                                    ...project,
-                                    loreEntries: updated,
-                                  });
-                                }}
-                                className="rounded border border-blue-400/30 bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-100 outline-none focus:border-blue-400"
-                              >
-                                <option value="lore">Lore</option>
-                                <option value="journal">Journal</option>
-                                <option value="quest_note">Quest Note</option>
-                              </select>
-                              {entry.questId && (
-                                <span className="truncate rounded border border-yellow-400/30 bg-yellow-400/10 px-2 py-1 text-[10px] font-bold text-yellow-200">
-                                  {project.quests.find(
+                {rpgTab === "lore" &&
+                  (() => {
+                    const entries = project.loreEntries || [];
+                    const selectedEntry =
+                      entries.find((entry) => entry.id === activeLoreEntryId) ||
+                      entries[0];
+                    const entryTemplates = [
+                      {
+                        type: "journal" as const,
+                        label: "+ Journal",
+                        title: "New Journal Entry",
+                        category: "Journal",
+                      },
+                      {
+                        type: "quest_note" as const,
+                        label: "+ Quest Note",
+                        title: "New Quest Note",
+                        category: "Quest Notes",
+                      },
+                      {
+                        type: "lore" as const,
+                        label: "+ Lore",
+                        title: "New Lore Page",
+                        category: "Lore",
+                      },
+                    ];
+                    const updateEntry = (
+                      entryId: string,
+                      updates: Partial<LoreEntry>,
+                    ) => {
+                      pushHistory({
+                        ...project,
+                        loreEntries: entries.map((entry) =>
+                          entry.id === entryId ? { ...entry, ...updates } : entry,
+                        ),
+                      });
+                    };
+
+                    return (
+                      <div className="behavior-library-layout">
+                        <aside className="behavior-library-rail">
+                          <div className="behavior-rail-header">
+                            <div>
+                              <div className="text-xs font-bold uppercase text-blue-200">
+                                Almanac Library
+                              </div>
+                              <div className="text-[11px] text-neutral-500">
+                                {entries.length} notes, logs, and lore pages
+                              </div>
+                            </div>
+                            <div className="mt-3 grid gap-1">
+                              {entryTemplates.map((template) => (
+                                <button
+                                  key={template.type}
+                                  type="button"
+                                  onClick={() => {
+                                    const newEntry: LoreEntry = {
+                                      id: uuidv4(),
+                                      title: template.title,
+                                      content: "",
+                                      entryType: template.type,
+                                      category: template.category,
+                                      questId:
+                                        template.type === "quest_note"
+                                          ? project.quests[0]?.id
+                                          : undefined,
+                                    };
+                                    pushHistory({
+                                      ...project,
+                                      loreEntries: [...entries, newEntry],
+                                    });
+                                    setActiveLoreEntryId(newEntry.id);
+                                  }}
+                                  className="rounded border border-blue-400/40 bg-blue-500/10 px-3 py-2 text-left text-xs font-bold text-blue-100 hover:bg-blue-500/20"
+                                >
+                                  {template.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="behavior-rail-list">
+                            {entries.map((entry) => {
+                              const isActive =
+                                entry.id === (selectedEntry?.id || activeLoreEntryId);
+                              const linkedQuest = entry.questId
+                                ? project.quests.find(
                                     (quest) => quest.id === entry.questId,
-                                  )?.name || "Linked quest"}
-                                </span>
-                              )}
-                            </div>
-                            <input
-                              type="text"
-                              value={entry.title}
-                              onChange={(e) => {
-                                const updated = (project.loreEntries || []).map(
-                                  (e2) =>
-                                    e2.id === entry.id
-                                      ? { ...e2, title: e.target.value }
-                                      : e2,
-                                );
-                                pushHistory({
-                                  ...project,
-                                  loreEntries: updated,
-                                });
-                              }}
-                              className="mb-3 w-full border-b border-neutral-700 bg-transparent pb-2 text-lg font-bold text-blue-200 outline-none focus:border-blue-500"
-                              placeholder="Entry Title"
-                            />
-                            <div className="mb-3 grid gap-2 sm:grid-cols-2">
-                              <select
-                                value={entry.questId || ""}
-                                onChange={(e) => {
-                                  const updated = (project.loreEntries || []).map(
-                                    (e2) =>
-                                      e2.id === entry.id
-                                        ? {
-                                            ...e2,
-                                            questId: e.target.value || undefined,
-                                            entryType:
-                                              e.target.value
-                                                ? "quest_note"
-                                                : e2.entryType,
-                                            category:
-                                              e.target.value
-                                                ? "Quest Notes"
-                                                : e2.category,
-                                          }
-                                        : e2,
-                                  );
-                                  pushHistory({
-                                    ...project,
-                                    loreEntries: updated,
-                                  });
-                                }}
-                                className="rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-300 outline-none focus:border-blue-500 sm:col-span-2"
-                              >
-                                <option value="">Not linked to a quest</option>
-                                {(project.quests || []).map((quest) => (
-                                  <option key={quest.id} value={quest.id}>
-                                    {quest.name}
-                                  </option>
-                                ))}
-                              </select>
-                              <input
-                                type="text"
-                                value={entry.category || ""}
-                                onChange={(e) => {
-                                  const updated = (project.loreEntries || []).map(
-                                    (e2) =>
-                                      e2.id === entry.id
-                                        ? { ...e2, category: e.target.value }
-                                        : e2,
-                                  );
-                                  pushHistory({
-                                    ...project,
-                                    loreEntries: updated,
-                                  });
-                                }}
-                                className="rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-300 outline-none focus:border-blue-500"
-                                placeholder="Category"
-                              />
-                              <select
-                                value={entry.requiredFlagId || ""}
-                                onChange={(e) => {
-                                  const updated = (project.loreEntries || []).map(
-                                    (e2) =>
-                                      e2.id === entry.id
-                                        ? {
-                                            ...e2,
-                                            requiredFlagId:
-                                              e.target.value || undefined,
-                                          }
-                                        : e2,
-                                  );
-                                  pushHistory({
-                                    ...project,
-                                    loreEntries: updated,
-                                  });
-                                }}
-                                className="rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-300 outline-none focus:border-blue-500"
-                              >
-                                <option value="">Always visible</option>
-                                {(project.gameFlags || []).map((flag) => (
-                                  <option key={flag} value={flag}>
-                                    {flag}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            <textarea
-                              value={entry.content}
-                              onChange={(e) => {
-                                const updated = (project.loreEntries || []).map(
-                                  (e2) =>
-                                    e2.id === entry.id
-                                      ? { ...e2, content: e.target.value }
-                                      : e2,
-                                );
-                                pushHistory({
-                                  ...project,
-                                  loreEntries: updated,
-                                });
-                              }}
-                              className="min-h-40 flex-1 w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-neutral-300 outline-none custom-scrollbar focus:border-blue-500"
-                              placeholder={
-                                entry.entryType === "journal"
-                                  ? "Journal text, observations, discoveries..."
-                                  : entry.entryType === "quest_note"
-                                    ? "Quest clue, objective note, rumor, or journal update..."
-                                    : "Lore content..."
-                              }
-                            />
-                            <button
-                              onClick={() => {
-                                pushHistory({
-                                  ...project,
-                                  loreEntries: (
-                                    project.loreEntries || []
-                                  ).filter((e2) => e2.id !== entry.id),
-                                });
-                              }}
-                              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity"
-                            >
-                              <X size={14} />
-                            </button>
+                                  )
+                                : null;
+                              return (
+                                <button
+                                  key={entry.id}
+                                  type="button"
+                                  onClick={() => setActiveLoreEntryId(entry.id)}
+                                  className={`behavior-rail-item ${
+                                    isActive ? "is-active" : ""
+                                  }`}
+                                >
+                                  <span className="block truncate text-sm font-bold">
+                                    {entry.title || "Untitled entry"}
+                                  </span>
+                                  <span className="mt-1 flex flex-wrap gap-1 text-[10px] font-bold uppercase tracking-wide">
+                                    <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-blue-200">
+                                      {entry.entryType || "lore"}
+                                    </span>
+                                    {linkedQuest && (
+                                      <span className="rounded bg-yellow-400/15 px-1.5 py-0.5 text-yellow-200">
+                                        {linkedQuest.name}
+                                      </span>
+                                    )}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                            {entries.length === 0 && (
+                              <div className="rounded border border-dashed border-neutral-800 p-4 text-center text-sm italic text-neutral-500">
+                                No almanac entries yet.
+                              </div>
+                            )}
                           </div>
-                        ))}
-                        {(project.loreEntries || []).length === 0 && (
-                          <div className="rounded-lg border border-dashed border-neutral-800 p-6 text-sm italic text-neutral-500">
-                            No almanac entries yet.
-                          </div>
-                        )}
-                    </div>
-                  </>
-                )}
+                        </aside>
+
+                        <div className="behavior-main-editor">
+                          {selectedEntry ? (
+                            <div className="studio-card mx-auto grid max-w-5xl gap-4 rounded-lg border border-neutral-800 bg-neutral-900 p-4 shadow-xl">
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-xs font-bold uppercase tracking-wide text-blue-300">
+                                    Almanac Entry
+                                  </div>
+                                  <p className="mt-1 text-sm text-neutral-500">
+                                    Player-facing lore, journal pages, and quest notes that can unlock from story flags.
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const remaining = entries.filter(
+                                      (entry) => entry.id !== selectedEntry.id,
+                                    );
+                                    pushHistory({
+                                      ...project,
+                                      loreEntries: remaining,
+                                    });
+                                    setActiveLoreEntryId(remaining[0]?.id || null);
+                                  }}
+                                  className="rounded border border-red-400/40 bg-red-500/10 px-3 py-1.5 text-xs font-bold text-red-300 hover:bg-red-500/20"
+                                >
+                                  Delete Entry
+                                </button>
+                              </div>
+
+                              <div className="grid gap-3 md:grid-cols-[10rem_minmax(0,1fr)]">
+                                <label className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                  Type
+                                  <select
+                                    value={selectedEntry.entryType || "lore"}
+                                    onChange={(e) => {
+                                      const entryType = e.target
+                                        .value as LoreEntry["entryType"];
+                                      updateEntry(selectedEntry.id, {
+                                        entryType,
+                                        category:
+                                          selectedEntry.category ||
+                                          (entryType === "journal"
+                                            ? "Journal"
+                                            : entryType === "quest_note"
+                                              ? "Quest Notes"
+                                              : "Lore"),
+                                      });
+                                    }}
+                                    className="mt-1 w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs normal-case text-neutral-200 outline-none focus:border-blue-500"
+                                  >
+                                    <option value="lore">Lore</option>
+                                    <option value="journal">Journal</option>
+                                    <option value="quest_note">Quest Note</option>
+                                  </select>
+                                </label>
+                                <label className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                  Title
+                                  <input
+                                    type="text"
+                                    value={selectedEntry.title}
+                                    onChange={(e) =>
+                                      updateEntry(selectedEntry.id, {
+                                        title: e.target.value,
+                                      })
+                                    }
+                                    className="mt-1 w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-lg font-bold normal-case text-blue-100 outline-none focus:border-blue-500"
+                                    placeholder="Entry title"
+                                  />
+                                </label>
+                              </div>
+
+                              <div className="grid gap-3 md:grid-cols-3">
+                                <label className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                  Quest Link
+                                  <select
+                                    value={selectedEntry.questId || ""}
+                                    onChange={(e) =>
+                                      updateEntry(selectedEntry.id, {
+                                        questId: e.target.value || undefined,
+                                        entryType: e.target.value
+                                          ? "quest_note"
+                                          : selectedEntry.entryType,
+                                        category: e.target.value
+                                          ? "Quest Notes"
+                                          : selectedEntry.category,
+                                      })
+                                    }
+                                    className="mt-1 w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs normal-case text-neutral-300 outline-none focus:border-blue-500"
+                                  >
+                                    <option value="">Not linked to a quest</option>
+                                    {(project.quests || []).map((quest) => (
+                                      <option key={quest.id} value={quest.id}>
+                                        {quest.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                  Category
+                                  <input
+                                    type="text"
+                                    value={selectedEntry.category || ""}
+                                    onChange={(e) =>
+                                      updateEntry(selectedEntry.id, {
+                                        category: e.target.value,
+                                      })
+                                    }
+                                    className="mt-1 w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs normal-case text-neutral-300 outline-none focus:border-blue-500"
+                                    placeholder="Category"
+                                  />
+                                </label>
+                                <label className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                  Unlock Event
+                                  <select
+                                    value={selectedEntry.requiredFlagId || ""}
+                                    onChange={(e) =>
+                                      updateEntry(selectedEntry.id, {
+                                        requiredFlagId:
+                                          e.target.value || undefined,
+                                      })
+                                    }
+                                    className="mt-1 w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs normal-case text-neutral-300 outline-none focus:border-blue-500"
+                                  >
+                                    <option value="">Always visible</option>
+                                    {(project.gameFlags || []).map((flag) => (
+                                      <option key={flag} value={flag}>
+                                        {flag}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+
+                              <label className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                Player Text
+                                <textarea
+                                  value={selectedEntry.content}
+                                  onChange={(e) =>
+                                    updateEntry(selectedEntry.id, {
+                                      content: e.target.value,
+                                    })
+                                  }
+                                  className="mt-1 min-h-[18rem] w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-3 text-sm normal-case text-neutral-200 outline-none custom-scrollbar focus:border-blue-500"
+                                  placeholder={
+                                    selectedEntry.entryType === "journal"
+                                      ? "Journal text, observations, discoveries..."
+                                      : selectedEntry.entryType === "quest_note"
+                                        ? "Quest clue, objective note, rumor, or journal update..."
+                                        : "Lore content..."
+                                  }
+                                />
+                              </label>
+                            </div>
+                          ) : (
+                            <div className="mx-auto max-w-xl rounded border border-dashed border-neutral-800 p-8 text-center text-sm italic text-neutral-500">
+                              Choose a template on the left to start a journal note, quest note, or lore page.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                 {rpgTab === "companions" && (
                   <>
@@ -20602,6 +21764,177 @@ const App: React.FC = () => {
               {worldRulesUsesDetailPane && (
               <div className="flex-1 overflow-y-auto custom-scrollbar">
                 {rpgTab === "quests" &&
+                  activeStoryEvent &&
+                  (project.gameFlags || []).includes(activeStoryEvent) &&
+                  (() => {
+                    const refs = getStoryEventReferences(project, activeStoryEvent);
+                    return (
+                      <div className="max-w-6xl space-y-5">
+                        <div className="rounded-lg border border-emerald-400/30 bg-neutral-900 p-6">
+                          <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div>
+                              <div className="text-xs font-bold uppercase tracking-wider text-emerald-300">
+                                Story Event
+                              </div>
+                              <h3 className="mt-1 text-2xl font-bold text-white">
+                                {activeStoryEvent}
+                              </h3>
+                              <p className="mt-2 max-w-2xl text-sm text-neutral-400">
+                                Use this event from dialogue, object clicks, quest
+                                steps, rewards, and UI buttons.
+                              </p>
+                            </div>
+                            <div className="grid grid-cols-4 gap-2 text-center text-xs font-bold uppercase">
+                              <div className="rounded border border-neutral-800 bg-neutral-950 px-3 py-2">
+                                <div className="text-lg text-white">
+                                  {refs.questSteps.length}
+                                </div>
+                                <div className="text-neutral-500">steps</div>
+                              </div>
+                              <div className="rounded border border-neutral-800 bg-neutral-950 px-3 py-2">
+                                <div className="text-lg text-white">
+                                  {refs.questRewards.length}
+                                </div>
+                                <div className="text-neutral-500">rewards</div>
+                              </div>
+                              <div className="rounded border border-neutral-800 bg-neutral-950 px-3 py-2">
+                                <div className="text-lg text-white">
+                                  {refs.dialogueHooks.length}
+                                </div>
+                                <div className="text-neutral-500">dialogue</div>
+                              </div>
+                              <div className="rounded border border-neutral-800 bg-neutral-950 px-3 py-2">
+                                <div className="text-lg text-white">
+                                  {refs.objectHooks.length}
+                                </div>
+                                <div className="text-neutral-500">objects</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 xl:grid-cols-2">
+                          <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+                            <h4 className="mb-3 font-bold text-emerald-300">
+                              Quest steps waiting for this
+                            </h4>
+                            <div className="space-y-2">
+                              {refs.questSteps.map((step) => (
+                                <button
+                                  type="button"
+                                  key={`${step.questId}-${step.stepName}`}
+                                  onClick={() => {
+                                    setActiveQuestId(step.questId);
+                                    setActiveStoryEvent(null);
+                                  }}
+                                  className="w-full rounded border border-neutral-800 bg-neutral-950 p-3 text-left text-sm hover:border-emerald-400/50 hover:bg-neutral-800"
+                                >
+                                  <div className="font-bold text-white">
+                                    {step.questName}
+                                  </div>
+                                  <div className="mt-1 text-neutral-400">
+                                    {step.stepName}
+                                  </div>
+                                </button>
+                              ))}
+                              {refs.questSteps.length === 0 && (
+                                <div className="rounded border border-dashed border-neutral-800 p-4 text-sm italic text-neutral-500">
+                                  No quest steps listen for this event yet.
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+                            <h4 className="mb-3 font-bold text-cyan-300">
+                              Dialogue hooks
+                            </h4>
+                            <div className="space-y-2">
+                              {refs.dialogueHooks.map((hook) => (
+                                <div
+                                  key={`${hook.treeId}-${hook.choiceText}-${hook.mode}`}
+                                  className="rounded border border-neutral-800 bg-neutral-950 p-3 text-sm"
+                                >
+                                  <div className="font-bold text-white">
+                                    {hook.treeName}
+                                  </div>
+                                  <div className="mt-1 text-neutral-400">
+                                    {hook.mode === "sets" ? "Sets" : "Requires"} ·{" "}
+                                    {hook.choiceText || hook.nodeSpeaker}
+                                  </div>
+                                </div>
+                              ))}
+                              {refs.dialogueHooks.length === 0 && (
+                                <div className="rounded border border-dashed border-neutral-800 p-4 text-sm italic text-neutral-500">
+                                  No dialogue choices use this event yet.
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+                            <h4 className="mb-3 font-bold text-pink-300">
+                              Objects and buttons
+                            </h4>
+                            <div className="space-y-2">
+                              {refs.objectHooks.map((hook) => (
+                                <div
+                                  key={`${hook.sceneId}-${hook.objectName}-${hook.action}`}
+                                  className="rounded border border-neutral-800 bg-neutral-950 p-3 text-sm"
+                                >
+                                  <div className="font-bold text-white">
+                                    {hook.objectName}
+                                  </div>
+                                  <div className="mt-1 text-neutral-400">
+                                    {hook.sceneName} · {hook.action.replace(/_/g, " ")}
+                                  </div>
+                                </div>
+                              ))}
+                              {refs.objectHooks.length === 0 && (
+                                <div className="rounded border border-dashed border-neutral-800 p-4 text-sm italic text-neutral-500">
+                                  No objects or UI buttons set this event yet.
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+                            <h4 className="mb-3 font-bold text-amber-300">
+                              Quest rewards that set this
+                            </h4>
+                            <div className="space-y-2">
+                              {refs.questRewards.map((reward) => (
+                                <button
+                                  type="button"
+                                  key={reward.questId}
+                                  onClick={() => {
+                                    setActiveQuestId(reward.questId);
+                                    setActiveStoryEvent(null);
+                                  }}
+                                  className="w-full rounded border border-neutral-800 bg-neutral-950 p-3 text-left text-sm hover:border-amber-400/50 hover:bg-neutral-800"
+                                >
+                                  <div className="font-bold text-white">
+                                    {reward.questName}
+                                  </div>
+                                  <div className="mt-1 text-neutral-400">
+                                    Sets this event as a quest reward.
+                                  </div>
+                                </button>
+                              ))}
+                              {refs.questRewards.length === 0 && (
+                                <div className="rounded border border-dashed border-neutral-800 p-4 text-sm italic text-neutral-500">
+                                  No quest rewards set this event yet.
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                {rpgTab === "quests" &&
+                  !activeStoryEvent &&
                   (activeQuestId &&
                   (project.quests || []).find((q) => q.id === activeQuestId) ? (
                     (() => {
@@ -21360,7 +22693,7 @@ const App: React.FC = () => {
                     </div>
                   ))}
 
-                {rpgTab === "stats" && (
+                {(rpgTab as string) === "stats" && (
                   <div className="grid gap-4 xl:grid-cols-2">
                     <div className="rounded-lg border border-emerald-400/20 bg-neutral-900 p-4">
                       <div className="mb-3 flex items-center gap-2 text-emerald-300">
@@ -21451,7 +22784,7 @@ const App: React.FC = () => {
                   </div>
                 )}
 
-                {rpgTab === "companions" &&
+                {(rpgTab as string) === "companions" &&
                   (activeCompanionId &&
                   (project.companions || []).find((c) => c.id === activeCompanionId) ? (
                     (() => {
@@ -21896,6 +23229,7 @@ const App: React.FC = () => {
                       const iconAsset = item.iconAssetId
                         ? project.assets.find((asset) => asset.id === item.iconAssetId)
                         : null;
+                      const iconSrc = getAssetDisplaySrc(iconAsset);
                       const isActive =
                         item.id ===
                         (activeInventoryItemId || project.inventoryItems[0]?.id);
@@ -21912,9 +23246,9 @@ const App: React.FC = () => {
                           }`}
                         >
                           <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-neutral-700 bg-neutral-950">
-                            {iconAsset?.src ? (
+                            {iconSrc ? (
                               <img
-                                src={iconAsset.src}
+                                src={iconSrc}
                                 alt=""
                                 className="h-full w-full object-contain"
                               />
@@ -23490,9 +24824,13 @@ const App: React.FC = () => {
         })()}
 
       {/* Image Editor Modal */}
-      {editingAssetId && (
+      {editingAssetId &&
+        (() => {
+          const editingAsset = project.assets.find((a) => a.id === editingAssetId);
+          if (!editingAsset) return null;
+          return (
         <ImageEditorModal
-          asset={project.assets.find((a) => a.id === editingAssetId)!}
+          asset={editingAsset}
           onSave={(newSrc, isNew) => {
             const originalAsset = project.assets.find(
               (a) => a.id === editingAssetId,
@@ -23530,18 +24868,20 @@ const App: React.FC = () => {
           }}
           onClose={() => setEditingAssetId(null)}
         />
-      )}
+          );
+        })()}
 
       {calibratingFrameAssetId &&
         (() => {
           const frameAsset = project.assets.find(
             (asset) => asset.id === calibratingFrameAssetId,
           );
-          if (!frameAsset) return null;
+          const frameSrc = getAssetDisplaySrc(frameAsset);
+          if (!frameAsset || !frameSrc) return null;
           return (
             <DeviceFrameCalibrator
               assetId={frameAsset.id}
-              imageSrc={frameAsset.src}
+              imageSrc={frameSrc}
               initialCalibration={
                 project.globalSettings.deviceFrame?.assetId === frameAsset.id
                   ? (project.globalSettings
@@ -23565,10 +24905,11 @@ const App: React.FC = () => {
 
       {isEditingShellControls &&
         deviceFrame &&
-        deviceFrameAsset && (
+        deviceFrameAsset &&
+        deviceFrameSrc && (
           <ShellControlEditor
             calibration={deviceFrame as DeviceFrameCalibration}
-            imageSrc={deviceFrameAsset.src}
+            imageSrc={deviceFrameSrc}
             assets={project.assets}
             scenes={project.scenes}
             dialogueTrees={project.dialogueTrees || []}
@@ -23774,7 +25115,7 @@ const App: React.FC = () => {
       )}
 
       <AnimatedCursor
-        src={isPlaying ? activeCursorAsset?.src : undefined}
+        src={isPlaying ? getAssetDisplaySrc(activeCursorAsset) : undefined}
         surfaceSelector='[data-play-cursor-surface="true"]'
       />
 

@@ -72,6 +72,16 @@ const shellDestinations: Array<{
     detail: "Open or close the player's items",
   },
   {
+    interaction: "toggle_needs_hud",
+    label: "Needs HUD",
+    detail: "Show or hide the small needs meters",
+  },
+  {
+    interaction: "toggle_skills_hud",
+    label: "Skills HUD",
+    detail: "Show or hide the small skills meters",
+  },
+  {
     interaction: "open_quest_log",
     label: "Quests",
     detail: "Open the quest journal",

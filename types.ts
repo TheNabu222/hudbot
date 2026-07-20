@@ -41,6 +41,8 @@ export type InteractionType =
   | "save_game"
   | "load_game"
   | "toggle_inventory"
+  | "toggle_needs_hud"
+  | "toggle_skills_hud"
   | "open_ui"
   | "close_ui"
   | "modify_number"
@@ -274,6 +276,8 @@ export interface Asset {
   id: string;
   src: string;
   dataURL?: string;
+  exportSource?: "linked" | "github_inferred" | "embedded_fallback";
+  exportReason?: string;
   name: string;
   isFavorite?: boolean;
   tags?: string[];

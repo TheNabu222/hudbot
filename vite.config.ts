@@ -9,6 +9,16 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        watch: {
+          ignored: [
+            '**/.git/**',
+            '**/dist/**',
+            '**/assets/**',
+            '**/peripheral/**',
+            '**/peripheral/**/dist/**',
+            '**/peripheral/**/node_modules/**',
+          ],
+        },
       },
       plugins: [react(), viteSingleFile()],
       define: {

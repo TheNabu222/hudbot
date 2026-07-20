@@ -93,6 +93,8 @@ const advancedResponseChoices: Array<{
   { interaction: "open_almanac", label: "Open Almanac", icon: BookOpen },
   { interaction: "open_relationships", label: "Open Relationships", icon: Users },
   { interaction: "open_settings", label: "Open Settings", icon: Settings },
+  { interaction: "toggle_needs_hud", label: "Toggle Needs HUD", icon: Wand2 },
+  { interaction: "toggle_skills_hud", label: "Toggle Skills HUD", icon: Wand2 },
   { interaction: "clear_flag", label: "Forget Flag", icon: Flag },
   { interaction: "toggle_flag", label: "Toggle Flag", icon: Flag },
   { interaction: "show_object", label: "Show Object", icon: Eye },
@@ -639,6 +641,8 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
 
           {[
             "toggle_inventory",
+            "toggle_needs_hud",
+            "toggle_skills_hud",
             "open_crafting",
             "open_quest_log",
             "open_map",

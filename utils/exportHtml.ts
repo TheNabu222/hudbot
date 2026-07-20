@@ -90,8 +90,11 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-export function generateExportHtml(project: Project): string {
-  const strippedProject = prepareProjectForExport(project);
+export function generateExportHtml(sourceProject: Project): string {
+  const project = prepareProjectForExport(sourceProject, {
+    assetScope: "used",
+    includeEmbeddedAssetData: "fallback",
+  });
 
   const scene = project.scenes.find((s) => s.id === project.currentSceneId) ||
     project.scenes[0] || {
@@ -110,6 +113,7 @@ export function generateExportHtml(project: Project): string {
   const dialogueChoiceTextSize =
     project.globalSettings?.dialogueChoiceTextSizePx ?? 13;
   const dialoguePortraitSize = project.globalSettings?.dialoguePortraitSizePx ?? 64;
+  const exportSaveKey = `neocities_game_save_${project.id}_${Date.now().toString(36)}`;
   const dialogueTitleSize = Math.max(11, dialogueTextSize - 1);
   const needTracks = normalizeExportTracks(
     project.globalSettings?.customNeeds,
@@ -821,6 +825,15 @@ export function generateExportHtml(project: Project): string {
         ),
     );
 
+  const resolveAssetSrc = (
+    asset: { src?: string; dataURL?: string } | undefined,
+    fallback = "",
+  ) => {
+    if (!asset) return fallback || "";
+    if (asset.src && !asset.src.startsWith("data:")) return asset.src;
+    return asset.dataURL || asset.src || fallback || "";
+  };
+
   const getObjectHtml = (obj: any) => {
     let animStyle = "";
     if (obj.animation === "glow") {
@@ -849,12 +862,16 @@ export function generateExportHtml(project: Project): string {
     const peStr = shouldReceiveClicks
       ? "pointer-events: auto; touch-action: manipulation;"
       : "pointer-events: none;";
+    const leftValue = obj.stretchToScreen ? "0" : `${obj.x}px`;
+    const topValue = obj.stretchToScreen ? "0" : `${obj.y}px`;
+    const widthValue = obj.stretchToScreen ? "100%" : `${obj.width}px`;
+    const heightValue = obj.stretchToScreen ? "100%" : `${obj.height}px`;
 
     const style = `
-      left: ${obj.x}px;
-      top: ${obj.y}px;
-      width: ${obj.width}px;
-      height: ${obj.height}px;
+      left: ${leftValue};
+      top: ${topValue};
+      width: ${widthValue};
+      height: ${heightValue};
       z-index: ${obj.zIndex ?? 100};
       opacity: ${obj.opacity === 0 ? 0.01 : (obj.opacity ?? 1)};
       transform: rotate(${obj.rotation || 0}deg);
@@ -883,7 +900,7 @@ export function generateExportHtml(project: Project): string {
       data-difficulty="${obj.skillCheckDifficulty || 0}"
       data-grant-skill="${obj.grantSkill || "none"}"
       data-grant-skill-val="${obj.grantSkillValue || 0}"
-      data-script-src="${obj.scriptAssetId ? (project.assets || []).find((a) => a.id === obj.scriptAssetId)?.src || "" : ""}"
+      data-script-src="${obj.scriptAssetId ? resolveAssetSrc((project.assets || []).find((a) => a.id === obj.scriptAssetId)) : ""}"
       data-ui-binding="${obj.uiBindingType || ""}"
       data-ui-binding-id="${obj.uiBindingId || ""}"
       data-ui-element-type="${obj.uiElementType || ""}"
@@ -1030,12 +1047,16 @@ export function generateExportHtml(project: Project): string {
       const filters = obj.filters
         ? `brightness(${obj.filters.brightness ?? 1}) contrast(${obj.filters.contrast ?? 1}) saturate(${obj.filters.saturate ?? 1}) hue-rotate(${obj.filters.hueRotate ?? 0}deg) blur(${obj.filters.blur ?? 0}px) sepia(${obj.filters.sepia ?? 0}) invert(${obj.filters.invert ?? 0}) grayscale(${obj.filters.grayscale ?? 0})`
         : "none";
-      const imgStyle = `width: 100%; height: 100%; object-fit: fill; transform: scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1}); filter: ${filters};`;
+      const objectFit =
+        obj.objectFit === "contain" || obj.objectFit === "cover"
+          ? obj.objectFit
+          : "fill";
+      const imgStyle = `width: 100%; height: 100%; object-fit: ${objectFit}; transform: scaleX(${obj.flipX ? -1 : 1}) scaleY(${obj.flipY ? -1 : 1}); filter: ${filters};`;
       const asset = obj._assetId
         ? project.assets.find((a) => a.id === obj._assetId)
-        : project.assets.find((a) => a.src === obj.src);
+        : project.assets.find((a) => a.src === obj.src || a.dataURL === obj.src);
       const assetDataAttr = asset
-        ? `data-asset-id="${asset.id}" data-runtime-src="true" src="${asset.src || obj.src || ""}"`
+        ? `data-asset-id="${asset.id}" data-runtime-src="true" src="${resolveAssetSrc(asset, obj.src)}"`
         : `src="${obj.src || ""}"`;
       if (obj.isVideo) {
         return `<div id="${obj.id}" onclick="void(0)" class="${classes.join(" ")}" style="${style}" ${dataAttrs}><video ${assetDataAttr} style="${imgStyle}" autoplay loop muted playsinline></video></div>`;
@@ -1091,10 +1112,19 @@ export function generateExportHtml(project: Project): string {
 	    const needTrackDefinitions = ${jsonForInlineScript(needTracks)};
 	    const skillTrackDefinitions = ${jsonForInlineScript(skillTracks)};
 	    let activeDialogue = null;
+      window.__CAVEBOT_SAVE_KEY__ = ${JSON.stringify(exportSaveKey)};
+      const gameSaveKey = window.__CAVEBOT_SAVE_KEY__;
+
+    const assetSrc = (asset, fallback = '') => {
+      if (!asset) return fallback || '';
+      if (asset.src && !asset.src.startsWith('data:')) return asset.src;
+      return asset.dataURL || asset.src || fallback || '';
+    };
 
     const buildAudioSrc = (asset) => {
-      if (!asset || !asset.src) return "";
-      return asset.src + (asset.trimStart || asset.trimEnd
+      const src = assetSrc(asset);
+      if (!src) return "";
+      return src + (asset.trimStart || asset.trimEnd
         ? '#t=' + (asset.trimStart || 0) + (asset.trimEnd ? ',' + asset.trimEnd : '')
         : '');
     };
@@ -1117,7 +1147,7 @@ export function generateExportHtml(project: Project): string {
     const findCursorAsset = (assetId) => assets.find(asset => asset.id === assetId);
     const resolveCursorSrc = (assetId) => {
       const cursorAsset = findCursorAsset(assetId);
-      return cursorAsset ? (cursorAsset.dataURL || cursorAsset.src || '') : '';
+      return assetSrc(cursorAsset);
     };
     const setAnimatedCursor = (assetId) => {
       const cursorSrc = resolveCursorSrc(assetId) || resolveCursorSrc(globalCursorAssetId);
@@ -1204,7 +1234,7 @@ export function generateExportHtml(project: Project): string {
 
     // Load from LocalStorage
     try {
-      const saved = localStorage.getItem('neocities_game_save_${project.id}');
+      const saved = localStorage.getItem(gameSaveKey);
       if (saved) {
         state = { ...state, ...JSON.parse(saved) };
       }
@@ -1218,7 +1248,7 @@ export function generateExportHtml(project: Project): string {
 
     let saveGame = () => {
       try {
-        localStorage.setItem('neocities_game_save_${project.id}', JSON.stringify(state));
+        localStorage.setItem(gameSaveKey, JSON.stringify(state));
       } catch(e) {
         console.warn('Failed to save game to localStorage');
       }
@@ -1230,8 +1260,9 @@ export function generateExportHtml(project: Project): string {
         const assetId = el.getAttribute('data-asset-id');
         if (!assetId) return;
         const asset = assets.find(a => a.id === assetId);
-        if (asset && asset.src) {
-          el.setAttribute('src', asset.src);
+        const src = assetSrc(asset);
+        if (src) {
+          el.setAttribute('src', src);
         }
       });
       const dialogueBox = document.getElementById('dialogue-box');
@@ -1319,7 +1350,7 @@ export function generateExportHtml(project: Project): string {
         }
 
         const bgmAsset = assets.find(a => a.id === assetId);
-        if (bgmAsset && bgmAsset.src) {
+        if (assetSrc(bgmAsset)) {
            currentBgmAudio = applyAssetVolume(new Audio(buildAudioSrc(bgmAsset)), bgmAsset);
            currentBgmAudio.loop = true;
            currentBgmAudio.play().catch(e => console.warn("BGM play failed. User interaction needed:", e));
@@ -1342,17 +1373,22 @@ export function generateExportHtml(project: Project): string {
       
       window.startDialogue = (treeId) => {
         const tree = dialogueTrees.find(t => t.id === treeId);
-        if (tree && tree.startNodeId) {
+        const startNodeId = tree
+          ? (tree.nodes || []).some(node => node.id === tree.startNodeId)
+            ? tree.startNodeId
+            : (tree.nodes || [])[0]?.id
+          : null;
+        if (tree && startNodeId) {
           state.talkCounts[treeId] = (state.talkCounts[treeId] || 0) + 1;
           state.flags['talked_' + treeId] = true;
           saveGame();
           checkQuestAutoComplete();
-          showDialogueNode(tree, tree.startNodeId);
+          showDialogueNode(tree, startNodeId);
         }
       };
 
       window.showDialogueNode = (tree, nodeId) => {
-        const node = tree.nodes.find(n => n.id === nodeId);
+        const node = tree.nodes.find(n => n.id === nodeId) || tree.nodes[0];
         if (!node) {
           closeDialogue();
           return;
@@ -1366,7 +1402,7 @@ export function generateExportHtml(project: Project): string {
         
         if (speakerAsset && (!node.portraitPosition || node.portraitPosition === 'left')) {
           html += '<div class="dialogue-portrait left">' +
-                  '<img src="' + speakerAsset.src + '" />' +
+                  '<img src="' + assetSrc(speakerAsset) + '" />' +
                   '</div>';
         }
         
@@ -1374,7 +1410,7 @@ export function generateExportHtml(project: Project): string {
         
         if (speakerAsset && node.portraitPosition === 'right') {
           html += '<div class="dialogue-portrait right">' +
-                  '<img src="' + speakerAsset.src + '" />' +
+                  '<img src="' + assetSrc(speakerAsset) + '" />' +
                   '</div>';
         }
         html += '</div>';
@@ -1572,7 +1608,7 @@ export function generateExportHtml(project: Project): string {
         }
         if (choice.playSoundAssetId) {
           const snd = assets.find(a => a.id === choice.playSoundAssetId);
-          if (snd) { const a = new Audio(snd.src); a.volume = snd.volume ?? 1; a.play().catch(() => {}); }
+          if (snd) { playAudioAsset(snd); }
         }
         saveGame();
 
@@ -1703,14 +1739,14 @@ export function generateExportHtml(project: Project): string {
       // Inventory Deselect on Background Click/Right-Click
       container.addEventListener('pointerdown', (e) => {
          if (typeof selectedInventoryItemId !== 'undefined' && selectedInventoryItemId !== null) {
-            selectedInventoryItemId = null;
+            clearInventorySelection();
             try { updateInventoryUI(); } catch(e){}
          }
       });
       container.addEventListener('contextmenu', (e) => {
          e.preventDefault();
          if (typeof selectedInventoryItemId !== 'undefined' && selectedInventoryItemId !== null) {
-            selectedInventoryItemId = null;
+            clearInventorySelection();
             try { updateInventoryUI(); } catch(e){}
          }
       });
@@ -1860,12 +1896,7 @@ export function generateExportHtml(project: Project): string {
           if (audioSrc && audioSrc !== '') {
             const soundAsset = assets.find(a => a.id === audioSrc);
             if (soundAsset) {
-              const mediaFragment = soundAsset.trimStart || soundAsset.trimEnd
-                ? '#t=' + (soundAsset.trimStart || 0) + (soundAsset.trimEnd ? ',' + soundAsset.trimEnd : '')
-                : '';
-              const audio = new Audio(soundAsset.src + mediaFragment);
-              audio.volume = Math.min(1, soundAsset.volume ?? 1);
-              audio.play().catch(e => console.warn("SFX play failed", e));
+              playAudioAsset(soundAsset);
             }
           }
           
@@ -2054,6 +2085,16 @@ export function generateExportHtml(project: Project): string {
             showSimpleDialogue("[Skill Check Success]\\n" + (data || "You succeeded!"), "");
           } else if (interaction === 'toggle_inventory') {
             toggleInventory();
+          } else if (interaction === 'toggle_needs_hud') {
+            const tracker = document.getElementById('needs-tracker');
+            if (tracker) {
+              tracker.style.display = getComputedStyle(tracker).display === 'none' ? 'block' : 'none';
+            }
+          } else if (interaction === 'toggle_skills_hud') {
+            const tracker = document.getElementById('skills-tracker');
+            if (tracker) {
+              tracker.style.display = getComputedStyle(tracker).display === 'none' ? 'block' : 'none';
+            }
           } else if (interaction === 'open_quest_log') {
             toggleQuestLog();
           } else if (interaction === 'open_map') {
@@ -2079,7 +2120,7 @@ export function generateExportHtml(project: Project): string {
             });
             showSimpleDialogue(window.__cavebotMuted ? 'Audio muted.' : 'Audio unmuted.', 'System');
           } else if (interaction === 'restart_game') {
-            try { localStorage.removeItem('neocities_game_save_${project.id}'); } catch(e) {}
+            try { localStorage.removeItem(gameSaveKey); } catch(e) {}
             location.reload();
           } else if (interaction === 'exit_game') {
             showSimpleDialogue('Game paused.', 'System');
@@ -2098,9 +2139,9 @@ export function generateExportHtml(project: Project): string {
             const itemName = itemDef ? itemDef.name : selectedInventoryItemId;
             if (pref) {
               state.relationships[charId] = Math.max(-100, Math.min(100, (state.relationships[charId] || (char.defaultAffinity || 0)) + pref.change));
-              const reaction = pref.reactionText || (pref.change > 0 ? char.name + ' smiles. "Thank you."' : char.name + ' frowns. "I don\'t want this."');
+              const reaction = pref.reactionText || (pref.change > 0 ? char.name + ' smiles. "Thank you."' : char.name + ' frowns. "I do not want this."');
               state.inventory = state.inventory.filter(id => id !== selectedInventoryItemId);
-              selectedInventoryItemId = null;
+              clearInventorySelection();
               updateInventoryUI();
               saveGame();
               showSimpleDialogue(reaction, char.name);
@@ -2118,7 +2159,7 @@ export function generateExportHtml(project: Project): string {
                 const skipBtn = document.getElementById('cutscene-skip-btn');
                 
                 cutscenePlayer.style.display = 'flex';
-                cutsceneVideo.src = videoAsset.src;
+                cutsceneVideo.src = assetSrc(videoAsset);
                 cutsceneVideo.play();
                 
                 const endCutscene = () => {
@@ -2200,7 +2241,7 @@ export function generateExportHtml(project: Project): string {
                   let value = response[key] || '';
                   if (key === 'scriptAssetId' && value) {
                     const scriptAsset = assets.find(asset => asset.id === value);
-                    value = scriptAsset ? scriptAsset.src : value;
+                    value = scriptAsset ? assetSrc(scriptAsset, value) : value;
                   }
                   obj.setAttribute(attribute, value);
                 });
@@ -2244,7 +2285,7 @@ export function generateExportHtml(project: Project): string {
           const overlay = document.getElementById(id);
           if (overlay) overlay.style.display = 'none';
         });
-        if (exceptId !== 'inventory-overlay') selectedInventoryItemId = null;
+        if (exceptId !== 'inventory-overlay') clearInventorySelection();
       };
 
       const setRuntimeOverlayOpen = (id, onOpen, onClose) => {
@@ -2263,7 +2304,7 @@ export function generateExportHtml(project: Project): string {
           'inventory-overlay',
           () => updateInventoryUI(),
           () => {
-            selectedInventoryItemId = null;
+            clearInventorySelection();
           },
         );
       };
@@ -2333,7 +2374,7 @@ export function generateExportHtml(project: Project): string {
           for (const t of thresholds) { if (value >= t.value) { stageLabel = t.label; stageColor = t.color || 'var(--ui-primary)'; } }
           const pct = Math.round(((value + 100) / 200) * 100);
           const portraitAsset = char.portraitAssetId ? (gameData.assets || []).find(a => a.id === char.portraitAssetId) : null;
-          const portraitSrc = portraitAsset ? portraitAsset.src : null;
+          const portraitSrc = assetSrc(portraitAsset);
           html += \`<div style="padding:12px;border:1px solid \${stageColor}40;border-radius:8px;display:flex;gap:12px;align-items:center;">
             \${portraitSrc ? '<img src="' + portraitSrc + '" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid ' + stageColor + '40;" />' : '<div style="width:48px;height:48px;border-radius:6px;border:1px solid ' + stageColor + '40;display:flex;align-items:center;justify-content:center;font-size:20px;">👤</div>'}
             <div style="flex:1;min-width:0;">
@@ -2482,6 +2523,19 @@ export function generateExportHtml(project: Project): string {
         return selected.every((itemId, index) => itemId === required[index]);
       };
 
+      const craftingRecipeCanAccept = (recipe, selectedIds) => {
+        const selected = selectedIds.filter(Boolean);
+        const required = getCraftingRequirements(recipe).map(req => req.itemId);
+        if (selected.length === 0 || selected.length >= required.length) return false;
+        const requiredCounts = {};
+        required.forEach(itemId => { requiredCounts[itemId] = (requiredCounts[itemId] || 0) + 1; });
+        return selected.every(itemId => {
+          if (!requiredCounts[itemId]) return false;
+          requiredCounts[itemId] -= 1;
+          return true;
+        });
+      };
+
       const applyCraftingRecipe = (recipe) => {
         getCraftingRequirements(recipe).forEach(req => {
           if (!req.consume) return;
@@ -2520,36 +2574,47 @@ export function generateExportHtml(project: Project): string {
       };
 
       let selectedInventoryItemId = null;
+      let selectedInventoryItemIds = [];
+
+      const clearInventorySelection = () => {
+        selectedInventoryItemId = null;
+        selectedInventoryItemIds = [];
+      };
 
       window.handleInventoryItemClick = (itemId) => {
         const itemDef = inventoryItems.find(i => i.id === itemId);
         if (!itemDef) return;
 
-        if (selectedInventoryItemId === itemId) {
-          selectedInventoryItemId = null;
+        if (selectedInventoryItemIds.includes(itemId)) {
+          clearInventorySelection();
           toggleInventory();
           flavorText.innerText = itemDef.description ? ('(Item): ' + itemDef.description) : ('You look at: ' + itemDef.name);
           flavorText.style.display = 'block';
           setTimeout(() => flavorText.style.display = 'none', 3000);
-        } else if (selectedInventoryItemId && selectedInventoryItemId !== itemId) {
+        } else if (selectedInventoryItemIds.length > 0) {
+             const nextSelection = [...selectedInventoryItemIds, itemId];
              const combination = (gameData.craftingRecipes || []).find(r =>
-               craftingRecipeMatches(r, [selectedInventoryItemId, itemId])
+               craftingRecipeMatches(r, nextSelection)
              );
              if (combination) {
                  applyCraftingRecipe(combination);
-                 selectedInventoryItemId = null;
+                 clearInventorySelection();
                  flavorText.innerText = combination.successMessage || 'Items combined successfully!';
                  flavorText.style.display = 'block';
                  setTimeout(() => flavorText.style.display = 'none', 3000);
                  saveGame();
+             } else if ((gameData.craftingRecipes || []).some(r => craftingRecipeCanAccept(r, nextSelection))) {
+                 selectedInventoryItemIds = nextSelection;
+                 selectedInventoryItemId = selectedInventoryItemIds[0] || null;
              } else {
                  flavorText.innerText = 'These objects do not combine.';
                  flavorText.style.display = 'block';
                  setTimeout(() => flavorText.style.display = 'none', 3000);
-                 selectedInventoryItemId = null;
+                 clearInventorySelection();
              }
         } else {
           selectedInventoryItemId = itemId;
+          selectedInventoryItemIds = [itemId];
         }
         updateInventoryUI();
       };
@@ -2571,7 +2636,7 @@ export function generateExportHtml(project: Project): string {
            }
         }
         
-        selectedInventoryItemId = null;
+        clearInventorySelection();
         toggleInventory();
         flavorText.innerText = itemDef.useMessage || 'You used ' + itemDef.name + '.';
         flavorText.style.display = 'block';
@@ -2662,12 +2727,13 @@ export function generateExportHtml(project: Project): string {
           const iconAsset = itemDef.iconAssetId ? assets.find(a => a.id === itemDef.iconAssetId) : null;
           
           let iconHtml = '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.5"><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M8 21v-5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v5"/><path d="M8 10h8"/><path d="M8 14h8"/></svg>';
-          if (iconAsset && iconAsset.src) {
-            iconHtml = '<img src="' + iconAsset.src + '" alt="' + itemDef.name + '" draggable="false" />';
+          const iconSrc = assetSrc(iconAsset);
+          if (iconSrc) {
+            iconHtml = '<img src="' + iconSrc + '" alt="' + itemDef.name + '" draggable="false" />';
           }
           
-          const isSelected = selectedInventoryItemId === itemId;
-          const hasSelection = selectedInventoryItemId !== null;
+          const isSelected = selectedInventoryItemIds.includes(itemId);
+          const hasSelection = selectedInventoryItemIds.length > 0;
           
           let extraStyle = '';
           if (isSelected) {
@@ -2706,7 +2772,7 @@ export function generateExportHtml(project: Project): string {
     const overlay = project.globalSettings.hudOverlay;
     const asset = project.assets.find((a) => a.id === overlay.assetId);
     if (asset) {
-      const hudSrc = asset.dataURL || asset.src || "";
+      const hudSrc = resolveAssetSrc(asset);
       const bgSize = overlay.position === "stretch" ? "100% 100%" : (overlay.position ? "contain" : "100% 100%");
       let bgPos = "center";
       if (overlay.position === "top-left") bgPos = "top left";
@@ -2730,7 +2796,7 @@ export function generateExportHtml(project: Project): string {
   let deviceFrameHtml = "";
   let deviceControlsHtml = "";
   if (hasDeviceFrame && deviceFrame && deviceFrameAsset) {
-    const frameSrc = deviceFrameAsset.dataURL || deviceFrameAsset.src || "";
+    const frameSrc = resolveAssetSrc(deviceFrameAsset);
     const aperture = deviceFrameAperture!;
     const slices = [
       { x: 0, y: 0, width: deviceFrame.outerWidth, height: aperture.y },
@@ -2775,8 +2841,10 @@ export function generateExportHtml(project: Project): string {
       .map((control) => {
         const primaryResponse = control.clickResponses?.[0];
         const primaryScriptSrc = primaryResponse?.scriptAssetId
-          ? project.assets.find((asset) => asset.id === primaryResponse.scriptAssetId)?.src ||
-            primaryResponse.scriptAssetId
+          ? resolveAssetSrc(
+              project.assets.find((asset) => asset.id === primaryResponse.scriptAssetId),
+              primaryResponse.scriptAssetId,
+            )
           : "";
         return `
         <button
@@ -3013,7 +3081,7 @@ export function generateExportHtml(project: Project): string {
         <button onclick="saveGame(); showSimpleDialogue('Game saved.', 'System'); toggleSettings();" style="border:1px solid var(--ui-primary);background:rgba(0,0,0,.28);color:var(--ui-primary);padding:10px;border-radius:var(--ui-radius);font-weight:bold;cursor:pointer;">Save Game</button>
         <button onclick="location.reload();" style="border:1px solid var(--ui-primary);background:rgba(0,0,0,.28);color:var(--ui-primary);padding:10px;border-radius:var(--ui-radius);font-weight:bold;cursor:pointer;">Load Game</button>
         <button onclick="if(!document.fullscreenElement){document.documentElement.requestFullscreen?.();}else{document.exitFullscreen?.();}" style="border:1px solid var(--ui-primary);background:rgba(0,0,0,.28);color:var(--ui-primary);padding:10px;border-radius:var(--ui-radius);font-weight:bold;cursor:pointer;">Fullscreen</button>
-        <button onclick="try { localStorage.removeItem('neocities_game_save_${project.id}'); } catch(e) {} location.reload();" style="border:1px solid #ef4444;background:rgba(127,29,29,.35);color:#fecaca;padding:10px;border-radius:var(--ui-radius);font-weight:bold;cursor:pointer;">Restart Game</button>
+        <button onclick="try { localStorage.removeItem(window.__CAVEBOT_SAVE_KEY__); } catch(e) {} location.reload();" style="border:1px solid #ef4444;background:rgba(127,29,29,.35);color:#fecaca;padding:10px;border-radius:var(--ui-radius);font-weight:bold;cursor:pointer;">Restart Game</button>
       </div>
     </div>
   </div>
@@ -3023,7 +3091,7 @@ export function generateExportHtml(project: Project): string {
   ${project.globalSettings?.dialoguePosition === 'below' ? '<div id="dialogue-box"></div>' : ''}
   </div> <!-- Close scale-wrapper -->
 
-  <script id="__GAME_DATA__" type="application/json">${JSON.stringify(strippedProject).split("</script>").join("<\\/script>").split("</SCRIPT>").join("<\\/script>")}</script>
+  <script id="__GAME_DATA__" type="application/json">${JSON.stringify(project).split("</script>").join("<\\/script>").split("</SCRIPT>").join("<\\/script>")}</script>
   <script>${js}</script>
 </body>
 </html>`;

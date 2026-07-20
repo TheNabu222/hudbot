@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import esbuild from "esbuild";
+import { JSDOM, VirtualConsole } from "jsdom";
 
 const source = `
 	  import assert from "node:assert/strict";
@@ -25,12 +26,14 @@ const source = `
         { id: "map-icon-asset", src: mapIcon, name: "Map Icon", type: "image", category: "used" },
         { id: "portrait-asset", src: data("portrait"), name: "Portrait", type: "image", category: "used" },
         { id: "speaker-asset", src: data("speaker"), name: "Speaker", type: "image", category: "used" },
-        { id: "item-icon-asset", src: data("item-icon"), name: "Item Icon", type: "image", category: "used" },
+        { id: "item-icon-asset", src: "", dataURL: data("item-icon"), name: "Item Icon", type: "image", category: "used" },
         { id: "use-sound-asset", src: audio("use-sound"), name: "Use Sound", type: "audio", category: "used" },
         { id: "choice-sound-asset", src: audio("choice-sound"), name: "Choice Sound", type: "audio", category: "used" },
+        { id: "dataurl-audio-asset", src: "", dataURL: audio("dataurl-audio"), name: "DataURL Audio", type: "audio", category: "used" },
         { id: "bgm-asset", src: audio("bgm"), name: "BGM", type: "audio", category: "used" },
 	        { id: "cursor-asset", src: data("cursor"), name: "Cursor", type: "image", category: "used" },
 	        { id: "frame-asset", src: data("frame"), name: "Frame", type: "image", category: "used" },
+	        { id: "dataurl-only-asset", src: "", dataURL: data("dataurl-only"), name: "DataURL Only", type: "image", category: "used" },
 	        { id: "unused-library-asset", src: data("unused"), name: "Unused Library", type: "image", category: "library" },
 	        { id: "github:assets/_cavebot-assets/used-repo.png", src: "https://raw.githubusercontent.com/thenabu222/entropic-ai/main/assets/_cavebot-assets/used-repo.png", name: "Used Repo", type: "image", category: "repo" },
 	      ],
@@ -78,6 +81,61 @@ const source = `
 	              opacity: 1,
 	              locked: false,
 	              interaction: "none",
+	              blendMode: "normal",
+	              parallaxSpeed: 1,
+	            },
+	            {
+	              id: "dataurl-obj",
+	              name: "DataURL Object",
+	              src: "",
+	              _assetId: "dataurl-only-asset",
+	              x: 180,
+	              y: 120,
+	              width: 32,
+	              height: 32,
+	              rotation: 0,
+	              zIndex: 3,
+	              opacity: 1,
+	              locked: false,
+	              interaction: "sound",
+	              interactionData: "dataurl-audio-asset",
+	              audioSrc: "dataurl-audio-asset",
+	              blendMode: "normal",
+	              parallaxSpeed: 1,
+	            },
+	            {
+	              id: "hookah-obj",
+	              name: "Hookah Pickup",
+	              src: objectSrc,
+	              _assetId: "object-asset",
+	              x: 240,
+	              y: 120,
+	              width: 32,
+	              height: 32,
+	              rotation: 0,
+	              zIndex: 4,
+	              opacity: 1,
+	              locked: false,
+	              interaction: "collect",
+	              giveItemId: "hookah",
+	              blendMode: "normal",
+	              parallaxSpeed: 1,
+	            },
+	            {
+	              id: "lighter-obj",
+	              name: "Lighter Pickup",
+	              src: objectSrc,
+	              _assetId: "object-asset",
+	              x: 300,
+	              y: 120,
+	              width: 32,
+	              height: 32,
+	              rotation: 0,
+	              zIndex: 5,
+	              opacity: 1,
+	              locked: false,
+	              interaction: "collect",
+	              giveItemId: "lighter",
 	              blendMode: "normal",
 	              parallaxSpeed: 1,
 	            },
@@ -219,7 +277,25 @@ const source = `
 	        },
         itemGroups: ["Tools"],
         customCursorAssetId: "cursor-asset",
-        deviceFrame: { assetId: "frame-asset", outerWidth: 900, outerHeight: 700, screen: { x: 20, y: 20, width: 800, height: 600 }, controls: [] },
+        typewriterSpeed: 0,
+        deviceFrame: {
+          assetId: "frame-asset",
+          outerWidth: 900,
+          outerHeight: 700,
+          screen: { x: 20, y: 20, width: 800, height: 600 },
+          controls: [
+            {
+              id: "quest-shell",
+              name: "Quest Shell",
+              x: 820,
+              y: 620,
+              width: 40,
+              height: 40,
+              cursor: "pointer",
+              clickResponses: [{ id: "open-quest-log", interaction: "open_quest_log" }],
+            },
+          ],
+        },
       },
     };
 
@@ -252,6 +328,8 @@ const source = `
 	    assert.equal(html.includes("id=\\"skill-Hyena_20Whispering\\""), true, "generated HTML should use stable encoded skill DOM ids");
 	    assert.equal(html.includes("Family / kin"), true, "generated HTML should display relationship tie kinds");
 	    assert.equal(html.includes("Skill 1"), false, "generated HTML should not fall back to placeholder skill labels");
+	    assert.equal(html.includes(data("dataurl-only")), true, "generated HTML should seed dataURL-only image assets");
+	    assert.equal(html.includes(audio("dataurl-audio")), true, "generated HTML should retain dataURL-only audio assets used by behaviors");
 
     [
       "object-asset",
@@ -262,9 +340,11 @@ const source = `
       "item-icon-asset",
       "use-sound-asset",
       "choice-sound-asset",
+	      "dataurl-audio-asset",
 	      "bgm-asset",
 	      "cursor-asset",
 	      "frame-asset",
+	      "dataurl-only-asset",
 	      "github:assets/_cavebot-assets/used-repo.png",
 	    ].forEach((assetId) => assert.equal(assetIds.has(assetId), true, assetId + " should be retained"));
 
@@ -279,9 +359,11 @@ const source = `
 	    assert.equal(repoRefs.assets.some((asset) => String(asset.src).startsWith("data:")), false, "repo-reference export should strip embedded base64 sources");
 	    const repoAsset = repoRefs.assets.find((asset) => asset.id === "github:assets/_cavebot-assets/used-repo.png");
 	    assert.equal(repoAsset?.src, "https://raw.githubusercontent.com/thenabu222/entropic-ai/main/assets/_cavebot-assets/used-repo.png", "repo-reference export should keep raw GitHub URLs");
+	    return html;
 	  }
 	`;
 
+console.log("export smoke: bundling");
 const result = await esbuild.build({
   stdin: {
     contents: source,
@@ -296,6 +378,64 @@ const result = await esbuild.build({
 });
 
 const bundled = Buffer.from(result.outputFiles[0].text).toString("base64");
+console.log("export smoke: generating html");
 const { run } = await import(`data:text/javascript;base64,${bundled}`);
-run();
+const html = run();
+
+console.log("export smoke: booting html");
+const runtimeErrors = [];
+const virtualConsole = new VirtualConsole();
+virtualConsole.on("jsdomError", (error) => {
+  runtimeErrors.push(error.detail?.stack || error.stack || error.message);
+});
+virtualConsole.on("error", (error) => runtimeErrors.push(error.stack || String(error)));
+const dom = new JSDOM(html, {
+  runScripts: "dangerously",
+  resources: "usable",
+  pretendToBeVisual: true,
+  url: "https://example.test/export.html",
+  virtualConsole,
+  beforeParse(window) {
+    window.HTMLMediaElement.prototype.play = () => Promise.resolve();
+    window.HTMLMediaElement.prototype.pause = () => {};
+    window.open = () => null;
+  },
+});
+await new Promise((resolve) => {
+  dom.window.addEventListener("load", resolve, { once: true });
+  setTimeout(resolve, 250);
+});
+console.log("export smoke: asserting interactions");
+assert.deepEqual(runtimeErrors, [], "exported HTML should boot without runtime errors");
+const exportedObject = dom.window.document.getElementById("obj-1");
+assert.ok(exportedObject, "exported scene object should exist");
+exportedObject.click();
+const dialogueBox = dom.window.document.getElementById("dialogue-box");
+assert.equal(dialogueBox.style.display, "flex", "clicking exported dialogue object should open dialogue");
+const dialogueText = dom.window.document.getElementById("dialogue-text");
+assert.equal(dialogueText?.innerText, "Hello", "exported dialogue text should render");
+dom.window.chooseDialogue(0);
+
+const dataUrlImage = dom.window.document.querySelector("#dataurl-obj img");
+assert.ok(dataUrlImage?.getAttribute("src")?.startsWith("data:image/png"), "dataURL-only object image should resolve in exported runtime");
+dom.window.document.getElementById("dataurl-obj").click();
+dom.window.document.getElementById("hookah-obj").click();
+dom.window.closeDialogue();
+dom.window.document.getElementById("lighter-obj").click();
+dom.window.closeDialogue();
+
+dom.window.toggleInventory();
+dom.window.handleInventoryItemClick("herb");
+dom.window.handleInventoryItemClick("hookah");
+dom.window.handleInventoryItemClick("lighter");
+dom.window.toggleInventory();
+const inventoryList = dom.window.document.getElementById("inventory-list");
+assert.equal(inventoryList?.textContent?.includes("Smoke"), true, "exported inventory should combine three required items/tools");
+
+const shellQuestButton = dom.window.document.getElementById("shell-control-quest-shell");
+assert.ok(shellQuestButton, "exported shell control should exist");
+shellQuestButton.click();
+const questOverlay = dom.window.document.getElementById("quest-overlay");
+assert.equal(questOverlay.style.display, "flex", "clicking exported shell control should open quest log");
+dom.window.close();
 console.log("export smoke ok");
