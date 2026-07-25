@@ -179,6 +179,163 @@ const normalizeBlendMode = (value?: string): BlendMode =>
     ? (value as BlendMode)
     : "normal";
 
+type InterfaceTemplateKind =
+  | "modal"
+  | "hud"
+  | "journal"
+  | "inventory"
+  | "quest"
+  | "crafting"
+  | "map"
+  | "relationships"
+  | "settings"
+  | "choiceBar";
+type SmartUiRegionKind = "inventory_grid" | "journal_text" | "quest_list" | "stat_list";
+type InterfacePresetGroupId =
+  | "shell"
+  | "session"
+  | "rpg"
+  | "tactical"
+  | "knowledge";
+type InterfaceStudioPane = "workshop" | "presets" | "screens";
+
+const INTERFACE_PRESET_GROUPS: Array<{
+  id: InterfacePresetGroupId;
+  title: string;
+  blurb: string;
+  template: InterfaceTemplateKind;
+  presets: string[];
+}> = [
+  {
+    id: "shell",
+    title: "Game Flow & System States",
+    blurb: "Title, loading, settings, save/load, results, credits, failure, rewards.",
+    template: "modal",
+    presets: [
+      "Title Screen",
+      "Mode Select",
+      "Settings Menu",
+      "Load / Save",
+      "Loading Screen",
+      "Credits",
+      "Game Over",
+      "Results Screen",
+      "Rewards & Experience",
+    ],
+  },
+  {
+    id: "session",
+    title: "Session & Narrative Flow",
+    blurb: "Setup, map, pause, cutscene, tutorial, dialogue, item-get, unlock notices.",
+    template: "modal",
+    presets: [
+      "Character Select",
+      "Stage Select",
+      "World Map",
+      "Pre-Game Menu",
+      "Pause Menu",
+      "Cutscene Panel",
+      "Dialogue Choice",
+      "Item Get",
+      "Feature Unlocked",
+    ],
+  },
+  {
+    id: "rpg",
+    title: "RPG Core",
+    blurb: "Inventory, loadouts, stats, crafting, buying, equipping, character edits.",
+    template: "journal",
+    presets: [
+      "Player Menu",
+      "Inventory",
+      "Inspect Item",
+      "Equipment",
+      "Loadout",
+      "Buying / Trading",
+      "Character Customization",
+      "Upgrade Screen",
+      "Crafting",
+    ],
+  },
+  {
+    id: "tactical",
+    title: "HUD & Action Inputs",
+    blurb: "Vitals, counters, objectives, minimap, targeting, prompts, wheels, logs.",
+    template: "hud",
+    presets: [
+      "Player Vitals",
+      "Objective Chip",
+      "Minimap",
+      "Compass",
+      "Button Prompts",
+      "Item Wheel",
+      "Ability Menu",
+      "Targeting Overlay",
+      "Game Log",
+    ],
+  },
+  {
+    id: "knowledge",
+    title: "Sandbox, Lore & Collections",
+    blurb: "Codex, journal, tutorials, galleries, profiles, creator tools, browsers.",
+    template: "journal",
+    presets: [
+      "Codex",
+      "Journal",
+      "Quest Log",
+      "Tutorial Guide",
+      "Gallery",
+      "Collectable Viewer",
+      "Sound Player",
+      "Level Editor",
+      "Content Browser",
+    ],
+  },
+];
+
+const INTERFACE_TEMPLATE_IMPACT: Record<InterfaceTemplateKind, string> = {
+  modal: "Opens as a popup screen; blocks room clicks until closed.",
+  hud: "Shows as an always-on HUD layer over the game screen.",
+  journal: "Opens as a menu or log screen from buttons, objects, or dialogue.",
+  inventory: "Fills an item grid from the player's live inventory.",
+  quest: "Shows active quest steps, journal notes, and completion state.",
+  crafting: "Shows recipe choices and required inventory combinations.",
+  map: "Opens a travel/map surface that should be sized inside the playable frame.",
+  relationships: "Shows roster ties, groups, reputation, and follower state.",
+  settings: "Opens player-facing audio, display, accessibility, and save options.",
+  choiceBar: "Opens as a lightweight action bar without covering the whole scene.",
+};
+
+const interfaceTemplateLabel = (
+  template: InterfaceTemplateKind,
+  presetName = "",
+) => {
+  const lower = presetName.toLowerCase();
+  if (lower.includes("inventory")) return "live item slots";
+  if (lower.includes("craft")) return "recipe builder";
+  if (lower.includes("quest")) return "quest tracker";
+  if (lower.includes("journal") || lower.includes("codex") || lower.includes("lore")) {
+    return "text and notes";
+  }
+  if (lower.includes("map") || lower.includes("minimap")) return "map surface";
+  if (lower.includes("relationship") || lower.includes("roster")) return "people menu";
+  if (lower.includes("setting")) return "settings menu";
+
+  const labels: Record<InterfaceTemplateKind, string> = {
+    modal: "popup screen",
+    hud: "always visible HUD",
+    journal: "text and notes",
+    inventory: "live item slots",
+    quest: "quest tracker",
+    crafting: "recipe builder",
+    map: "map surface",
+    relationships: "people menu",
+    settings: "settings menu",
+    choiceBar: "choice bar",
+  };
+  return labels[template];
+};
+
 const defaultTrackDefinition = (
   id: string,
   kind: "need" | "skill",
@@ -545,7 +702,14 @@ const collectScenePreloadAssetValues = (project: Project) => {
     });
     if (object.src) assetSources.add(object.src);
     (object.clickResponses || []).forEach((response) => {
-      [response.scriptAssetId, response.playSoundAssetId].forEach((value) => {
+      const legacySoundResponse = response as ClickResponse & {
+        playSoundAssetId?: string;
+      };
+      [
+        response.scriptAssetId,
+        response.interaction === "sound" ? response.interactionData : undefined,
+        legacySoundResponse.playSoundAssetId,
+      ].forEach((value) => {
         if (value) assetIds.add(value);
       });
     });
@@ -698,6 +862,9 @@ const App: React.FC = () => {
     assets: DEFAULT_ASSETS,
     globalSettings: {
       useDayNightCycle: false,
+      dayNightStartHour: 8,
+      dayNightHoursPerTick: 0.1,
+      dayNightTickMs: 1000,
       enableNeeds: true,
       enableTTRPGStats: true,
       stageWidth: 800,
@@ -876,6 +1043,7 @@ const App: React.FC = () => {
   const [runtimeDraggingId, setRuntimeDraggingId] = useState<string | null>(
     null,
   );
+  const runtimeDraggingIdRef = useRef<string | null>(null);
   const [quickEditPos, setQuickEditPos] = useState<{
     x: number;
     y: number;
@@ -889,6 +1057,8 @@ const App: React.FC = () => {
     src: string;
     targetSceneId?: string;
   } | null>(null);
+  const [isAudioMuted, setIsAudioMuted] = useState(false);
+  const runtimeAudioRefs = useRef<HTMLAudioElement[]>([]);
   const [isMapOpen, setIsMapOpen] = useState(false);
   const [activeFastTravelMapId, setActiveFastTravelMapId] = useState<
     string | null
@@ -899,6 +1069,10 @@ const App: React.FC = () => {
   >(null);
   const [activeItemGroup, setActiveItemGroup] = useState("all");
   const [newItemGroupText, setNewItemGroupText] = useState("");
+  const [activeInterfacePresetGroup, setActiveInterfacePresetGroup] =
+    useState<InterfacePresetGroupId>("tactical");
+  const [interfaceStudioPane, setInterfaceStudioPane] =
+    useState<InterfaceStudioPane>("presets");
   const [rpgTab, setRpgTab] = useState<
     RpgSubtool | "factions" | "companions"
   >("quests");
@@ -1698,6 +1872,22 @@ const App: React.FC = () => {
 
   const bgmRef = useRef<HTMLAudioElement | null>(null);
 
+  const playRuntimeAudioAsset = (audioAsset?: Asset | null) => {
+    const audioSrc = getAssetDisplaySrc(audioAsset);
+    if (!audioAsset || !audioSrc || isAudioMuted) return;
+    const mediaFragment =
+      audioAsset.trimStart || audioAsset.trimEnd
+        ? `#t=${audioAsset.trimStart || 0}${audioAsset.trimEnd ? `,${audioAsset.trimEnd}` : ""}`
+        : "";
+    const audio = new Audio(audioSrc + mediaFragment);
+    audio.volume = Math.min(1, audioAsset.volume ?? 1);
+    audio.muted = isAudioMuted;
+    runtimeAudioRefs.current = runtimeAudioRefs.current
+      .filter((candidate) => !candidate.paused)
+      .concat(audio);
+    audio.play().catch((e) => console.error("SFX playback failed", e));
+  };
+
   useEffect(() => {
     const currentScene = project.scenes.find(
       (s) => s.id === project.currentSceneId,
@@ -1714,6 +1904,7 @@ const App: React.FC = () => {
           bgmRef.current = new Audio(fullSrc);
           bgmRef.current.loop = true;
           bgmRef.current.volume = Math.min(1, audioAsset.volume ?? 1);
+          bgmRef.current.muted = isAudioMuted;
         } else if (
           bgmRef.current.src !== fullSrc ||
           bgmRef.current.volume !== Math.min(1, audioAsset.volume ?? 1)
@@ -1722,7 +1913,9 @@ const App: React.FC = () => {
           bgmRef.current = new Audio(fullSrc);
           bgmRef.current.loop = true;
           bgmRef.current.volume = Math.min(1, audioAsset.volume ?? 1);
+          bgmRef.current.muted = isAudioMuted;
         }
+        bgmRef.current.muted = isAudioMuted;
         bgmRef.current
           .play()
           .catch((e) => console.error("Audio playback failed", e));
@@ -1738,15 +1931,25 @@ const App: React.FC = () => {
         bgmRef.current.pause();
       }
     };
-  }, [isPlaying, project.currentSceneId, project.assets, project.scenes]);
+  }, [isPlaying, isAudioMuted, project.currentSceneId, project.assets, project.scenes]);
 
   useEffect(() => {
     let timeInterval: ReturnType<typeof setInterval> | null = null;
     if (isPlaying && project.globalSettings.useDayNightCycle) {
+      const hoursPerTick = Math.max(
+        0,
+        project.globalSettings.dayNightHoursPerTick ?? 0.1,
+      );
+      const tickMs = Math.max(100, project.globalSettings.dayNightTickMs ?? 1000);
       timeInterval = setInterval(() => {
         setGameTime((prev) => {
-          const next = prev + 0.1;
-          return next >= 24 ? 0 : next;
+          const next = prev + hoursPerTick;
+          if (next >= 24) {
+            const daysElapsed = Math.floor(next / 24);
+            setGameDay((day) => day + Math.max(1, daysElapsed));
+            return next % 24;
+          }
+          return next;
         });
 
         // Deplete needs over time if enabled
@@ -1761,12 +1964,18 @@ const App: React.FC = () => {
             return next;
           });
         }
-      }, 1000);
+      }, tickMs);
     }
     return () => {
       if (timeInterval) clearInterval(timeInterval);
     };
-  }, [isPlaying, project.globalSettings.useDayNightCycle]);
+  }, [
+    isPlaying,
+    project.globalSettings.dayNightHoursPerTick,
+    project.globalSettings.dayNightTickMs,
+    project.globalSettings.enableNeeds,
+    project.globalSettings.useDayNightCycle,
+  ]);
 
   useEffect(() => {
     if (isPlaying) {
@@ -1877,6 +2086,8 @@ const App: React.FC = () => {
   // Dragging state for stage objects
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const draggingIdRef = useRef<string | null>(null);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
 
   // Parallax tracking state
   const [mouseRatio, setMouseRatio] = useState({ x: 0, y: 0 });
@@ -2241,6 +2452,162 @@ const App: React.FC = () => {
         style={{ transform }}
       />
     );
+  };
+
+  const getInventoryIconSrc = (itemId: string) => {
+    const item = project.inventoryItems.find((candidate) => candidate.id === itemId);
+    if (!item?.iconAssetId) return "";
+    const asset = project.assets.find((candidate) => candidate.id === item.iconAssetId);
+    return getAssetDisplaySrc(asset) || inferGitHubAssetIdSrc(item.iconAssetId) || "";
+  };
+
+  const getVisibleLoreEntries = (source?: SceneObject["uiTextSource"]) => {
+    const entries = project.loreEntries || [];
+    return entries.filter((entry) => {
+      if (entry.requiredFlagId && !playerFlags.includes(entry.requiredFlagId)) return false;
+      if (source === "journal") return entry.entryType === "journal";
+      if (source === "quest_note") return entry.entryType === "quest_note";
+      if (source === "lore") return entry.entryType === "lore";
+      return true;
+    });
+  };
+
+  const renderSmartUiRegion = (obj: SceneObject) => {
+    const primary = obj.uiColorPrimary || project.globalSettings.uiColorPrimary || "#00ffcc";
+    const secondary = obj.uiColorSecondary || "rgba(0,0,0,0.68)";
+    const padding = obj.uiPadding ?? 10;
+    const isEditor = !isPlaying;
+
+    if (obj.uiElementType === "inventory_grid") {
+      const columns = Math.max(1, obj.uiGridColumns || 4);
+      const rows = Math.max(1, obj.uiGridRows || 3);
+      const gap = obj.uiGridGap ?? 8;
+      const visibleIds = isEditor
+        ? (playerInventory.length ? playerInventory : project.inventoryItems.slice(0, columns * rows).map((item) => item.id))
+        : playerInventory;
+      const cells = Array.from({ length: columns * rows }, (_, index) => visibleIds[index] || "");
+      return (
+        <div
+          className="ui-smart-region ui-smart-region--inventory"
+          style={{
+            borderColor: primary,
+            backgroundColor: secondary,
+            padding,
+            gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+            gap,
+          }}
+        >
+          {cells.map((itemId, index) => {
+            const item = project.inventoryItems.find((candidate) => candidate.id === itemId);
+            const iconSrc = itemId ? getInventoryIconSrc(itemId) : "";
+            return (
+              <div key={`${itemId || "empty"}-${index}`} className="ui-smart-region__slot">
+                {iconSrc ? (
+                  <img src={iconSrc} alt="" draggable={false} />
+                ) : item ? (
+                  <span>{item.name.slice(0, 2)}</span>
+                ) : null}
+              </div>
+            );
+          })}
+          {!isEditor && playerInventory.length === 0 && (
+            <div className="ui-smart-region__empty">{obj.uiEmptyText || "Inventory empty"}</div>
+          )}
+        </div>
+      );
+    }
+
+    if (obj.uiElementType === "journal_text") {
+      const entries = getVisibleLoreEntries(obj.uiTextSource);
+      return (
+        <div
+          className="ui-smart-region ui-smart-region--text"
+          style={{
+            borderColor: primary,
+            backgroundColor: secondary,
+            color: obj.textColor || primary,
+            fontFamily: obj.textFontFamily || project.globalSettings.uiFontFamily,
+            fontSize: obj.textFontSize || 14,
+            lineHeight: obj.textLineHeight || 1.35,
+            padding,
+          }}
+        >
+          {entries.length ? (
+            entries.slice(0, 6).map((entry) => (
+              <article key={entry.id}>
+                <strong>{entry.title || "Untitled"}</strong>
+                {entry.content && <p>{entry.content}</p>}
+              </article>
+            ))
+          ) : (
+            <span>{obj.uiEmptyText || (isEditor ? "Journal text fills this box" : "No journal entries yet.")}</span>
+          )}
+        </div>
+      );
+    }
+
+    if (obj.uiElementType === "quest_list") {
+      const quests = project.quests.filter(
+        (quest) =>
+          activeQuests.includes(quest.id) ||
+          completedQuests.includes(quest.id) ||
+          (isEditor && project.quests.indexOf(quest) < 4),
+      );
+      return (
+        <div
+          className="ui-smart-region ui-smart-region--text"
+          style={{
+            borderColor: primary,
+            backgroundColor: secondary,
+            color: obj.textColor || primary,
+            fontFamily: obj.textFontFamily || project.globalSettings.uiFontFamily,
+            fontSize: obj.textFontSize || 13,
+            lineHeight: obj.textLineHeight || 1.25,
+            padding,
+          }}
+        >
+          {quests.length ? (
+            quests.slice(0, 6).map((quest) => (
+              <article key={quest.id}>
+                <strong>{quest.name || "Untitled quest"}</strong>
+                <p>{completedQuests.includes(quest.id) ? "Complete" : quest.description || "Active objective"}</p>
+              </article>
+            ))
+          ) : (
+            <span>{obj.uiEmptyText || (isEditor ? "Quest rows fill this box" : "No active quests.")}</span>
+          )}
+        </div>
+      );
+    }
+
+    if (obj.uiElementType === "stat_list") {
+      const tracks = Object.entries(playerNeeds);
+      const fallbackTracks = ["hunger", "rest", "novelty", "connection"].map((id) => [id, 70] as [string, number]);
+      return (
+        <div
+          className="ui-smart-region ui-smart-region--stats"
+          style={{
+            borderColor: primary,
+            backgroundColor: secondary,
+            color: obj.textColor || primary,
+            fontFamily: obj.textFontFamily || project.globalSettings.uiFontFamily,
+            fontSize: obj.textFontSize || 12,
+            padding,
+          }}
+        >
+          {(tracks.length ? tracks : fallbackTracks).slice(0, 8).map(([label, value]) => (
+            <div key={label} className="ui-smart-region__meter">
+              <span>{label}</span>
+              <i>
+                <b style={{ width: `${Math.max(0, Math.min(100, Number(value) || 0))}%`, backgroundColor: primary }} />
+              </i>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    return null;
   };
 
   const updateScene = (updates: Partial<typeof currentScene>) => {
@@ -2913,21 +3280,26 @@ const App: React.FC = () => {
   const handleObjectPointerDown = (e: React.PointerEvent, obj: SceneObject) => {
     if (isPlaying) {
       if (!obj.isDraggable) return;
+      e.preventDefault();
       e.stopPropagation();
+      runtimeDraggingIdRef.current = obj.id;
       setRuntimeDraggingId(obj.id);
 
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      setDragOffset({
+      const offset = {
         x: ((e.clientX - rect.left) / rect.width) * obj.width,
         y: ((e.clientY - rect.top) / rect.height) * obj.height,
-      });
+      };
+      dragOffsetRef.current = offset;
+      setDragOffset(offset);
 
       try {
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       } catch (err) {}
       return;
     }
     if (obj.locked) return;
+    e.preventDefault();
     e.stopPropagation();
     if (rightSidebarWidth === 0) setRightSidebarWidth(320);
     setSelectedHudWidget(null);
@@ -2957,19 +3329,22 @@ const App: React.FC = () => {
       }
     }
 
+    draggingIdRef.current = obj.id;
     setDraggingId(obj.id);
     dragStartProjectRef.current = project;
     didDragRef.current = false;
 
     // Calculate offset from top-left of object
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setDragOffset({
+    const offset = {
       x: ((e.clientX - rect.left) / rect.width) * obj.width,
       y: ((e.clientY - rect.top) / rect.height) * obj.height,
-    });
+    };
+    dragOffsetRef.current = offset;
+    setDragOffset(offset);
 
     try {
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     } catch (err) {}
   };
 
@@ -3025,19 +3400,22 @@ const App: React.FC = () => {
 
   const handleObjectPointerMove = (e: React.PointerEvent) => {
     if (isPlaying) {
-      if (runtimeDraggingId && stageRef.current) {
+      const activeRuntimeDraggingId = runtimeDraggingIdRef.current;
+      if (activeRuntimeDraggingId && stageRef.current) {
         const rect = stageRef.current.getBoundingClientRect();
         const stageWidth =
           currentScene.width || project.globalSettings.stageWidth || 800;
         const stageHeight =
           currentScene.height || project.globalSettings.stageHeight || 600;
         let newX =
-          ((e.clientX - rect.left) / rect.width) * stageWidth - dragOffset.x;
+          ((e.clientX - rect.left) / rect.width) * stageWidth -
+          dragOffsetRef.current.x;
         let newY =
-          ((e.clientY - rect.top) / rect.height) * stageHeight - dragOffset.y;
+          ((e.clientY - rect.top) / rect.height) * stageHeight -
+          dragOffsetRef.current.y;
         setRuntimeOverrides((prev) => ({
           ...prev,
-          [runtimeDraggingId]: { x: newX, y: newY },
+          [activeRuntimeDraggingId]: { x: newX, y: newY },
         }));
       }
 
@@ -3143,7 +3521,8 @@ const App: React.FC = () => {
       return;
     }
 
-    if (!draggingId || !stageRef.current) return;
+    const activeDraggingId = draggingIdRef.current || draggingId;
+    if (!activeDraggingId || !stageRef.current) return;
     didDragRef.current = true;
 
     const rect = stageRef.current.getBoundingClientRect();
@@ -3152,9 +3531,11 @@ const App: React.FC = () => {
     const stageHeight =
       currentScene.height || project.globalSettings.stageHeight || 600;
     let newX =
-      ((e.clientX - rect.left) / rect.width) * stageWidth - dragOffset.x;
+      ((e.clientX - rect.left) / rect.width) * stageWidth -
+      dragOffsetRef.current.x;
     let newY =
-      ((e.clientY - rect.top) / rect.height) * stageHeight - dragOffset.y;
+      ((e.clientY - rect.top) / rect.height) * stageHeight -
+      dragOffsetRef.current.y;
 
     // Snap to grid if enabled or shift is held
     if (project.globalSettings.snapToGrid || e.shiftKey) {
@@ -3163,7 +3544,10 @@ const App: React.FC = () => {
       newY = Math.round(newY / grid) * grid;
     }
 
-    if (selectedMultiIds.length > 1 && selectedMultiIds.includes(draggingId)) {
+    if (
+      selectedMultiIds.length > 1 &&
+      selectedMultiIds.includes(activeDraggingId)
+    ) {
       const startSceneList =
         editorMode === "ui_stage"
           ? dragStartProjectRef.current?.uiMenus
@@ -3176,7 +3560,7 @@ const App: React.FC = () => {
             : dragStartProjectRef.current?.currentSceneId),
       );
       const startDragObj = startScene?.objects.find(
-        (o: any) => o.id === draggingId,
+        (o: any) => o.id === activeDraggingId,
       );
 
       if (!startDragObj) return;
@@ -3228,7 +3612,7 @@ const App: React.FC = () => {
             : dragStartProjectRef.current?.currentSceneId),
       );
       const startDragObj = startScene?.objects.find(
-        (o: any) => o.id === draggingId,
+        (o: any) => o.id === activeDraggingId,
       );
       if (!startDragObj) return;
 
@@ -3248,10 +3632,13 @@ const App: React.FC = () => {
                   ...s,
                   objects: s.objects.map((o: any) => {
                     const descendantIds = getDescendantIds(
-                      [draggingId],
+                      [activeDraggingId],
                       s.objects,
                     );
-                    if (o.id !== draggingId && !descendantIds.includes(o.id))
+                    if (
+                      o.id !== activeDraggingId &&
+                      !descendantIds.includes(o.id)
+                    )
                       return o;
 
                     const startObj = startScene?.objects.find(
@@ -3270,10 +3657,13 @@ const App: React.FC = () => {
 
   const handleObjectPointerUp = (e: React.PointerEvent) => {
     if (isPlaying) {
-      if (runtimeDraggingId) {
+      const activeRuntimeDraggingId =
+        runtimeDraggingIdRef.current || runtimeDraggingId;
+      if (activeRuntimeDraggingId) {
+        runtimeDraggingIdRef.current = null;
         setRuntimeDraggingId(null);
         try {
-          (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
         } catch (err) {}
       }
       setSelectionBox(null);
@@ -3306,7 +3696,8 @@ const App: React.FC = () => {
       setSelectionStart(null);
     }
 
-    if (draggingId || resizingId || rotatingId) {
+    const activeDraggingId = draggingIdRef.current || draggingId;
+    if (activeDraggingId || resizingId || rotatingId) {
       if (dragStartProjectRef.current) {
         setHistory((h) => ({
           past: [...h.past.slice(-20), dragStartProjectRef.current!],
@@ -3314,28 +3705,29 @@ const App: React.FC = () => {
         }));
       }
     }
-    if (draggingId) {
+    if (activeDraggingId) {
       if (!didDragRef.current && !e.shiftKey) {
         // If they just clicked (no drag) and not holding shift,
         // make sure this object is the only selected one.
         // If holding shift, it stays in the multi-select array (added in pointerdown).
-        setSelectedMultiIds([draggingId]);
-        setSelectedObjectId(draggingId);
+        setSelectedMultiIds([activeDraggingId]);
+        setSelectedObjectId(activeDraggingId);
       }
       try {
-        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
       } catch (err) {}
+      draggingIdRef.current = null;
       setDraggingId(null);
     }
     if (resizingId) {
       try {
-        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
       } catch (err) {}
       setResizingId(null);
     }
     if (rotatingId) {
       try {
-        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
       } catch (err) {}
       setRotatingId(null);
     }
@@ -3560,7 +3952,11 @@ const App: React.FC = () => {
 
   const handleExport = () => {
     try {
-      const html = generateExportHtml(project);
+      const exportProject = prepareProjectForExport(project, {
+        assetScope: "used",
+        includeEmbeddedAssetData: "fallback",
+      });
+      const html = generateExportHtml(exportProject);
       const blob = new Blob([html], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -3629,7 +4025,7 @@ const App: React.FC = () => {
         );
       });
       setPlayerSkills(defaultSkills);
-      setGameTime(8);
+      setGameTime(project.globalSettings.dayNightStartHour ?? 8);
       setGameDay(1);
     } else {
       setPlayerInventory([]);
@@ -3660,6 +4056,7 @@ const App: React.FC = () => {
         /^(.+?\.(?:png|jpe?g|gif|webp|svg|mp3|wav|ogg|m4a|mp4|webm|js|ts))(?:_crop.*)?$/i,
         "$1",
       )
+      .replace(/(?:_crop)+$/i, "")
       .toLowerCase();
   const normalizeRepoFileMatchStem = (value?: string | null) =>
     normalizeRepoFileMatchName(value).replace(REPOSITORY_MEDIA_EXTENSION, "");
@@ -3852,8 +4249,11 @@ const App: React.FC = () => {
             objects: scene.objects.map((obj) => {
               const updatedSrc = srcReplacements.get(obj.src);
               if (updatedSrc) return { ...obj, src: updatedSrc };
+              const existingAsset = obj._assetId
+                ? updatedAssetsById.get(obj._assetId)
+                : undefined;
               const hasLiveAsset =
-                obj._assetId && updatedAssetsById.has(obj._assetId);
+                Boolean(existingAsset && getAssetDisplaySrc(existingAsset));
               if (hasLiveAsset || obj.src || !obj._assetId) return obj;
               const nameMatchedAsset = newAssetsByName.get(
                 normalizeRepoFileMatchName(obj.name),
@@ -4086,6 +4486,105 @@ const App: React.FC = () => {
     });
   };
 
+  const normalizeRuntimeLookup = (value?: string | null) =>
+    (value || "")
+      .trim()
+      .replace(/^.*\//, "")
+      .replace(/\.[a-z0-9]+$/i, "")
+      .replace(/(?:_crop|_cropped|_copy|copy)+$/gi, "")
+      .replace(/[^a-z0-9]+/gi, "")
+      .toLowerCase();
+
+  const addRuntimeInventoryItem = (itemId: string) => {
+    if (!itemId) return;
+    setPlayerInventory((prev) => (prev.includes(itemId) ? prev : [...prev, itemId]));
+  };
+
+  const relationshipBaseValue = (targetId: string) => {
+    const character = (project.characters || []).find(
+      (candidate) => candidate.id === targetId,
+    );
+    if (character) return character.defaultAffinity ?? 0;
+    const faction = (project.factions || []).find(
+      (candidate) => candidate.id === targetId,
+    );
+    return faction?.defaultAffinity ?? 0;
+  };
+
+  const resolveRuntimeRelationshipTargetId = (
+    explicitTargetId?: string | null,
+    obj?: SceneObject,
+  ) => {
+    const rawTarget =
+      explicitTargetId ||
+      obj?.reputationEffect?.npcId ||
+      obj?.characterId ||
+      obj?.affinityId ||
+      "";
+    if (!rawTarget) return "";
+    const normalizedTarget = normalizeRuntimeLookup(rawTarget);
+    const character = (project.characters || []).find(
+      (candidate) =>
+        candidate.id === rawTarget ||
+        normalizeRuntimeLookup(candidate.name) === normalizedTarget,
+    );
+    if (character) return character.id;
+    const faction = (project.factions || []).find(
+      (candidate) =>
+        candidate.id === rawTarget ||
+        normalizeRuntimeLookup(candidate.name) === normalizedTarget,
+    );
+    return faction?.id || rawTarget;
+  };
+
+  const changeRuntimeRelationship = (targetId: string, amount: number) => {
+    if (!targetId || !Number.isFinite(amount)) return;
+    setPlayerFactions((prev) => ({
+      ...prev,
+      [targetId]: Math.max(
+        -100,
+        Math.min(100, (prev[targetId] ?? relationshipBaseValue(targetId)) + amount),
+      ),
+    }));
+  };
+
+  const inferInventoryItemForObject = (obj: SceneObject) => {
+    if (obj.giveItemId) return obj.giveItemId;
+    const linkedAssetId = obj._assetId;
+    const linkedAssetSrc = obj.src;
+    const normalizedObjectName = normalizeRuntimeLookup(obj.name);
+    const normalizedObjectSrc = normalizeRuntimeLookup(linkedAssetSrc);
+    const matchingItem = (project.inventoryItems || []).find((item) => {
+      if (linkedAssetId && item.iconAssetId === linkedAssetId) return true;
+      const normalizedItemName = normalizeRuntimeLookup(item.name);
+      if (
+        normalizedObjectName &&
+        normalizedItemName &&
+        (normalizedItemName === normalizedObjectName ||
+          normalizedObjectName.includes(normalizedItemName) ||
+          normalizedItemName.includes(normalizedObjectName))
+      ) {
+        return true;
+      }
+      if (!item.iconAssetId) return false;
+      const iconAsset = project.assets.find(
+        (asset) => asset.id === item.iconAssetId,
+      );
+      const iconSrc = getAssetDisplaySrc(iconAsset);
+      if (linkedAssetSrc && iconSrc === linkedAssetSrc) return true;
+      const normalizedIconSrc = normalizeRuntimeLookup(iconSrc);
+      const normalizedIconName = normalizeRuntimeLookup(iconAsset?.name);
+      return !!(
+        normalizedObjectSrc &&
+        ((normalizedIconSrc && normalizedIconSrc === normalizedObjectSrc) ||
+          (normalizedIconName &&
+            (normalizedIconName === normalizedObjectSrc ||
+              normalizedObjectSrc.includes(normalizedIconName))))
+      );
+    });
+    return matchingItem?.id || "";
+  };
+
   const handleObjectClick = (obj: SceneObject, isChainedResponse = false) => {
     if (!isPlaying) return;
     if (!isChainedResponse) {
@@ -4126,16 +4625,7 @@ const App: React.FC = () => {
 
     if (obj.audioSrc) {
       const audioAsset = project.assets.find((a) => a.id === obj.audioSrc);
-      const audioSrc = getAssetDisplaySrc(audioAsset);
-      if (audioAsset && audioSrc) {
-        const mediaFragment =
-          audioAsset.trimStart || audioAsset.trimEnd
-            ? `#t=${audioAsset.trimStart || 0}${audioAsset.trimEnd ? `,${audioAsset.trimEnd}` : ""}`
-            : "";
-        const audio = new Audio(audioSrc + mediaFragment);
-        audio.volume = Math.min(1, audioAsset.volume ?? 1);
-        audio.play().catch((e) => console.error("SFX playback failed", e));
-      }
+      playRuntimeAudioAsset(audioAsset);
     }
 
     // Evaluate global Skill requirement block (if the object has a skill set to something other than 'none' and interaction is NOT skill_check)
@@ -4195,12 +4685,10 @@ const App: React.FC = () => {
       setGameTime((prev) => (prev + (obj.timeCost || 0)) % 24);
     }
 
-    if (obj.reputationEffect && obj.reputationEffect.npcId) {
+    if (obj.reputationEffect) {
       const effect = obj.reputationEffect;
-      setPlayerFactions((prev) => ({
-        ...prev,
-        [effect.npcId]: Math.max(-100, Math.min(100, (prev[effect.npcId] || 0) + effect.value))
-      }));
+      const targetId = resolveRuntimeRelationshipTargetId(effect.npcId, obj);
+      changeRuntimeRelationship(targetId, effect.value);
     }
 
     if (obj.requireItemId && !playerInventory.includes(obj.requireItemId)) {
@@ -4262,20 +4750,23 @@ const App: React.FC = () => {
       obj.interaction === "give-item" ||
       obj.interaction === "collect"
     ) {
-      if (obj.giveItemId) {
-        setPlayerInventory((prev) => [...prev, obj.giveItemId!]);
+      const itemIdToGive = inferInventoryItemForObject(obj);
+      if (itemIdToGive) {
+        addRuntimeInventoryItem(itemIdToGive);
         const item = project.inventoryItems.find(
-          (i) => i.id === obj.giveItemId,
+          (i) => i.id === itemIdToGive,
         );
         setPreviewDialogue(
           obj.interactionData || `You obtained: ${item?.name || "an item"}!`,
         );
-      } else if (!obj.giveItemId) {
+      } else {
         setPreviewDialogue(obj.interactionData || `You interacted with this!`);
       }
 
       if (obj.interaction === "collect") {
-        setCollectedObjects((prev) => [...prev, obj.id]);
+        setCollectedObjects((prev) =>
+          prev.includes(obj.id) ? prev : [...prev, obj.id],
+        );
       }
     } else if (obj.interaction === "link" && obj.interactionData) {
       window.open(obj.interactionData, "_blank");
@@ -4407,13 +4898,19 @@ const App: React.FC = () => {
           .catch((err) => console.error("Exit fullscreen error", err));
       }
     } else if (obj.interaction === "toggle_mute") {
-      // In a real implementation this would toggle a global volume state,
-      // but without a global audio context we can just mock it or toggle a player flag
-      setPreviewDialogue("Audio mute toggled.");
+      setIsAudioMuted((previous) => {
+        const next = !previous;
+        if (bgmRef.current) bgmRef.current.muted = next;
+        runtimeAudioRefs.current.forEach((audio) => {
+          audio.muted = next;
+        });
+        setPreviewDialogue(next ? "Audio muted." : "Audio unmuted.");
+        return next;
+      });
     } else if (obj.interaction === "advance_day") {
       setPlayerFlags((prev) => prev.filter((f) => !f.startsWith("daily_")));
       setGameDay((prev) => prev + 1);
-      setGameTime(6); // reset to morning
+      setGameTime(project.globalSettings.dayNightStartHour ?? 6);
       setPreviewDialogue("A new day begins.");
     } else if (obj.interaction === "gift_item") {
       const charId = obj.interactionData;
@@ -4614,13 +5111,7 @@ const App: React.FC = () => {
       const audioAsset = project.assets.find(
         (a) => a.id === obj.interactionData,
       );
-      const audioSrc = getAssetDisplaySrc(audioAsset);
-      if (audioAsset && audioSrc) {
-        const mediaFragment = audioAsset.trimStart || audioAsset.trimEnd ? `#t=${audioAsset.trimStart || 0}${audioAsset.trimEnd ? ',' + audioAsset.trimEnd : ''}` : '';
-        const audio = new Audio(audioSrc + mediaFragment);
-        audio.volume = Math.min(1, audioAsset.volume ?? 1);
-        audio.play().catch((e) => console.error("SFX playback failed", e));
-      }
+      playRuntimeAudioAsset(audioAsset);
     } else if (obj.interaction === "run_script" && obj.scriptAssetId) {
       const scriptAsset = project.assets.find(
         (a) => a.id === obj.scriptAssetId,
@@ -5338,13 +5829,29 @@ const App: React.FC = () => {
   };
 
   const createInterfaceTemplate = (
-    template: "modal" | "hud" | "journal" | "choiceBar",
+    template: InterfaceTemplateKind,
+    options: { name?: string } = {},
   ) => {
-    const menuId = uuidv4();
+    const existingEditableMenu = options.name
+      ? (project.uiMenus || []).find((menu) => menu.name === options.name)
+      : null;
+    const menuId = existingEditableMenu?.id || uuidv4();
     const stageW = logicalStageWidth || 800;
     const stageH = logicalStageHeight || 600;
     const primary = project.globalSettings.uiColorPrimary || "#00ffcc";
     const panelBg = project.globalSettings.uiColorBackground || "rgba(0,0,0,0.86)";
+    const resolveTemplate = (requested: InterfaceTemplateKind, name?: string): InterfaceTemplateKind => {
+      const normalized = (name || "").toLowerCase();
+      if (normalized.includes("inventory")) return "inventory";
+      if (normalized.includes("quest")) return "quest";
+      if (normalized.includes("craft")) return "crafting";
+      if (normalized.includes("map")) return "map";
+      if (normalized.includes("relationship") || normalized.includes("roster")) return "relationships";
+      if (normalized.includes("setting")) return "settings";
+      if (normalized.includes("journal") || normalized.includes("lore") || normalized.includes("almanac") || normalized.includes("codex")) return "journal";
+      return requested;
+    };
+    const resolvedTemplate = resolveTemplate(template, options.name);
     const makeBase = (
       name: string,
       x: number,
@@ -5428,9 +5935,52 @@ const App: React.FC = () => {
         interaction,
         ...extra,
       }) as SceneObject;
+    const smartRegion = (
+      kind: SmartUiRegionKind,
+      name: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      zIndex: number,
+      extra: Partial<SceneObject> = {},
+    ): SceneObject =>
+      ({
+        ...makeBase(name, x, y, width, height, zIndex),
+        isUiElement: true,
+        uiElementType: kind,
+        uiBindingType:
+          kind === "inventory_grid"
+            ? "inventory"
+            : kind === "quest_list"
+              ? "quests"
+              : kind === "stat_list"
+                ? "stats"
+                : "journal",
+        uiColorPrimary: primary,
+        uiColorSecondary: "rgba(4,12,22,0.56)",
+        uiBorderRadius: 6,
+        uiBorderType: "dashed",
+        uiGridColumns: kind === "inventory_grid" ? 5 : undefined,
+        uiGridRows: kind === "inventory_grid" ? 4 : undefined,
+        uiGridGap: kind === "inventory_grid" ? 6 : undefined,
+        uiPadding: kind === "inventory_grid" ? 10 : 16,
+        uiEmptyText:
+          kind === "inventory_grid"
+            ? "Inventory empty"
+            : kind === "quest_list"
+              ? "No active quests"
+              : kind === "stat_list"
+                ? "No meters configured"
+                : "No entries unlocked",
+        textColor: primary,
+        textFontSize: kind === "stat_list" ? 12 : 15,
+        ignoreClicks: true,
+        ...extra,
+      }) as SceneObject;
 
     const templates: Record<
-      typeof template,
+      InterfaceTemplateKind,
       { name: string; isOpenByDefault: boolean; blocksClicks: boolean; objects: SceneObject[] }
     > = {
       modal: {
@@ -5468,6 +6018,89 @@ const App: React.FC = () => {
           button("Close Journal", "Close", stageW * 0.72, stageH * 0.78, stageW * 0.11, 38, 13, "close_ui", { targetUiId: menuId }),
         ],
       },
+      inventory: {
+        name: "Inventory Screen",
+        isOpenByDefault: false,
+        blocksClicks: true,
+        objects: [
+          panel("Inventory Art Backing", stageW * 0.1, stageH * 0.1, stageW * 0.8, stageH * 0.78, 10, "rgba(0,0,0,0.7)"),
+          text("Inventory Title", "INVENTORY", stageW * 0.15, stageH * 0.15, stageW * 0.5, 34, 12, 24),
+          smartRegion("inventory_grid", "Inventory Item Grid", stageW * 0.17, stageH * 0.25, stageW * 0.55, stageH * 0.5, 12, {
+            uiEmptyText: "No items collected yet",
+          }),
+          text("Inventory Hint", "Resize this item grid over your bag, shelf, or custom inventory art.", stageW * 0.18, stageH * 0.78, stageW * 0.5, 30, 12, 13),
+          button("Close Inventory", "Close", stageW * 0.72, stageH * 0.78, stageW * 0.11, 38, 13, "close_ui", { targetUiId: menuId }),
+        ],
+      },
+      quest: {
+        name: "Quest Log Screen",
+        isOpenByDefault: false,
+        blocksClicks: true,
+        objects: [
+          panel("Quest Log Backing", stageW * 0.1, stageH * 0.1, stageW * 0.8, stageH * 0.78, 10),
+          text("Quest Log Title", "QUEST LOG", stageW * 0.15, stageH * 0.15, stageW * 0.5, 34, 12, 24),
+          smartRegion("quest_list", "Quest Step List", stageW * 0.15, stageH * 0.24, stageW * 0.62, stageH * 0.48, 12, {
+            uiEmptyText: "No active quests",
+          }),
+          button("Close Quest Log", "Close", stageW * 0.72, stageH * 0.78, stageW * 0.11, 38, 13, "close_ui", { targetUiId: menuId }),
+        ],
+      },
+      crafting: {
+        name: "Crafting Screen",
+        isOpenByDefault: false,
+        blocksClicks: true,
+        objects: [
+          panel("Crafting Backing", stageW * 0.1, stageH * 0.1, stageW * 0.8, stageH * 0.78, 10),
+          text("Crafting Title", "CRAFTING", stageW * 0.15, stageH * 0.15, stageW * 0.5, 34, 12, 24),
+          panel("Recipe List Region", stageW * 0.15, stageH * 0.25, stageW * 0.28, stageH * 0.48, 11, "rgba(255,255,255,0.04)"),
+          text("Recipe List Label", "Recipes", stageW * 0.18, stageH * 0.29, stageW * 0.2, 30, 12, 15),
+          smartRegion("inventory_grid", "Required Inventory Grid", stageW * 0.48, stageH * 0.25, stageW * 0.28, stageH * 0.36, 12, {
+            uiGridColumns: 3,
+            uiGridRows: 3,
+            uiEmptyText: "Required items",
+          }),
+          button("Craft Button", "Craft", stageW * 0.55, stageH * 0.66, stageW * 0.14, 40, 13, "open_crafting"),
+          button("Close Crafting", "Close", stageW * 0.72, stageH * 0.78, stageW * 0.11, 38, 13, "close_ui", { targetUiId: menuId }),
+        ],
+      },
+      map: {
+        name: "Map Screen",
+        isOpenByDefault: false,
+        blocksClicks: true,
+        objects: [
+          panel("Map Art Slot", stageW * 0.08, stageH * 0.08, stageW * 0.84, stageH * 0.78, 10, "rgba(5,20,28,0.62)"),
+          text("Map Title", "MAP", stageW * 0.13, stageH * 0.13, stageW * 0.35, 34, 12, 24),
+          text("Map Hint", "Drop your map art here, then place clickable location buttons over it.", stageW * 0.18, stageH * 0.48, stageW * 0.5, 70, 12, 15),
+          button("Location Button", "Location", stageW * 0.46, stageH * 0.36, stageW * 0.16, 40, 13, "open_map"),
+          button("Close Map", "Close", stageW * 0.72, stageH * 0.78, stageW * 0.11, 38, 13, "close_ui", { targetUiId: menuId }),
+        ],
+      },
+      relationships: {
+        name: "Relationships Screen",
+        isOpenByDefault: false,
+        blocksClicks: true,
+        objects: [
+          panel("Relationships Backing", stageW * 0.1, stageH * 0.1, stageW * 0.8, stageH * 0.78, 10),
+          text("Relationships Title", "RELATIONSHIPS", stageW * 0.15, stageH * 0.15, stageW * 0.55, 34, 12, 24),
+          panel("Roster Rows", stageW * 0.15, stageH * 0.25, stageW * 0.62, stageH * 0.45, 11, "rgba(255,255,255,0.04)"),
+          text("Roster Hint", "Character ties, groups, and reputation changes appear here during play.", stageW * 0.18, stageH * 0.3, stageW * 0.54, 88, 12, 15),
+          button("Close Relationships", "Close", stageW * 0.72, stageH * 0.78, stageW * 0.11, 38, 13, "close_ui", { targetUiId: menuId }),
+        ],
+      },
+      settings: {
+        name: "Settings Screen",
+        isOpenByDefault: false,
+        blocksClicks: true,
+        objects: [
+          panel("Settings Backing", stageW * 0.16, stageH * 0.12, stageW * 0.68, stageH * 0.72, 10),
+          text("Settings Title", "SETTINGS", stageW * 0.21, stageH * 0.17, stageW * 0.45, 34, 12, 24),
+          button("Mute Toggle", "Mute / Unmute", stageW * 0.22, stageH * 0.29, stageW * 0.22, 42, 12, "toggle_mute"),
+          button("Save Game", "Save Game", stageW * 0.22, stageH * 0.39, stageW * 0.22, 42, 12, "save_game"),
+          button("Load Game", "Load Game", stageW * 0.5, stageH * 0.39, stageW * 0.22, 42, 12, "load_game"),
+          button("Fullscreen", "Fullscreen", stageW * 0.5, stageH * 0.29, stageW * 0.22, 42, 12, "toggle_fullscreen"),
+          button("Close Settings", "Close", stageW * 0.62, stageH * 0.71, stageW * 0.12, 38, 13, "close_ui", { targetUiId: menuId }),
+        ],
+      },
       choiceBar: {
         name: "Action Choice Bar",
         isOpenByDefault: false,
@@ -5479,10 +6112,40 @@ const App: React.FC = () => {
         ],
       },
     };
-    const selected = templates[template];
+    const selected = templates[resolvedTemplate];
+    const genericScaffoldNames = new Set([
+      "Panel Backing",
+      "Panel Title",
+      "Panel Body",
+      "Close Button",
+      "Journal Backing",
+      "Journal Title",
+      "Entry Row 1",
+      "Entry Row 2",
+      "Entry Placeholder",
+      "Close Journal",
+    ]);
+    const shouldRegenerateExisting =
+      !!existingEditableMenu &&
+      !!options.name?.endsWith("Custom Screen") &&
+      !["modal", "hud", "journal", "choiceBar"].includes(resolvedTemplate) &&
+      (existingEditableMenu.objects || []).length > 0 &&
+      (existingEditableMenu.objects || []).every((object) =>
+        genericScaffoldNames.has(object.name || ""),
+      );
+
+    if (existingEditableMenu && !shouldRegenerateExisting) {
+      setProject((p) => ({ ...p, currentUiMenuId: existingEditableMenu.id }));
+      setEditorMode("ui_stage");
+      setHideEditorHud(true);
+      setSelectedObjectId(null);
+      showError(`Opened existing ${existingEditableMenu.name}. Edit it on the canvas.`);
+      return;
+    }
+
     const newMenu: Scene = {
       id: menuId,
-      name: selected.name,
+      name: existingEditableMenu?.name || options.name || selected.name,
       width: stageW,
       height: stageH,
       backgroundColor: "transparent",
@@ -5491,17 +6154,355 @@ const App: React.FC = () => {
       isOpenByDefault: selected.isOpenByDefault,
       closeOnClickOutside: selected.blocksClicks,
     };
+    const nextUiMenus = existingEditableMenu
+      ? (project.uiMenus || []).map((menu) =>
+          menu.id === existingEditableMenu.id ? newMenu : menu,
+        )
+      : [...(project.uiMenus || []), newMenu];
+
     pushHistory({
       ...project,
-      uiMenus: [...(project.uiMenus || []), newMenu],
+      uiMenus: nextUiMenus,
       currentUiMenuId: menuId,
     });
-    if (template === "hud") {
+    if (resolvedTemplate === "hud") {
       setHideEditorHud(false);
       setIsHudPlacementMode(true);
       setSelectedHudWidget("buttons");
     }
     setEditorMode("ui_stage");
+    if (shouldRegenerateExisting) {
+      showError(`Rebuilt ${newMenu.name} with the right functional regions.`);
+    }
+  };
+
+  const createHudKit = () => {
+    const stageW = logicalStageWidth || project.globalSettings.stageWidth || 800;
+    const stageH = logicalStageHeight || project.globalSettings.stageHeight || 600;
+    const primary = project.globalSettings.uiColorPrimary || "#00ffcc";
+    const panelBg =
+      project.globalSettings.uiColorBackground || "rgba(0,0,0,0.86)";
+
+    const makeBase = (
+      name: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      zIndex: number,
+    ): Partial<SceneObject> => ({
+      id: uuidv4(),
+      name,
+      x,
+      y,
+      width,
+      height,
+      zIndex,
+      opacity: 1,
+      rotation: 0,
+      locked: false,
+      blendMode: "normal",
+      parallaxSpeed: 1,
+      cursor: "pointer",
+    });
+
+    const panel = (
+      name: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      zIndex: number,
+      color = panelBg,
+    ): SceneObject =>
+      ({
+        ...makeBase(name, x, y, width, height, zIndex),
+        isUiElement: true,
+        uiElementType: "panel",
+        uiColorPrimary: primary,
+        uiColorSecondary: color,
+        uiBorderRadius: 8,
+        ignoreClicks: true,
+      }) as SceneObject;
+
+    const text = (
+      name: string,
+      content: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      zIndex: number,
+      size = 16,
+    ): SceneObject =>
+      ({
+        ...makeBase(name, x, y, width, height, zIndex),
+        isText: true,
+        textContent: content,
+        textColor: primary,
+        textFontSize: size,
+        textWeight: "bold",
+        textAlign: "left",
+        ignoreClicks: true,
+      }) as SceneObject;
+
+    const button = (
+      name: string,
+      label: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      zIndex: number,
+      interaction: InteractionType,
+      extra: Partial<SceneObject> = {},
+    ): SceneObject =>
+      ({
+        ...makeBase(name, x, y, width, height, zIndex),
+        isUiElement: true,
+        uiElementType: "button",
+        textContent: label,
+        textFontSize: height < 34 ? 11 : 14,
+        uiColorPrimary: primary,
+        uiColorSecondary: "rgba(0,0,0,0.72)",
+        uiBorderRadius: 6,
+        interaction,
+        ...extra,
+      }) as SceneObject;
+
+    const progress = (
+      name: string,
+      label: string,
+      bindingId: string,
+      y: number,
+    ): SceneObject[] => [
+      text(`${name} Label`, label, stageW * 0.17, y, stageW * 0.18, 24, 13, 13),
+      ({
+        ...makeBase(`${name} Meter`, stageW * 0.36, y + 2, stageW * 0.45, 18, 13),
+        isUiElement: true,
+        uiElementType: "progress",
+        uiColorPrimary: primary,
+        uiColorSecondary: "rgba(255,255,255,0.08)",
+        uiValue: 70,
+        uiBindingType: "need",
+        uiBindingId: bindingId,
+        ignoreClicks: true,
+      }) as SceneObject,
+    ];
+
+    const menu = (
+      name: string,
+      objects: SceneObject[],
+      options: Pick<Scene, "blocksClicks" | "isOpenByDefault" | "closeOnClickOutside">,
+    ): Scene => ({
+      id: uuidv4(),
+      name,
+      width: stageW,
+      height: stageH,
+      backgroundColor: "transparent",
+      objects,
+      ...options,
+    });
+
+    const hudBar = menu(
+      "HUD Kit - Bottom Controls",
+      [
+        panel("HUD Bar Backing", stageW * 0.16, stageH - 70, stageW * 0.68, 52, 10, "rgba(0,0,0,0.5)"),
+        button("Inventory", "Items", stageW * 0.19, stageH - 60, 74, 34, 12, "toggle_inventory"),
+        button("Map", "Map", stageW * 0.31, stageH - 60, 62, 34, 12, "open_map"),
+        button("Quests", "Quests", stageW * 0.41, stageH - 60, 78, 34, 12, "open_quest_log"),
+        button("Lore", "Lore", stageW * 0.53, stageH - 60, 64, 34, 12, "open_almanac"),
+        button("Craft", "Craft", stageW * 0.63, stageH - 60, 72, 34, 12, "open_crafting"),
+      ],
+      { blocksClicks: false, isOpenByDefault: true, closeOnClickOutside: false },
+    );
+
+    const meterPanel = menu(
+      "HUD Kit - Needs and Skills",
+      [
+        panel("Meters Panel", stageW * 0.12, stageH * 0.1, stageW * 0.76, stageH * 0.48, 10),
+        text("Meters Title", "NEEDS / SKILLS", stageW * 0.17, stageH * 0.15, stageW * 0.5, 34, 12, 22),
+        ...progress("Rest", "Rest", "rest", stageH * 0.25),
+        ...progress("Hunger", "Hunger", "hunger", stageH * 0.31),
+        ...progress("Connection", "Connection", "connection", stageH * 0.37),
+        ...progress("Novelty", "Novelty", "novelty", stageH * 0.43),
+        button("Close Meters", "Close", stageW * 0.7, stageH * 0.49, stageW * 0.12, 36, 13, "close_ui"),
+      ],
+      { blocksClicks: true, isOpenByDefault: false, closeOnClickOutside: true },
+    );
+
+    const journalPanel = menu(
+      "HUD Kit - Journal and Lore",
+      [
+        panel("Journal Panel", stageW * 0.1, stageH * 0.09, stageW * 0.8, stageH * 0.72, 10),
+        text("Journal Title", "JOURNAL / QUESTS / LORE", stageW * 0.15, stageH * 0.14, stageW * 0.58, 36, 12, 22),
+        panel("Journal Row 1", stageW * 0.15, stageH * 0.25, stageW * 0.7, 58, 11, "rgba(255,255,255,0.04)"),
+        panel("Journal Row 2", stageW * 0.15, stageH * 0.37, stageW * 0.7, 58, 11, "rgba(255,255,255,0.04)"),
+        text("Journal Hint", "Use quest and almanac actions to unlock real entries here.", stageW * 0.18, stageH * 0.28, stageW * 0.58, 86, 12, 14),
+        button("Close Journal", "Close", stageW * 0.73, stageH * 0.72, stageW * 0.12, 38, 13, "close_ui"),
+      ],
+      { blocksClicks: true, isOpenByDefault: false, closeOnClickOutside: true },
+    );
+
+    const systemPanel = menu(
+      "HUD Kit - System Strip",
+      [
+        panel("System Strip Backing", stageW - 248, 18, 226, 44, 10, "rgba(0,0,0,0.44)"),
+        button("Save", "Save", stageW - 238, 26, 48, 28, 12, "save_game"),
+        button("Load", "Load", stageW - 184, 26, 48, 28, 12, "load_game"),
+        button("Mute", "Mute", stageW - 130, 26, 48, 28, 12, "toggle_mute"),
+        button("Settings", "Gear", stageW - 76, 26, 48, 28, 12, "open_settings"),
+      ],
+      { blocksClicks: false, isOpenByDefault: true, closeOnClickOutside: false },
+    );
+
+    const kitMenus = [hudBar, meterPanel, journalPanel, systemPanel];
+    const kitMenuNames = new Set(kitMenus.map((menu) => menu.name));
+    pushHistory({
+      ...project,
+      uiMenus: [
+        ...(project.uiMenus || []).filter((menu) => !kitMenuNames.has(menu.name)),
+        ...kitMenus,
+      ],
+      currentUiMenuId: hudBar.id,
+      globalSettings: {
+        ...project.globalSettings,
+        hideAllDefaultHud: true,
+        enableSkillsHud: true,
+        enableAlmanacHud: true,
+        enableMapHud: true,
+        enableSettingsHud: true,
+      },
+    });
+    setEditorMode("ui_stage");
+    setHideEditorHud(false);
+    setIsHudPlacementMode(false);
+    setSelectedObjectId(hudBar.objects[1]?.id || null);
+    showError("Created a starter HUD kit. Edit the generated screens like normal canvas objects.");
+  };
+
+  const createSmartUiRegion = (kind: SmartUiRegionKind) => {
+    const stageW = logicalStageWidth || project.globalSettings.stageWidth || 800;
+    const stageH = logicalStageHeight || project.globalSettings.stageHeight || 600;
+    const isOnUiCanvas = editorMode === "ui_stage" && !isPlaying && currentScene?.id !== "fallback";
+    const targetMenu =
+      isOnUiCanvas
+        ? currentScene
+        : (project.uiMenus || []).find((menu) => menu.id === project.currentUiMenuId) ||
+          (project.uiMenus || [])[0] ||
+          null;
+    const shouldCreateMenu = !targetMenu;
+    const menuId = targetMenu?.id || uuidv4();
+    const menuName = targetMenu?.name || "Custom Interface Screen";
+    const maxZ = Math.max(0, ...((targetMenu?.objects || []).map((object) => object.zIndex || 0)));
+    const regionDefaults: Record<SmartUiRegionKind, Partial<SceneObject>> = {
+      inventory_grid: {
+        name: "Inventory Item Grid",
+        x: stageW * 0.18,
+        y: stageH * 0.28,
+        width: stageW * 0.52,
+        height: stageH * 0.42,
+        uiElementType: "inventory_grid",
+        uiBindingType: "inventory",
+        uiGridColumns: 4,
+        uiGridRows: 3,
+        uiGridGap: 8,
+        uiPadding: 10,
+        uiEmptyText: "Inventory empty",
+      },
+      journal_text: {
+        name: "Journal Text Region",
+        x: stageW * 0.18,
+        y: stageH * 0.22,
+        width: stageW * 0.58,
+        height: stageH * 0.5,
+        uiElementType: "journal_text",
+        uiBindingType: "journal",
+        uiTextSource: "all",
+        uiPadding: 16,
+        textFontSize: 14,
+        textColor: project.globalSettings.uiColorPrimary || "#00ffcc",
+        uiEmptyText: "No entries yet.",
+      },
+      quest_list: {
+        name: "Quest List Region",
+        x: stageW * 0.16,
+        y: stageH * 0.24,
+        width: stageW * 0.62,
+        height: stageH * 0.46,
+        uiElementType: "quest_list",
+        uiBindingType: "quests",
+        uiPadding: 14,
+        textFontSize: 13,
+        textColor: project.globalSettings.uiColorPrimary || "#00ffcc",
+        uiEmptyText: "No active quests.",
+      },
+      stat_list: {
+        name: "Needs / Stats Region",
+        x: stageW * 0.58,
+        y: stageH * 0.14,
+        width: stageW * 0.28,
+        height: stageH * 0.28,
+        uiElementType: "stat_list",
+        uiBindingType: "stats",
+        uiPadding: 10,
+        textFontSize: 12,
+      },
+    };
+    const region: SceneObject = {
+      id: uuidv4(),
+      src: "",
+      rotation: 0,
+      zIndex: maxZ + 1,
+      opacity: 1,
+      locked: false,
+      cursor: "default",
+      animation: "none",
+      blendMode: "normal",
+      parallaxSpeed: 1,
+      interaction: "none",
+      isUiElement: true,
+      ignoreClicks: true,
+      uiColorPrimary: project.globalSettings.uiColorPrimary || "#00ffcc",
+      uiColorSecondary: "rgba(4,12,22,0.56)",
+      uiBorderType: "dashed",
+      uiBorderRadius: 4,
+      hasPhysics: false,
+      ...regionDefaults[kind],
+    } as SceneObject;
+
+    const nextUiMenus = shouldCreateMenu
+      ? [
+          ...(project.uiMenus || []),
+          {
+            id: menuId,
+            name: menuName,
+            width: stageW,
+            height: stageH,
+            backgroundColor: "transparent",
+            objects: [region],
+            blocksClicks: true,
+            closeOnClickOutside: true,
+          },
+        ]
+      : (project.uiMenus || []).map((menu) =>
+          menu.id === menuId
+            ? {
+                ...menu,
+                objects: [...(menu.objects || []), region],
+              }
+            : menu,
+        );
+
+    pushHistory({
+      ...project,
+      uiMenus: nextUiMenus,
+      currentUiMenuId: menuId,
+    });
+    setEditorMode("ui_stage");
+    setHideEditorHud(true);
+    setSelectedObjectId(region.id);
+    showError(`${region.name} added. Stretch it over the part of your graphic that should fill automatically in play/export.`);
   };
 
   const deleteDialogueTree = (treeId: string) => {
@@ -5582,6 +6583,192 @@ const App: React.FC = () => {
       },
     });
   };
+
+  const activeInterfaceGroup =
+    INTERFACE_PRESET_GROUPS.find(
+      (group) => group.id === activeInterfacePresetGroup,
+    ) || INTERFACE_PRESET_GROUPS[0];
+
+  const patchGlobalSettings = (
+    updates: Partial<Project["globalSettings"]>,
+  ) => {
+    pushHistory({
+      ...project,
+      globalSettings: {
+        ...project.globalSettings,
+        ...updates,
+      },
+    });
+  };
+
+  const placeBuiltInHudWidget = (widget: HudWidgetId) => {
+    setEditorMode("ui_stage");
+    setHideEditorHud(false);
+    setIsHudPlacementMode(true);
+    setSelectedHudWidget(widget);
+    setSelectedObjectId(null);
+    showError("Drag the highlighted built-in HUD widget on the stage.");
+  };
+
+  const builtinHudSurfaces: Array<{
+    label: string;
+    family: string;
+    description: string;
+    impact: string;
+    enabled: boolean;
+    hidden?: boolean;
+    enableUpdates?: Partial<Project["globalSettings"]>;
+    hideUpdates?: Partial<Project["globalSettings"]>;
+    widget?: HudWidgetId;
+    createTemplate?: InterfaceTemplateKind;
+    actionName: string;
+  }> = [
+    {
+      label: "Default Button Dock",
+      family: "Shell navigation",
+      description: "Built-in inventory, quest, map, lore, crafting, and settings buttons.",
+      impact: "Controls the default exported button dock; use a custom HUD screen to replace it.",
+      enabled: !project.globalSettings.hideAllDefaultHud,
+      hidden: !!project.globalSettings.hideAllDefaultHud,
+      enableUpdates: { hideAllDefaultHud: false },
+      hideUpdates: { hideAllDefaultHud: true },
+      widget: "buttons",
+      createTemplate: "hud",
+      actionName: "place dock",
+    },
+    {
+      label: "Needs Meter",
+      family: "Vitals",
+      description: "Rest, hunger, connection, spiritual, novelty, and custom player meters.",
+      impact: "Shows live player meters in play mode when enabled.",
+      enabled: !!project.globalSettings.enableNeeds,
+      enableUpdates: { enableNeeds: !project.globalSettings.enableNeeds },
+      widget: "needs",
+      createTemplate: "hud",
+      actionName: "place meter",
+    },
+    {
+      label: "Skills Meter",
+      family: "Stats",
+      description: "Skill tracks and RPG stats shown as a compact in-game panel.",
+      impact: "Shows live skill/stat tracks in play mode when enabled.",
+      enabled: !!project.globalSettings.enableTTRPGStats,
+      enableUpdates: {
+        enableTTRPGStats: !project.globalSettings.enableTTRPGStats,
+      },
+      widget: "skills",
+      createTemplate: "hud",
+      actionName: "place meter",
+    },
+    {
+      label: "Inventory",
+      family: "Player menu",
+      description: "The item browser opened by buttons, shell controls, or object responses.",
+      impact: "Opened by inventory buttons, shell controls, or click responses.",
+      enabled: !project.globalSettings.hideDefaultInventoryBtn,
+      hidden: !!project.globalSettings.hideDefaultInventoryBtn,
+      hideUpdates: {
+        hideDefaultInventoryBtn:
+          !project.globalSettings.hideDefaultInventoryBtn,
+      },
+      createTemplate: "inventory",
+      actionName: "customize",
+    },
+    {
+      label: "Quest Log",
+      family: "Progress",
+      description: "Active quests, steps, rewards, journal text, and completion states.",
+      impact: "Opened by quest buttons and can reflect step progress during play.",
+      enabled: !project.globalSettings.hideDefaultQuestLogBtn,
+      hidden: !!project.globalSettings.hideDefaultQuestLogBtn,
+      hideUpdates: {
+        hideDefaultQuestLogBtn:
+          !project.globalSettings.hideDefaultQuestLogBtn,
+      },
+      createTemplate: "quest",
+      actionName: "customize",
+    },
+    {
+      label: "Crafting",
+      family: "RPG core",
+      description: "Recipes, required inventory, consumable ingredients, and outcomes.",
+      impact: "Opened by crafting buttons so players can combine required items.",
+      enabled: !project.globalSettings.hideDefaultCraftingBtn,
+      hidden: !!project.globalSettings.hideDefaultCraftingBtn,
+      hideUpdates: {
+        hideDefaultCraftingBtn:
+          !project.globalSettings.hideDefaultCraftingBtn,
+      },
+      createTemplate: "crafting",
+      actionName: "customize",
+    },
+    {
+      label: "Map",
+      family: "Navigation",
+      description: "World map, locations, markers, travel points, and the frame cutout view.",
+      impact: "Opened by map buttons and travel responses; respects the playable screen.",
+      enabled: !!project.globalSettings.enableMapHud,
+      hidden: !!project.globalSettings.hideDefaultMapBtn,
+      enableUpdates: { enableMapHud: !project.globalSettings.enableMapHud },
+      hideUpdates: {
+        hideDefaultMapBtn: !project.globalSettings.hideDefaultMapBtn,
+      },
+      createTemplate: "map",
+      actionName: "customize",
+    },
+    {
+      label: "Relationships",
+      family: "Roster",
+      description: "People, groups, faction reputation, and character ties.",
+      impact: "Opened by relationship controls and reflects dialogue or gift changes.",
+      enabled: !!project.globalSettings.enableRelationshipsHud,
+      hidden: !!project.globalSettings.hideDefaultRelationshipsBtn,
+      enableUpdates: {
+        enableRelationshipsHud:
+          !project.globalSettings.enableRelationshipsHud,
+      },
+      hideUpdates: {
+        hideDefaultRelationshipsBtn:
+          !project.globalSettings.hideDefaultRelationshipsBtn,
+      },
+      createTemplate: "relationships",
+      actionName: "customize",
+    },
+    {
+      label: "Lore / Almanac",
+      family: "Knowledge",
+      description: "Codex pages, logs, quest notes, and unlocked lore entries.",
+      impact: "Opened by lore controls and updated by notes unlocked in events.",
+      enabled: !!project.globalSettings.enableAlmanacHud,
+      hidden: !!project.globalSettings.hideDefaultAlmanacBtn,
+      enableUpdates: {
+        enableAlmanacHud: !project.globalSettings.enableAlmanacHud,
+      },
+      hideUpdates: {
+        hideDefaultAlmanacBtn:
+          !project.globalSettings.hideDefaultAlmanacBtn,
+      },
+      createTemplate: "journal",
+      actionName: "customize",
+    },
+    {
+      label: "Settings",
+      family: "App shell",
+      description: "Gameplay, audio, display, accessibility, language, and layout options.",
+      impact: "Opened by settings controls; changes player-facing runtime options.",
+      enabled: !!project.globalSettings.enableSettingsHud,
+      hidden: !!project.globalSettings.hideDefaultSettingsBtn,
+      enableUpdates: {
+        enableSettingsHud: !project.globalSettings.enableSettingsHud,
+      },
+      hideUpdates: {
+        hideDefaultSettingsBtn:
+          !project.globalSettings.hideDefaultSettingsBtn,
+      },
+      createTemplate: "settings",
+      actionName: "customize",
+    },
+  ];
 
   const renderAnimationControls = (object: SceneObject) => (
     <div className="rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-3">
@@ -6032,13 +7219,13 @@ const App: React.FC = () => {
 	                          setIsBackupMenuOpen(false);
 	                        }}
 	                        className="flex flex-col items-start justify-center gap-0.5 rounded-lg border border-emerald-400/35 bg-emerald-400/10 px-2.5 py-2 text-left font-semibold text-emerald-100 transition-all hover:bg-emerald-400/20 active:scale-95"
-	                        title="Download editable JSON with only assets currently referenced by the game."
+	                        title="Download editable JSON with only assets currently referenced by the game. Embedded data is kept only for used assets with no usable link."
 	                      >
 	                        <span className="flex items-center gap-1.5">
 	                          <Download size={13} /> Clean
 	                        </span>
 	                        <span className="text-[9px] font-medium text-emerald-100/75">
-	                          used only
+	                          fallback only
 	                        </span>
 	                      </button>
 	                      <button
@@ -6993,6 +8180,46 @@ const App: React.FC = () => {
                       </button>
                     </div>
 
+                    {editorMode === "ui_stage" && !isPlaying && (
+                      <div className="flex items-center gap-1 rounded-md border border-cyan-300/25 bg-cyan-400/10 px-2 py-1">
+                        <span className="whitespace-nowrap font-comic text-[11px] font-bold text-cyan-100">
+                          Smart regions
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => createSmartUiRegion("inventory_grid")}
+                          className="rounded border border-cyan-300/35 bg-cyan-400/10 px-2 py-1 text-[11px] font-bold text-cyan-100 hover:bg-cyan-400/20"
+                          title="Draw where inventory item icons should appear in the live game"
+                        >
+                          Inventory grid
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => createSmartUiRegion("journal_text")}
+                          className="rounded border border-blue-300/35 bg-blue-400/10 px-2 py-1 text-[11px] font-bold text-blue-100 hover:bg-blue-400/20"
+                          title="Draw where journal, lore, or quest-note text should flow"
+                        >
+                          Journal text
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => createSmartUiRegion("quest_list")}
+                          className="rounded border border-fuchsia-300/35 bg-fuchsia-400/10 px-2 py-1 text-[11px] font-bold text-fuchsia-100 hover:bg-fuchsia-400/20"
+                          title="Draw where active quest rows should appear"
+                        >
+                          Quest list
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => createSmartUiRegion("stat_list")}
+                          className="rounded border border-amber-300/35 bg-amber-400/10 px-2 py-1 text-[11px] font-bold text-amber-100 hover:bg-amber-400/20"
+                          title="Draw where needs, skills, or meters should appear"
+                        >
+                          Stats
+                        </button>
+                      </div>
+                    )}
+
                     <button
                       onClick={() => setHideEditorHud(!hideEditorHud)}
                       className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md transition-all border ${
@@ -7365,8 +8592,13 @@ const App: React.FC = () => {
                           // Apply animation classes
                           let animClass = "";
                           let animStyle: React.CSSProperties = {};
+                          const isBeingManipulated =
+                            !isPlaying &&
+                            (obj.id === draggingId ||
+                              obj.id === resizingId ||
+                              obj.id === rotatingId);
 
-                          if (isPlaying || isSelected) {
+                          if ((isPlaying || isSelected) && !isBeingManipulated) {
                             if (obj.animation === "glow") {
                               animClass =
                                 "drop-shadow-[0_0_15px_rgba(255,255,255,0.8)]";
@@ -7491,6 +8723,7 @@ const App: React.FC = () => {
                                   }
                                 }, 50);
                               }}
+                              onDragStart={(e) => e.preventDefault()}
                               onPointerMove={handleObjectPointerMove}
                               onPointerUp={handleObjectPointerUp}
                               data-object-id={obj.id}
@@ -7563,6 +8796,8 @@ const App: React.FC = () => {
                                     ? "1px dashed #ef4444"
                                     : "none",
                                 mixBlendMode: obj.blendMode || "normal",
+                                touchAction: "none",
+                                userSelect: "none",
                               }}
                             >
                               {/* Smart Overlays (Editor only) */}
@@ -7688,6 +8923,14 @@ const App: React.FC = () => {
                                                     ? "3px ridge"
                                                     : "2px solid";
 
+                                  if (
+                                    obj.uiElementType === "inventory_grid" ||
+                                    obj.uiElementType === "journal_text" ||
+                                    obj.uiElementType === "quest_list" ||
+                                    obj.uiElementType === "stat_list"
+                                  ) {
+                                    return renderSmartUiRegion(obj);
+                                  }
                                   if (obj.uiElementType === "panel") {
                                     return (
                                       <div
@@ -8138,8 +9381,14 @@ const App: React.FC = () => {
                 {/* Ghost Foreground UI for Stage Editing */}
                 {editorMode === "stage" &&
                   !isPlaying &&
+                  !hideEditorHud &&
                   (project.uiMenus || [])
-                    .filter((m) => m.isOpenByDefault)
+                    .filter(
+                      (m) =>
+                        m.isOpenByDefault &&
+                        (!project.currentUiMenuId ||
+                          m.id === project.currentUiMenuId),
+                    )
                     .map((uiMenu) => (
                       <div
                         key={`ghost-fg-ui-${uiMenu.id}`}
@@ -8266,11 +9515,16 @@ const App: React.FC = () => {
 
                             let animClass = "";
                             let animStyle: React.CSSProperties = {};
+                            const isBeingManipulated =
+                              !isPlaying &&
+                              (obj.id === draggingId ||
+                                obj.id === resizingId ||
+                                obj.id === rotatingId);
 
-                            if (obj.animation === "glow") {
+                            if (!isBeingManipulated && obj.animation === "glow") {
                               animClass =
                                 "drop-shadow-[0_0_15px_rgba(255,255,255,0.8)]";
-                            } else if (obj.animation !== "none") {
+                            } else if (!isBeingManipulated && obj.animation !== "none") {
                               const duration =
                                 obj.animationDuration ||
                                 (obj.animation === "pulse"
@@ -8329,6 +9583,7 @@ const App: React.FC = () => {
                                     setHoverCursorAssetId(null);
                                   }
                                 }}
+                                onDragStart={(e) => e.preventDefault()}
                                 onPointerMove={handleObjectPointerMove}
                                 onPointerUp={handleObjectPointerUp}
                                 className={`absolute ${animClass}`}
@@ -8353,6 +9608,8 @@ const App: React.FC = () => {
                                   pointerEvents: obj.ignoreClicks
                                     ? "none"
                                     : "auto",
+                                  touchAction: "none",
+                                  userSelect: "none",
                                 }}
                               >
                                 {obj.isUiElement &&
@@ -8409,6 +9666,14 @@ const App: React.FC = () => {
                                       );
                                     }
 
+                                    if (
+                                      obj.uiElementType === "inventory_grid" ||
+                                      obj.uiElementType === "journal_text" ||
+                                      obj.uiElementType === "quest_list" ||
+                                      obj.uiElementType === "stat_list"
+                                    ) {
+                                      return renderSmartUiRegion(obj);
+                                    }
                                     if (obj.uiElementType === "panel") {
                                       return (
                                         <div
@@ -8931,7 +10196,7 @@ const App: React.FC = () => {
                   })()}
 
                 {/* HUD Overlay Preview */}
-                {(isPlaying || editorMode === "ui_stage") && hudOverlayAsset && (
+                {(isPlaying || (editorMode === "ui_stage" && !hideEditorHud)) && hudOverlayAsset && (
                   <div 
                     className="absolute z-[8500]"
                     style={getHudOverlayStyle()}
@@ -9135,9 +10400,13 @@ const App: React.FC = () => {
                                       // Apply quest rewards
                                       completedQuest?.rewards?.forEach((reward) => {
                                         if (reward.type === "give_item") {
-                                          setPlayerInventory((prev) => prev.includes(reward.targetId) ? prev : [...prev, reward.targetId]);
+                                          addRuntimeInventoryItem(reward.targetId);
                                         } else if (reward.type === "set_flag") {
-                                          setProject((p) => ({ ...p, gameFlags: [...(p.gameFlags || []), reward.targetId].filter((v, i, a) => a.indexOf(v) === i) }));
+                                          setPlayerFlags((prev) =>
+                                            prev.includes(reward.targetId)
+                                              ? prev
+                                              : [...prev, reward.targetId],
+                                          );
                                         } else if (reward.type === "modify_status") {
                                           setPlayerSkills((prev) => ({ ...prev, [reward.targetId]: Math.min(20, (prev[reward.targetId] || 0) + (reward.amount || 1)) }));
                                         }
@@ -9159,10 +10428,7 @@ const App: React.FC = () => {
                                     }
 
                                     if (choice.giveItemId) {
-                                      setPlayerInventory((prev) => [
-                                        ...prev,
-                                        choice.giveItemId!,
-                                      ]);
+                                      addRuntimeInventoryItem(choice.giveItemId);
                                       const uiName =
                                         project.inventoryItems?.find(
                                           (i) => i.id === choice.giveItemId,
@@ -9190,13 +10456,7 @@ const App: React.FC = () => {
                                       const sound = project.assets.find(
                                         (a) => a.id === choice.playSoundAssetId,
                                       );
-                                      const soundSrc = getAssetDisplaySrc(sound);
-                                      if (sound && soundSrc) {
-                                        const mediaFragment = sound.trimStart || sound.trimEnd ? `#t=${sound.trimStart || 0}${sound.trimEnd ? ',' + sound.trimEnd : ''}` : '';
-                                        const audio = new Audio(soundSrc + mediaFragment);
-                                        audio.volume = sound.volume ?? 1;
-                                        audio.play().catch((e) => console.error(e));
-                                      }
+                                      playRuntimeAudioAsset(sound);
                                     }
 
                                     if (choice.grantSkillId && choice.grantSkillId !== "none") {
@@ -9217,17 +10477,7 @@ const App: React.FC = () => {
                                       const targetId =
                                         effect.characterId || effect.factionId;
                                       if (targetId) {
-                                        setPlayerFactions((prev) => ({
-                                          ...prev,
-                                          [targetId]: Math.max(
-                                            -100,
-                                            Math.min(
-                                              100,
-                                              (prev[targetId] || 0) +
-                                                effect.value,
-                                            ),
-                                          ),
-                                        }));
+                                        changeRuntimeRelationship(targetId, effect.value);
                                       }
                                     }
 
@@ -10001,7 +11251,30 @@ const App: React.FC = () => {
                                   const item = project.inventoryItems.find(
                                     (i) => i.id === itemId,
                                   );
-                                  if (!item) return null;
+                                  if (!item) {
+                                    return (
+                                      <div
+                                        key={`${itemId}-${idx}`}
+                                        className="border p-3 text-xs"
+                                        style={{
+                                          backgroundColor: "rgba(0,0,0,0.2)",
+                                          borderColor: `${uiPrimary}40`,
+                                          borderRadius: uiRadius,
+                                          color: uiSecondary,
+                                        }}
+                                      >
+                                        <div className="font-bold" style={{ color: uiPrimary }}>
+                                          Unlinked item
+                                        </div>
+                                        <div className="mt-1 break-all font-mono opacity-80">
+                                          {itemId}
+                                        </div>
+                                        <div className="mt-2 opacity-70">
+                                          This was added to inventory, but no item definition matches it.
+                                        </div>
+                                      </div>
+                                    );
+                                  }
                                   const iconAsset = item.iconAssetId
                                     ? project.assets.find(
                                         (a) => a.id === item.iconAssetId,
@@ -10185,21 +11458,7 @@ const App: React.FC = () => {
                                                       a.id ===
                                                       item.useSoundAssetId,
                                                   );
-                                                const soundSrc =
-                                                  getAssetDisplaySrc(sound);
-                                                if (sound && soundSrc) {
-                                                  const mediaFragment = sound.trimStart || sound.trimEnd ? `#t=${sound.trimStart || 0}${sound.trimEnd ? ',' + sound.trimEnd : ''}` : '';
-                                                  const audio = new Audio(soundSrc + mediaFragment);
-                                                  audio.volume = sound.volume ?? 1;
-                                                  audio
-                                                    .play()
-                                                    .catch((e) =>
-                                                      console.error(
-                                                        "Could not play sound",
-                                                        e,
-                                                      ),
-                                                    );
-                                                }
+                                                playRuntimeAudioAsset(sound);
                                               }
 
                                               if (item.statRestores) {
@@ -10693,6 +11952,58 @@ const App: React.FC = () => {
                                 );
                               })
                             )}
+                            {(() => {
+                              const knownIds = new Set([
+                                ...(project.characters || []).map((char) => char.id),
+                                ...(project.factions || []).map((faction) => faction.id),
+                              ]);
+                              const looseRelationships = Object.entries(playerFactions)
+                                .filter(([id]) => !knownIds.has(id))
+                                .sort(([a], [b]) => a.localeCompare(b));
+                              if (looseRelationships.length === 0) return null;
+                              return (
+                                <>
+                                  <h3
+                                    className="mt-4 mb-2 text-xs font-bold uppercase tracking-widest"
+                                    style={{ color: uiPrimary }}
+                                  >
+                                    Other live relationship tracks
+                                  </h3>
+                                  {looseRelationships.map(([id, value]) => (
+                                    <div
+                                      key={id}
+                                      className="rounded border bg-black/20 p-3"
+                                      style={{ borderColor: `${uiPrimary}20` }}
+                                    >
+                                      <div className="flex items-center justify-between gap-3">
+                                        <span className="min-w-0 break-all font-mono text-xs" style={{ color: uiSecondary }}>
+                                          {id}
+                                        </span>
+                                        <span
+                                          className="rounded px-2 py-0.5 text-xs font-bold"
+                                          style={{
+                                            backgroundColor:
+                                              value > 20
+                                                ? "rgba(16,185,129,.2)"
+                                                : value < -20
+                                                  ? "rgba(239,68,68,.2)"
+                                                  : "rgba(156,163,175,.2)",
+                                            color:
+                                              value > 20
+                                                ? "#10b981"
+                                                : value < -20
+                                                  ? "#ef4444"
+                                                  : "#9ca3af",
+                                          }}
+                                        >
+                                          {value > 0 ? `+${value}` : value}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </>
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -13608,6 +14919,78 @@ const App: React.FC = () => {
                             Applies global lighting filters based on in-game
                             time.
                           </p>
+                          {project.globalSettings.useDayNightCycle && (
+                            <div className="mt-3 grid grid-cols-3 gap-2">
+                              <label className="text-xs font-bold uppercase tracking-wide text-neutral-500">
+                                Start hour
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={23.99}
+                                  step={0.25}
+                                  value={project.globalSettings.dayNightStartHour ?? 8}
+                                  onChange={(e) =>
+                                    setProject((p) => ({
+                                      ...p,
+                                      globalSettings: {
+                                        ...p.globalSettings,
+                                        dayNightStartHour: Math.max(
+                                          0,
+                                          Math.min(23.99, Number(e.target.value) || 0),
+                                        ),
+                                      },
+                                    }))
+                                  }
+                                  className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-neutral-100"
+                                />
+                              </label>
+                              <label className="text-xs font-bold uppercase tracking-wide text-neutral-500">
+                                Hours / tick
+                                <input
+                                  type="number"
+                                  min={0.01}
+                                  max={24}
+                                  step={0.01}
+                                  value={project.globalSettings.dayNightHoursPerTick ?? 0.1}
+                                  onChange={(e) =>
+                                    setProject((p) => ({
+                                      ...p,
+                                      globalSettings: {
+                                        ...p.globalSettings,
+                                        dayNightHoursPerTick: Math.max(
+                                          0.01,
+                                          Number(e.target.value) || 0.1,
+                                        ),
+                                      },
+                                    }))
+                                  }
+                                  className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-neutral-100"
+                                />
+                              </label>
+                              <label className="text-xs font-bold uppercase tracking-wide text-neutral-500">
+                                Tick ms
+                                <input
+                                  type="number"
+                                  min={100}
+                                  step={100}
+                                  value={project.globalSettings.dayNightTickMs ?? 1000}
+                                  onChange={(e) =>
+                                    setProject((p) => ({
+                                      ...p,
+                                      globalSettings: {
+                                        ...p.globalSettings,
+                                        dayNightTickMs: Math.max(
+                                          100,
+                                          Number(e.target.value) || 1000,
+                                        ),
+                                      },
+                                    }))
+                                  }
+                                  className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-neutral-100"
+                                />
+                              </label>
+                            </div>
+                          )}
                         </div>
                         <div>
                           <label className="flex items-center gap-2 cursor-pointer mt-3">
@@ -14048,6 +15431,140 @@ const App: React.FC = () => {
                               </label>
                             )}
 
+                            {(selectedObject.uiElementType === "inventory_grid" ||
+                              selectedObject.uiElementType === "journal_text" ||
+                              selectedObject.uiElementType === "quest_list" ||
+                              selectedObject.uiElementType === "stat_list") && (
+                              <div className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 p-3">
+                                <div className="mb-2 font-comic text-sm font-bold text-cyan-100">
+                                  Smart Region Fill
+                                </div>
+                                <p className="mb-3 text-xs leading-relaxed text-neutral-400">
+                                  This box is filled by live game data in Play and HTML export. Resize it on the canvas to fit your own graphic.
+                                </p>
+                                {selectedObject.uiElementType === "inventory_grid" && (
+                                  <div className="grid grid-cols-3 gap-2">
+                                    <label className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                      Columns
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        max={12}
+                                        value={selectedObject.uiGridColumns || 4}
+                                        onChange={(e) =>
+                                          updateObject(selectedObject.id, {
+                                            uiGridColumns: Math.max(1, Number(e.target.value) || 1),
+                                          })
+                                        }
+                                        className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-white"
+                                      />
+                                    </label>
+                                    <label className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                      Rows
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        max={12}
+                                        value={selectedObject.uiGridRows || 3}
+                                        onChange={(e) =>
+                                          updateObject(selectedObject.id, {
+                                            uiGridRows: Math.max(1, Number(e.target.value) || 1),
+                                          })
+                                        }
+                                        className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-white"
+                                      />
+                                    </label>
+                                    <label className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                      Gap
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        max={40}
+                                        value={selectedObject.uiGridGap ?? 8}
+                                        onChange={(e) =>
+                                          updateObject(selectedObject.id, {
+                                            uiGridGap: Math.max(0, Number(e.target.value) || 0),
+                                          })
+                                        }
+                                        className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-white"
+                                      />
+                                    </label>
+                                  </div>
+                                )}
+                                {selectedObject.uiElementType === "journal_text" && (
+                                  <label className="block text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                    Text source
+                                    <select
+                                      value={selectedObject.uiTextSource || "all"}
+                                      onChange={(e) =>
+                                        updateObject(selectedObject.id, {
+                                          uiTextSource: e.target.value as SceneObject["uiTextSource"],
+                                        })
+                                      }
+                                      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm normal-case text-white"
+                                    >
+                                      <option value="all">All unlocked entries</option>
+                                      <option value="journal">Journal entries only</option>
+                                      <option value="quest_note">Quest notes only</option>
+                                      <option value="lore">Lore pages only</option>
+                                    </select>
+                                  </label>
+                                )}
+                                <div className="mt-3 grid grid-cols-2 gap-2">
+                                  <label className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                    Padding
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={64}
+                                      value={selectedObject.uiPadding ?? 10}
+                                      onChange={(e) =>
+                                        updateObject(selectedObject.id, {
+                                          uiPadding: Math.max(0, Number(e.target.value) || 0),
+                                        })
+                                      }
+                                      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-white"
+                                    />
+                                  </label>
+                                  {selectedObject.uiElementType !== "inventory_grid" && (
+                                    <label className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                      Text size
+                                      <input
+                                        type="number"
+                                        min={8}
+                                        max={48}
+                                        value={selectedObject.textFontSize || 14}
+                                        onChange={(e) =>
+                                          updateObject(selectedObject.id, {
+                                            textFontSize: Math.max(8, Number(e.target.value) || 8),
+                                          })
+                                        }
+                                        className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-white"
+                                      />
+                                    </label>
+                                  )}
+                                </div>
+                                <label className="mt-3 block text-[10px] font-bold uppercase tracking-wide text-neutral-500">
+                                  Empty text
+                                  <input
+                                    type="text"
+                                    value={selectedObject.uiEmptyText || ""}
+                                    onChange={(e) =>
+                                      updateObject(selectedObject.id, {
+                                        uiEmptyText: e.target.value,
+                                      })
+                                    }
+                                    className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm normal-case text-white"
+                                    placeholder="What shows when this has no data"
+                                  />
+                                </label>
+                              </div>
+                            )}
+
+                            {!(selectedObject.uiElementType === "inventory_grid" ||
+                              selectedObject.uiElementType === "journal_text" ||
+                              selectedObject.uiElementType === "quest_list" ||
+                              selectedObject.uiElementType === "stat_list") && (
                             <div className="pt-4 border-t border-neutral-800 mt-4 space-y-3">
                               <LabelWithHelp
                                 label="Make it Smart (Auto-Update)"
@@ -14159,6 +15676,7 @@ const App: React.FC = () => {
                                 </div>
                               )}
                             </div>
+                            )}
                           </div>
                         </Accordion>
                       )}
@@ -18572,8 +20090,8 @@ const App: React.FC = () => {
         {editorMode === "ui_maker" && (
           <div className="studio-page flex-1 flex flex-col bg-neutral-950 overflow-hidden">
             <StudioFeatureHeader
-              title="Interface Studio"
-              description="Build menus, HUD widgets, overlays, journals, meters, and clickable screen controls in one place."
+              title="Interface Builder"
+              description="Make the screens players open: inventory, journal, map, settings, HUD bars, and frame buttons."
               actions={<button
                 onClick={() => {
                   const newMenu: Scene = {
@@ -18591,6 +20109,10 @@ const App: React.FC = () => {
                     uiMenus: [...(project.uiMenus || []), newMenu],
                     currentUiMenuId: newMenu.id,
                   });
+                  setEditorMode("ui_stage");
+                  setHideEditorHud(true);
+                  setSelectedObjectId(null);
+                  showError("Created a blank interface screen. Add assets, text, buttons, or HUD pieces here.");
                 }}
                 className="studio-primary-button flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"
               >
@@ -18598,329 +20120,612 @@ const App: React.FC = () => {
               </button>}
             />
 
-            <div className="studio-page-content studio-card-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto custom-scrollbar p-6 pb-20">
-              <div className="md:col-span-2 lg:col-span-3 rounded-2xl border border-cyan-300/25 bg-cyan-400/5 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.18)]">
-                <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="studio-page-content interface-studio-layout is-single-pane">
+              <div className="interface-studio-tools rounded-lg border border-cyan-300/25 bg-cyan-400/5 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.18)]">
+                <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <div className="font-comic text-lg font-bold text-cyan-100">
-                      HUD / Export layout tools
+                      What do you want to build?
                     </div>
-                    <p className="mt-1 max-w-3xl text-sm text-neutral-400">
-                      Arrange built-in HUD widgets, screen controls, shell buttons, and overlay pieces from here. These are interface jobs, not random right-inspector chores.
+                    <p className="mt-1 max-w-4xl text-sm text-neutral-400">
+                      Pick a player-facing screen first. Cavebot opens a canvas where you can drop your own art, then draw live zones for items, journal text, quest steps, maps, or meters.
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  {interfaceStudioPane === "workshop" && (
                     <button
                       type="button"
-                      onClick={() => {
-                        setEditorMode("ui_stage");
-                        setHideEditorHud(false);
-                        setIsHudPlacementMode(true);
-                        setSelectedHudWidget("buttons");
-                      }}
-                      className="rounded-xl border border-pink-400/45 bg-pink-500/10 px-3 py-2 font-comic text-sm font-bold text-pink-200 hover:bg-pink-500/20"
+                      onClick={createHudKit}
+                      className="rounded-xl border border-amber-300/50 bg-amber-400/15 px-3 py-2 font-comic text-sm font-bold text-amber-100 hover:bg-amber-400/25"
                     >
-                      Move built-in HUD
+                      Advanced: generate HUD kit
                     </button>
+                  )}
+                </div>
+
+                <div className="interface-pane-tabs" role="tablist" aria-label="Interface Studio sections">
+                  {([
+                    ["presets", "Make a screen", "Inventory, journal, map, crafting, settings, and popups"],
+                    ["workshop", "Frame buttons", "Outer CRT buttons, default HUD pieces, and live zones"],
+                    ["screens", "My screens", "Open, rename, duplicate, and wire your custom interfaces"],
+                  ] as const).map(([pane, label, helper]) => (
                     <button
+                      key={pane}
                       type="button"
-                      onClick={openScreenControlsEditor}
-                      className="rounded-xl border border-cyan-300/45 bg-cyan-400/10 px-3 py-2 font-comic text-sm font-bold text-cyan-100 hover:bg-cyan-400/20"
+                      role="tab"
+                      aria-selected={interfaceStudioPane === pane}
+                      onClick={() => setInterfaceStudioPane(pane)}
+                      className={interfaceStudioPane === pane ? "is-active" : ""}
                     >
-                      Place screen controls
+                      <span>{label}</span>
+                      <small>{helper}</small>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => openEditableHudOverlayScreen()}
-                      className="rounded-xl border border-emerald-300/45 bg-emerald-400/10 px-3 py-2 font-comic text-sm font-bold text-emerald-100 hover:bg-emerald-400/20"
-                    >
-                      Build on overlay image
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditorMode("stage");
-                        setHideEditorHud(false);
-                      }}
-                      className="rounded-xl border border-emerald-300/45 bg-emerald-400/10 px-3 py-2 font-comic text-sm font-bold text-emerald-100 hover:bg-emerald-400/20"
-                    >
-                      Check room export view
-                    </button>
-                  </div>
-	                </div>
-	              </div>
-	              <div className="md:col-span-2 lg:col-span-3 rounded-2xl border border-emerald-300/25 bg-emerald-400/5 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.16)]">
-	                <div className="mb-3 flex items-center gap-2 font-comic text-lg font-bold text-emerald-100">
-	                  <LayoutTemplate size={18} />
-	                  Quick modular layouts
-	                </div>
-	                <p className="mb-3 max-w-3xl text-sm leading-relaxed text-neutral-400">
-	                  Start from reusable interface blocks, then edit the generated pieces in Screen UI like ordinary objects.
-	                </p>
-	                <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-	                  <button
-	                    type="button"
-	                    onClick={() => createInterfaceTemplate("modal")}
-	                    className="rounded-lg border border-emerald-300/35 bg-emerald-400/10 px-3 py-2 text-left text-xs font-bold text-emerald-100 hover:bg-emerald-400/20"
-	                  >
-	                    Popup Panel
-	                  </button>
-	                  <button
-	                    type="button"
-	                    onClick={() => createInterfaceTemplate("hud")}
-	                    className="rounded-lg border border-pink-300/35 bg-pink-400/10 px-3 py-2 text-left text-xs font-bold text-pink-100 hover:bg-pink-400/20"
-	                  >
-	                    HUD Strip
-	                  </button>
-	                  <button
-	                    type="button"
-	                    onClick={() => createInterfaceTemplate("journal")}
-	                    className="rounded-lg border border-blue-300/35 bg-blue-400/10 px-3 py-2 text-left text-xs font-bold text-blue-100 hover:bg-blue-400/20"
-	                  >
-	                    Journal Screen
-	                  </button>
-	                  <button
-	                    type="button"
-	                    onClick={() => createInterfaceTemplate("choiceBar")}
-	                    className="rounded-lg border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-left text-xs font-bold text-amber-100 hover:bg-amber-400/20"
-	                  >
-	                    Choice Bar
-	                  </button>
-	                </div>
-	              </div>
-	              {(project.uiMenus || []).map((scene) => (
-                <div
-                  key={scene.id}
-                  className={`studio-card bg-neutral-900 border rounded-lg p-5 flex flex-col gap-4 transition-colors ${project.currentUiMenuId === scene.id ? "is-selected border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]" : "border-neutral-800 hover:border-neutral-700"}`}
-                >
-                  <div className="flex justify-between items-start">
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-4 h-4 rounded-full border border-neutral-700"
-                        style={{ backgroundColor: scene.backgroundColor }}
-                      ></div>
-                      <input
-                        type="text"
-                        value={scene.name}
-                        onChange={(e) => {
-                          pushHistory({
-                            ...project,
-                            uiMenus: (project.uiMenus || []).map((s) =>
-                              s.id === scene.id
-                                ? { ...s, name: e.target.value }
-                                : s,
-                            ),
-                          });
-                        }}
-                        className="bg-transparent border-b border-transparent hover:border-neutral-700 focus:border-emerald-500 text-lg font-bold text-white outline-none px-1 w-full"
-                      />
+                  ))}
+                </div>
+
+                {interfaceStudioPane === "workshop" && (
+                  <>
+                <div className="interface-tool-grid">
+                  <div className="interface-tool-card">
+                    <div className="interface-tool-kicker">Device shell</div>
+                    <h3>CRT frame and physical buttons</h3>
+                    <p>
+                      The frame is the outer artwork plus playable cutout. Shell buttons are click boxes on that outer frame.
+                    </p>
+                    <div className="interface-impact-row">
+                      <span>Game impact</span>
+                      <strong>Changes the exported frame, cutout, and physical shell button hitboxes.</strong>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="interface-tool-actions">
                       <button
+                        type="button"
                         onClick={() => {
-                          const newId = uuidv4();
-                          const newScene = {
-                            ...scene,
-                            id: newId,
-                            name: `${scene.name} (Copy)`,
-                            objects: scene.objects.map((o) => ({
-                              ...o,
-                              id: uuidv4(),
-                            })),
-                          };
-                          pushHistory({
-                            ...project,
-                            uiMenus: [...(project.uiMenus || []), newScene],
-                            currentUiMenuId: newId,
+                          const frameAssetId = project.globalSettings.deviceFrame?.assetId;
+                          if (frameAssetId) {
+                            setCalibratingFrameAssetId(frameAssetId);
+                            return;
+                          }
+                          setAssetPickerCb({
+                            title: "Choose CRT / device frame",
+                            helperText:
+                              "Pick the shell artwork first. Then mark the playable screen cutout and shell buttons.",
+                            filterType: "image",
+                            selectLabel: "Use as frame",
+                            onSelect: (id) => {
+                              setAssetPickerCb(null);
+                              setCalibratingFrameAssetId(id);
+                            },
                           });
                         }}
-                        className="text-neutral-400 hover:text-white p-1"
-                        title="Duplicate UI Menu"
+                        className="interface-action-button interface-action-button--blue"
                       >
-                        <Copy size={14} />
+                        {project.globalSettings.deviceFrame
+                          ? "Edit frame cutout"
+                          : "Choose frame"}
                       </button>
-                      {(project.uiMenus || []).length > 0 && (
-                        <button
-                          onClick={() => {
-                            const newMenus = (project.uiMenus || []).filter(
-                              (s) => s.id !== scene.id,
-                            );
-                            const newCurrentId =
-                              project.currentUiMenuId === scene.id
-                                ? newMenus[0]?.id || null
-                                : project.currentUiMenuId;
-                            pushHistory({
-                              ...project,
-                              uiMenus: newMenus,
-                              currentUiMenuId: newCurrentId,
-                            });
-                          }}
-                          className="text-red-400 hover:text-red-300 p-1"
-                          title="Delete UI Menu"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        disabled={!project.globalSettings.deviceFrame}
+                        onClick={() => setIsEditingShellControls(true)}
+                        className="interface-action-button interface-action-button--pink disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Edit shell buttons
+                      </button>
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-4 text-sm text-neutral-400 font-mono">
-                    <div className="rounded border border-cyan-500/25 bg-cyan-500/5 p-3">
-                      <div className="font-comic text-xs font-bold text-cyan-300">
-                        Uses the room coordinate space
-                      </div>
-                      <p className="mt-1 text-[10px] leading-relaxed text-neutral-500">
-                        This menu sits on the same {logicalStageWidth} × {logicalStageHeight} plane as your current room. No separate UI canvas math.
-                      </p>
-                      {(scene.width !== logicalStageWidth ||
-                        scene.height !== logicalStageHeight) && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            pushHistory({
-                              ...project,
-                              uiMenus: (project.uiMenus || []).map((candidate) =>
-                                candidate.id === scene.id
-                                  ? {
-                                      ...candidate,
-                                      width: logicalStageWidth,
-                                      height: logicalStageHeight,
-                                    }
-                                  : candidate,
-                              ),
-                            })
-                          }
-                          className="mt-2 rounded border border-cyan-400/35 bg-cyan-400/10 px-2 py-1 text-[9px] font-bold text-cyan-300 hover:bg-cyan-400/20"
-                        >
-                          Sync old menu size
-                        </button>
-                      )}
+                  <div className="interface-tool-card">
+                    <div className="interface-tool-kicker">Screen overlay</div>
+                    <h3>Editable artwork inside the game screen</h3>
+                    <p>
+                      Use this for glass, bezels, HUD plates, and decorative controls that should sit inside the playable screen.
+                    </p>
+                    <div className="interface-impact-row">
+                      <span>Game impact</span>
+                      <strong>Becomes editable Screen UI inside the playable screen.</strong>
                     </div>
-                    <div className="flex flex-col gap-1 w-full relative">
-                      <LabelWithHelp
-                        label="Background (Supports RGBA)"
-                        helpText="The background color of the UI Menu panel. Use rgba() string for transparency."
-                      />
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={scene.backgroundColor}
-                          onChange={(e) =>
-                            pushHistory({
-                              ...project,
-                              uiMenus: (project.uiMenus || []).map((s) =>
-                                s.id === scene.id
-                                  ? { ...s, backgroundColor: e.target.value }
-                                  : s,
-                              ),
-                            })
-                          }
-                          className="flex-1 w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1"
-                          placeholder="transparent"
-                        />
-                        <button
-                          onClick={() =>
-                            pushHistory({
-                              ...project,
-                              uiMenus: (project.uiMenus || []).map((s) =>
-                                s.id === scene.id
-                                  ? { ...s, backgroundColor: "transparent" }
-                                  : s,
-                              ),
-                            })
-                          }
-                          className="px-2 py-1 bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 rounded text-sm text-neutral-400"
-                        >
-                          Clear
-                        </button>
-                      </div>
+                    <div className="interface-tool-actions">
+                      <button
+                        type="button"
+                        onClick={() => openEditableHudOverlayScreen()}
+                        className="interface-action-button interface-action-button--green"
+                      >
+                        Edit screen overlay
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openScreenControlsEditor}
+                        className="interface-action-button interface-action-button--cyan"
+                      >
+                        Place screen controls
+                      </button>
                     </div>
-                    <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                      <input
-                        type="checkbox"
-                        checked={!!scene.isOpenByDefault}
-                        onChange={(e) =>
-                          pushHistory({
-                            ...project,
-                            uiMenus: (project.uiMenus || []).map((s) =>
-                              s.id === scene.id
-                                ? { ...s, isOpenByDefault: e.target.checked }
-                                : s,
-                            ),
-                          })
-                        }
-                        className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950"
-                      />
-                      <LabelWithHelp
-                        label="Show By Default (HUD)"
-                        helpText="Checked if this is a HUD or always-on interface that should be visible immediately!"
-                      />
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                      <input
-                        type="checkbox"
-                        checked={!!scene.blocksClicks}
-                        onChange={(e) =>
-                          pushHistory({
-                            ...project,
-                            uiMenus: (project.uiMenus || []).map((s) =>
-                              s.id === scene.id
-                                ? { ...s, blocksClicks: e.target.checked }
-                                : s,
-                            ),
-                          })
-                        }
-                        className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950"
-                      />
-                      <LabelWithHelp
-                        label="Block Clicks Below Screen UI"
-                        helpText="If checked, clicks inside this UI map's bounds will not pass through to the game scene below. Make the width/height match the stage if you want to block the entire screen!"
-                      />
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                      <input
-                        type="checkbox"
-                        checked={!!scene.closeOnClickOutside}
-                        onChange={(e) =>
-                          pushHistory({
-                            ...project,
-                            uiMenus: (project.uiMenus || []).map((s) =>
-                              s.id === scene.id
-                                ? { ...s, closeOnClickOutside: e.target.checked }
-                                : s,
-                            ),
-                          })
-                        }
-                        className="rounded bg-neutral-800 border-neutral-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-neutral-950"
-                      />
-                      <LabelWithHelp
-                        label="Close When Clicking Outside"
-                        helpText="Dismiss this panel automatically when the player clicks anywhere outside it — great for popup menus opened by custom buttons."
-                      />
-                    </label>
                   </div>
 
-                  <div className="pt-4 border-t border-neutral-800 flex justify-between items-center">
-                    <span className="text-sm text-neutral-500">
-                      {scene.objects.length} Objects
-                    </span>
-                    <button
-                      onClick={() => {
-                        setProject((p) => ({
-                          ...p,
-                          currentUiMenuId: scene.id,
-                        }));
-                        setEditorMode("ui_stage");
-                      }}
-                      className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-sm rounded transition-colors"
-                    >
-                      {project.currentUiMenuId === scene.id
-                        ? "Viewing UI Stage"
-                        : "Edit UI →"}
-                    </button>
+                  <div className="interface-tool-card">
+                    <div className="interface-tool-kicker">Export layout</div>
+                    <h3>Preview the stacked player view</h3>
+                    <p>
+                      Check the room, frame, dialogue, HUD, and UI screens together without digging through inspector accordions.
+                    </p>
+                    <div className="interface-impact-row">
+                      <span>Game impact</span>
+                      <strong>Preview is read-only; placing widgets changes default HUD positions.</strong>
+                    </div>
+                    <div className="interface-tool-actions">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditorMode("stage");
+                          setHideEditorHud(false);
+                        }}
+                        className="interface-action-button interface-action-button--amber"
+                      >
+                        Preview room layout
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => placeBuiltInHudWidget("buttons")}
+                        className="interface-action-button interface-action-button--pink"
+                      >
+                        Place built-in widgets
+                      </button>
+                    </div>
                   </div>
                 </div>
-              ))}
+
+                <div className="interface-smart-region-bar">
+                  <div>
+                    <strong>Add live zones to the open screen</strong>
+                    <span>After you drop your own graphic on a Screen UI canvas, draw boxes where Cavebot should fill real game data.</span>
+                  </div>
+                  <button type="button" onClick={() => createSmartUiRegion("inventory_grid")}>
+                    + Items go here
+                  </button>
+                  <button type="button" onClick={() => createSmartUiRegion("journal_text")}>
+                    + Journal text goes here
+                  </button>
+                  <button type="button" onClick={() => createSmartUiRegion("quest_list")}>
+                    + Quest steps go here
+                  </button>
+                  <button type="button" onClick={() => createSmartUiRegion("stat_list")}>
+                    + Needs / skills go here
+                  </button>
+                </div>
+                  </>
+                )}
+              </div>
+
+              {interfaceStudioPane === "presets" && (
+              <aside className="interface-template-panel interface-template-panel--starter overflow-hidden border border-emerald-300/25 bg-emerald-400/5 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.16)]">
+                <div className="mb-3 flex items-center gap-2 font-comic text-lg font-bold text-emerald-100">
+                  <LayoutTemplate size={18} />
+                  Screen starters
+                </div>
+                <p className="mb-3 text-sm leading-relaxed text-neutral-400">
+                  Pick what you want the player to open. Cavebot makes a Screen UI canvas you can edit like a room, then wire to buttons, objects, dialogue, or quest events.
+                </p>
+                <div className="interface-family-tabs">
+                  {INTERFACE_PRESET_GROUPS.map((group) => (
+                    <button
+                      key={group.id}
+                      type="button"
+                      onClick={() => setActiveInterfacePresetGroup(group.id)}
+                      className={group.id === activeInterfacePresetGroup ? "is-active" : ""}
+                    >
+                      {group.title.replace(" & ", " / ")}
+                    </button>
+                  ))}
+                </div>
+                <div className="interface-family-card">
+                  <div className="font-comic text-sm font-bold text-white">
+                    {activeInterfaceGroup.title}
+                  </div>
+                  <p>{activeInterfaceGroup.blurb}</p>
+                  <div className="interface-impact-row">
+                    <span>What it does</span>
+                    <strong>
+                      {INTERFACE_TEMPLATE_IMPACT[activeInterfaceGroup.template]}
+                    </strong>
+                  </div>
+                  <div className="interface-template-preview">
+                    <span className="mock-panel mock-panel--large" />
+                    <span className="mock-panel mock-panel--top" />
+                    <span className="mock-panel mock-panel--side" />
+                    <span className="mock-panel mock-panel--bottom" />
+                  </div>
+                </div>
+                <div className="interface-preset-list custom-scrollbar">
+                  {activeInterfaceGroup.presets.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() =>
+                        createInterfaceTemplate(activeInterfaceGroup.template, {
+                          name: preset,
+                        })
+                      }
+                      className="interface-preset-button"
+                    >
+                      <span>{preset}</span>
+                      <small>{interfaceTemplateLabel(activeInterfaceGroup.template, preset)}</small>
+                    </button>
+                  ))}
+                </div>
+              </aside>
+              )}
+
+              {(interfaceStudioPane === "workshop" || interfaceStudioPane === "screens") && (
+              <div className="interface-screen-workspace custom-scrollbar">
+                {interfaceStudioPane === "workshop" && (
+                <section className="interface-builtins-panel">
+                  <div className="interface-section-heading">
+                    <div>
+                      <h3>Built-in HUDs and standard menus</h3>
+                      <p>
+                        Advanced defaults. Most custom inventory, journal, map, and menu work should start in Make a screen.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={createHudKit}
+                      className="interface-action-button interface-action-button--amber"
+                    >
+                      Generate editable kit
+                    </button>
+                  </div>
+                  <div className="interface-builtins-grid">
+                    {builtinHudSurfaces.map((surface) => (
+                      <div
+                        key={surface.label}
+                        className={`interface-builtin-card ${surface.hidden ? "is-hidden" : ""}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="interface-tool-kicker">
+                              {surface.family}
+                            </span>
+                            <h4>{surface.label}</h4>
+                          </div>
+                          <span
+                            className={`interface-status-pill ${surface.enabled && !surface.hidden ? "is-on" : ""}`}
+                          >
+                            {surface.hidden
+                              ? "hidden"
+                              : surface.enabled
+                                ? "on"
+                                : "off"}
+                          </span>
+                        </div>
+                        <p>{surface.description}</p>
+                        <div className="interface-impact-row">
+                          <span>Game impact</span>
+                          <strong>{surface.impact}</strong>
+                        </div>
+                        <div className="interface-builtin-actions">
+                          {surface.enableUpdates && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                patchGlobalSettings(surface.enableUpdates || {})
+                              }
+                            >
+                              {surface.enabled ? "Disable" : "Enable"}
+                            </button>
+                          )}
+                          {surface.hideUpdates && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                patchGlobalSettings(surface.hideUpdates || {})
+                              }
+                            >
+                              {surface.hidden ? "Show default" : "Hide default"}
+                            </button>
+                          )}
+                          {surface.widget && (
+                            <button
+                              type="button"
+                              onClick={() => placeBuiltInHudWidget(surface.widget!)}
+                            >
+                              {surface.actionName}
+                            </button>
+                          )}
+                          {surface.createTemplate && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                createInterfaceTemplate(surface.createTemplate!, {
+                                  name: `${surface.label} Custom Screen`,
+                                })
+                              }
+                            >
+                              Make editable
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+                )}
+
+                {interfaceStudioPane === "screens" && (
+                <section className="interface-menu-library">
+                  <div className="interface-section-heading">
+                    <div>
+                      <h3>Editable interface screens</h3>
+                      <p>
+                        These are Screen UI canvases. Edit them, duplicate them, or wire buttons to open them.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => createInterfaceTemplate("modal", { name: "New Interface Screen" })}
+                      className="interface-action-button interface-action-button--green"
+                    >
+                      + Custom screen
+                    </button>
+                  </div>
+                  <div className="interface-screen-grid">
+                    {(project.uiMenus || []).map((scene) => (
+                      <div
+                        key={scene.id}
+                        className={`studio-card interface-menu-card bg-neutral-900 border flex flex-col gap-3 transition-colors ${project.currentUiMenuId === scene.id ? "is-selected border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]" : "border-neutral-800 hover:border-neutral-700"}`}
+                      >
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="min-w-0 flex-1">
+                            <input
+                              type="text"
+                              value={scene.name}
+                              onChange={(e) => {
+                                pushHistory({
+                                  ...project,
+                                  uiMenus: (project.uiMenus || []).map((s) =>
+                                    s.id === scene.id
+                                      ? { ...s, name: e.target.value }
+                                      : s,
+                                  ),
+                                });
+                              }}
+                              className="w-full bg-transparent border-b border-transparent hover:border-neutral-700 focus:border-emerald-500 text-lg font-bold text-white outline-none px-1"
+                            />
+                            <div className="interface-menu-meta mt-2">
+                              <span>{scene.width || logicalStageWidth} × {scene.height || logicalStageHeight}</span>
+                              <span>{scene.objects.length} objects</span>
+                              {scene.isOpenByDefault && <span>HUD/default</span>}
+                              {scene.blocksClicks && <span>blocks clicks</span>}
+                              {scene.closeOnClickOutside && <span>click-out closes</span>}
+                            </div>
+                            <div className="interface-impact-row">
+                              <span>Game impact</span>
+                              <strong>
+                                {scene.isOpenByDefault
+                                  ? "Visible automatically during play."
+                                  : "Opens only when a button, object, shell control, or response calls it."}
+                              </strong>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                const newId = uuidv4();
+                                const newScene = {
+                                  ...scene,
+                                  id: newId,
+                                  name: `${scene.name} (Copy)`,
+                                  objects: scene.objects.map((o) => ({
+                                    ...o,
+                                    id: uuidv4(),
+                                  })),
+                                };
+                                pushHistory({
+                                  ...project,
+                                  uiMenus: [...(project.uiMenus || []), newScene],
+                                  currentUiMenuId: newId,
+                                });
+                              }}
+                              className="text-neutral-400 hover:text-white p-1"
+                              title="Duplicate UI Menu"
+                            >
+                              <Copy size={14} />
+                            </button>
+                            {(project.uiMenus || []).length > 0 && (
+                              <button
+                                onClick={() => {
+                                  const newMenus = (project.uiMenus || []).filter(
+                                    (s) => s.id !== scene.id,
+                                  );
+                                  const newCurrentId =
+                                    project.currentUiMenuId === scene.id
+                                      ? newMenus[0]?.id || null
+                                      : project.currentUiMenuId;
+                                  pushHistory({
+                                    ...project,
+                                    uiMenus: newMenus,
+                                    currentUiMenuId: newCurrentId,
+                                  });
+                                }}
+                                className="text-red-400 hover:text-red-300 p-1"
+                                title="Delete UI Menu"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setProject((p) => ({
+                              ...p,
+                              currentUiMenuId: scene.id,
+                            }));
+                            setEditorMode("ui_stage");
+                            setHideEditorHud(true);
+                          }}
+                          className="interface-menu-preview"
+                          style={{
+                            background:
+                              scene.backgroundColor === "transparent"
+                                ? "rgba(255,255,255,0.025)"
+                                : scene.backgroundColor,
+                          }}
+                        >
+                          {(scene.objects || []).slice(0, 18).map((object) => {
+                            const sceneW = scene.width || logicalStageWidth || 800;
+                            const sceneH = scene.height || logicalStageHeight || 600;
+                            return (
+                              <span
+                                key={object.id}
+                                className={`interface-menu-preview__object ${object.isText ? "is-text" : object.isUiElement ? "is-ui" : "is-asset"}`}
+                                style={{
+                                  left: `${(object.x / sceneW) * 100}%`,
+                                  top: `${(object.y / sceneH) * 100}%`,
+                                  width: `${Math.max(2, (object.width / sceneW) * 100)}%`,
+                                  height: `${Math.max(2, (object.height / sceneH) * 100)}%`,
+                                  transform: `rotate(${object.rotation || 0}deg)`,
+                                }}
+                              >
+                                {object.isText
+                                  ? (object.textContent || "T").slice(0, 1)
+                                  : ""}
+                              </span>
+                            );
+                          })}
+                          {(scene.objects || []).length === 0 && (
+                            <span className="interface-menu-preview__empty">
+                              Open canvas to add art and smart regions
+                            </span>
+                          )}
+                        </button>
+
+                        <div className="interface-menu-settings">
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={!!scene.isOpenByDefault}
+                              onChange={(e) =>
+                                pushHistory({
+                                  ...project,
+                                  uiMenus: (project.uiMenus || []).map((s) =>
+                                    s.id === scene.id
+                                      ? { ...s, isOpenByDefault: e.target.checked }
+                                      : s,
+                                  ),
+                                })
+                              }
+                            />
+                            HUD/default
+                          </label>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={!!scene.blocksClicks}
+                              onChange={(e) =>
+                                pushHistory({
+                                  ...project,
+                                  uiMenus: (project.uiMenus || []).map((s) =>
+                                    s.id === scene.id
+                                      ? { ...s, blocksClicks: e.target.checked }
+                                      : s,
+                                  ),
+                                })
+                              }
+                            />
+                            Blocks game clicks
+                          </label>
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={!!scene.closeOnClickOutside}
+                              onChange={(e) =>
+                                pushHistory({
+                                  ...project,
+                                  uiMenus: (project.uiMenus || []).map((s) =>
+                                    s.id === scene.id
+                                      ? {
+                                          ...s,
+                                          closeOnClickOutside: e.target.checked,
+                                        }
+                                      : s,
+                                  ),
+                                })
+                              }
+                            />
+                            Click-out closes
+                          </label>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-neutral-800 pt-3">
+                          <div className="flex min-w-[12rem] flex-1 gap-2">
+                            <input
+                              type="text"
+                              value={scene.backgroundColor}
+                              onChange={(e) =>
+                                pushHistory({
+                                  ...project,
+                                  uiMenus: (project.uiMenus || []).map((s) =>
+                                    s.id === scene.id
+                                      ? { ...s, backgroundColor: e.target.value }
+                                      : s,
+                                  ),
+                                })
+                              }
+                              className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-200"
+                              placeholder="transparent"
+                            />
+                            {(scene.width !== logicalStageWidth ||
+                              scene.height !== logicalStageHeight) && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  pushHistory({
+                                    ...project,
+                                    uiMenus: (project.uiMenus || []).map((candidate) =>
+                                      candidate.id === scene.id
+                                        ? {
+                                            ...candidate,
+                                            width: logicalStageWidth,
+                                            height: logicalStageHeight,
+                                          }
+                                        : candidate,
+                                    ),
+                                  })
+                                }
+                                className="rounded border border-cyan-400/35 bg-cyan-400/10 px-2 py-1 text-[10px] font-bold text-cyan-300 hover:bg-cyan-400/20"
+                              >
+                                Sync size
+                              </button>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => {
+                              setProject((p) => ({
+                                ...p,
+                                currentUiMenuId: scene.id,
+                              }));
+                              setEditorMode("ui_stage");
+                            }}
+                            className="rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:bg-neutral-700"
+                          >
+                            {project.currentUiMenuId === scene.id
+                              ? "Open in Screen UI"
+                              : "Edit screen"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {(project.uiMenus || []).length === 0 && (
+                      <div className="rounded-lg border border-dashed border-neutral-800 bg-neutral-900/50 p-8 text-center text-sm text-neutral-500">
+                        Create an interface screen or start from a game-system preset.
+                      </div>
+                    )}
+                  </div>
+                </section>
+                )}
+              </div>
+              )}
             </div>
           </div>
         )}
@@ -18933,7 +20738,7 @@ const App: React.FC = () => {
             />
 
             <div
-              className={`studio-page-content behavior-page-content flex-1 gap-6 overflow-hidden p-6 ${
+              className={`studio-page-content behavior-page-content flex-1 gap-4 overflow-hidden p-4 ${
                 worldRulesUsesDetailPane
                   ? "flex"
                   : "overflow-y-auto custom-scrollbar"
@@ -18942,7 +20747,7 @@ const App: React.FC = () => {
               <div
                 className={`studio-rail behavior-tab-body relative flex flex-col gap-4 overflow-y-auto custom-scrollbar ${
                   !worldRulesUsesDetailPane
-                    ? "w-full min-w-0 overflow-visible px-0"
+                    ? "w-full min-w-0 px-0"
                     : "flex-shrink-0 border-r border-neutral-800 pr-6"
                 }`}
                 style={
@@ -24961,11 +26766,11 @@ const App: React.FC = () => {
         if (!sequenceObject) return null;
         return (
           <div
-            className="fixed inset-0 z-[76000] flex items-center justify-center bg-black/82 p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-[76000] flex items-center justify-center bg-black/82 p-2 backdrop-blur-sm sm:p-3"
             onClick={() => setEditingClickSequenceObjectId(null)}
           >
             <div
-              className="flex h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-emerald-400/30 bg-neutral-950 shadow-2xl"
+              className="action-sequence-workshop flex h-[calc(100vh-1rem)] w-[calc(100vw-1rem)] max-w-none flex-col overflow-hidden rounded-lg border border-emerald-400/30 bg-neutral-950 shadow-2xl sm:h-[calc(100vh-1.5rem)] sm:w-[calc(100vw-1.5rem)]"
               onClick={(event) => event.stopPropagation()}
             >
               <div className="flex items-start justify-between gap-4 border-b border-neutral-800 bg-neutral-900 px-4 py-3">

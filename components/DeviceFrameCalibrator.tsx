@@ -266,8 +266,8 @@ export const DeviceFrameCalibrator: React.FC<
     !!screenRect && screenRect.width >= 10 && screenRect.height >= 10;
 
   return (
-    <div className="fixed inset-0 z-[12000] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm">
-      <div className="device-calibrator flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden border border-emerald-400/60 bg-neutral-950 shadow-[0_0_60px_rgba(0,255,204,0.18)]">
+    <div className="fixed inset-0 z-[12000] flex items-center justify-center bg-black/85 p-2 backdrop-blur-sm sm:p-3">
+      <div className="device-calibrator flex h-[calc(100vh-1rem)] w-[calc(100vw-1rem)] max-w-none flex-col overflow-hidden border border-emerald-400/60 bg-neutral-950 shadow-[0_0_60px_rgba(0,255,204,0.18)] sm:h-[calc(100vh-1.5rem)] sm:w-[calc(100vw-1.5rem)]">
         <div className="flex items-center justify-between border-b border-neutral-800 bg-neutral-900 px-4 py-3">
           <div>
             <div className="flex items-center gap-2 font-comic text-base font-bold text-white">
@@ -288,7 +288,7 @@ export const DeviceFrameCalibrator: React.FC<
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_center,rgba(37,92,255,0.12),transparent_55%)] p-5">
+        <div className="min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_center,rgba(37,92,255,0.12),transparent_55%)] p-4">
           <div
             className="relative mx-auto w-fit max-w-full cursor-crosshair select-none touch-none"
             onPointerDown={beginMarking}
@@ -307,7 +307,7 @@ export const DeviceFrameCalibrator: React.FC<
                   height: event.currentTarget.naturalHeight,
                 })
               }
-              className="block max-h-[68vh] max-w-full object-contain"
+              className="block max-h-[calc(100vh-11rem)] max-w-full object-contain"
             />
 
             {screenRect && imageSize.width > 0 && imageSize.height > 0 && (

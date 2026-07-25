@@ -6,7 +6,7 @@ const GITHUB_RAW_ASSET_BASE =
 const REPOSITORY_FILE_EXTENSIONS =
   /\.(png|jpe?g|gif|webp|svg|mp3|wav|ogg|m4a|mp4|webm|js|ts)$/i;
 
-const isEmbeddedSource = (src?: string) => Boolean(src?.startsWith("data:"));
+export const isEmbeddedSource = (src?: string) => Boolean(src?.startsWith("data:"));
 
 const getOriginalEmbeddedSources = (asset: Asset) =>
   [asset.src, asset.dataURL].filter(
@@ -33,6 +33,8 @@ const restoreRepositoryFileName = (name: string) => {
 };
 
 export const inferGitHubAssetSrc = (asset: Asset): string => {
+  const idSrc = inferGitHubAssetIdSrc(asset.id);
+  if (idSrc) return idSrc;
   if (asset.src && !isEmbeddedSource(asset.src)) return asset.src;
 
   const category = cleanPathPart(asset.category || "");
@@ -178,6 +180,7 @@ const collectReferencedAssetValues = (project: Project): Set<string> => {
 const rewriteEmbeddedSourceReferences = <T>(
   value: T,
   embeddedSourceMap: Map<string, string>,
+  removeUnmappedEmbeddedSources = false,
   key = "",
 ): T => {
   if (key === "assets") return value;
@@ -186,18 +189,31 @@ const rewriteEmbeddedSourceReferences = <T>(
     isEmbeddedSource(value) &&
     shouldRewriteEmbeddedSourceReference(key)
   ) {
-    return (embeddedSourceMap.get(value) || value) as T;
+    if (embeddedSourceMap.has(value)) {
+      return embeddedSourceMap.get(value) as T;
+    }
+    return (removeUnmappedEmbeddedSources ? "" : value) as T;
   }
   if (Array.isArray(value)) {
     return value.map((item) =>
-      rewriteEmbeddedSourceReferences(item, embeddedSourceMap, key),
+      rewriteEmbeddedSourceReferences(
+        item,
+        embeddedSourceMap,
+        removeUnmappedEmbeddedSources,
+        key,
+      ),
     ) as T;
   }
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([childKey, child]) => [
         childKey,
-        rewriteEmbeddedSourceReferences(child, embeddedSourceMap, childKey),
+        rewriteEmbeddedSourceReferences(
+          child,
+          embeddedSourceMap,
+          removeUnmappedEmbeddedSources,
+          childKey,
+        ),
       ]),
     ) as T;
   }
@@ -237,6 +253,7 @@ export const prepareProjectForExport = (
         return {
           ...asset,
           src: embeddedSrc || asset.src,
+          dataURL: undefined,
           exportSource: "embedded_fallback",
           exportReason:
             asset.exportReason ||
@@ -255,6 +272,10 @@ export const prepareProjectForExport = (
           }
         : {
             ...asset,
+            src:
+              (isEmbeddedSource(asset.src) ? asset.src : asset.dataURL) ||
+              asset.src,
+            dataURL: undefined,
             exportSource: hasEmbeddedSource ? "embedded_fallback" : undefined,
             exportReason: hasEmbeddedSource
               ? "Used asset has no inferable repository filename, so embedded data is required for a self-contained export."
@@ -294,12 +315,13 @@ export const prepareProjectForExport = (
     const preparedAsset = preparedAssets[index];
     const replacement = preparedAsset.src || preparedAsset.dataURL || "";
     getOriginalEmbeddedSources(originalAsset).forEach((embeddedSource) => {
-      if (replacement) embeddedSourceMap.set(embeddedSource, replacement);
+      embeddedSourceMap.set(embeddedSource, replacement);
     });
   });
   const rewrittenProject = rewriteEmbeddedSourceReferences(
     strippedProject,
     embeddedSourceMap,
+    includeEmbeddedAssetData === false,
   );
 
   return {

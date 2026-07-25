@@ -1,5 +1,8 @@
 import { Project, Scene, StatTrackDefinition } from "../types";
-import { prepareProjectForExport } from "./projectPersistence";
+import {
+  inferGitHubAssetIdSrc,
+  prepareProjectForExport,
+} from "./projectPersistence";
 import {
   compareRuleValue,
   evaluateRuleCondition,
@@ -799,6 +802,96 @@ export function generateExportHtml(sourceProject: Project): string {
     .need-fill {
       height: 100%; background: #4ade80; transition: width 0.3s;
     }
+    .ui-smart-region {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      box-sizing: border-box;
+      border: 2px dashed currentColor;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .ui-smart-region--inventory {
+      display: grid;
+    }
+    .ui-smart-region__slot {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(0,0,0,0.32);
+      overflow: hidden;
+    }
+    .ui-smart-region__slot img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      image-rendering: pixelated;
+    }
+    .ui-smart-region__slot span {
+      color: rgba(255,255,255,0.74);
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .ui-smart-region__empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 8px;
+      color: rgba(255,255,255,0.72);
+      text-align: center;
+      font-weight: 800;
+    }
+    .ui-smart-region--text {
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+    .ui-smart-region--text article {
+      display: block;
+      margin: 0 0 0.75em;
+    }
+    .ui-smart-region--text strong {
+      display: block;
+      margin-bottom: 0.2em;
+      color: currentColor;
+      font-weight: 900;
+    }
+    .ui-smart-region--text p {
+      margin: 0;
+      color: rgba(255,255,255,0.86);
+    }
+    .ui-smart-region--stats {
+      display: grid;
+      align-content: start;
+      gap: 6px;
+    }
+    .ui-smart-region__meter {
+      display: grid;
+      grid-template-columns: minmax(4rem, max-content) minmax(4rem, 1fr);
+      align-items: center;
+      gap: 8px;
+    }
+    .ui-smart-region__meter span {
+      overflow: hidden;
+      color: rgba(255,255,255,0.9);
+      font-weight: 850;
+      text-overflow: ellipsis;
+      text-transform: capitalize;
+      white-space: nowrap;
+    }
+    .ui-smart-region__meter i {
+      display: block;
+      height: 7px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(0,0,0,0.4);
+    }
+    .ui-smart-region__meter b {
+      display: block;
+      height: 100%;
+    }
 
     #flavor-text {
       position: absolute;
@@ -820,9 +913,10 @@ export function generateExportHtml(sourceProject: Project): string {
   const hasCursorAsset = (assetId?: string) =>
     Boolean(
       assetId &&
-        (project.assets || []).some(
+        ((project.assets || []).some(
           (asset) => asset.id === assetId && (asset.src || asset.dataURL),
-        ),
+        ) ||
+          inferGitHubAssetIdSrc(assetId)),
     );
 
   const resolveAssetSrc = (
@@ -887,6 +981,8 @@ export function generateExportHtml(sourceProject: Project): string {
 
     const dataAttrs = `
       data-interaction="${obj.interaction}"
+      data-object-name="${(obj.name || "").replace(/"/g, "&quot;")}"
+      data-object-asset-id="${obj._assetId || ""}"
       data-interaction-data="${(obj.interactionData || "").replace(/"/g, "&quot;")}"
       data-audio-src="${obj.audioSrc || ""}"
       data-give-item="${obj.giveItemId || ""}"
@@ -900,10 +996,19 @@ export function generateExportHtml(sourceProject: Project): string {
       data-difficulty="${obj.skillCheckDifficulty || 0}"
       data-grant-skill="${obj.grantSkill || "none"}"
       data-grant-skill-val="${obj.grantSkillValue || 0}"
+      data-time-cost="${obj.timeCost || 0}"
+      data-reputation-target="${(obj.reputationEffect?.npcId || obj.characterId || obj.affinityId || "").replace(/"/g, "&quot;")}"
+      data-reputation-val="${obj.reputationEffect?.value || 0}"
       data-script-src="${obj.scriptAssetId ? resolveAssetSrc((project.assets || []).find((a) => a.id === obj.scriptAssetId)) : ""}"
       data-ui-binding="${obj.uiBindingType || ""}"
       data-ui-binding-id="${obj.uiBindingId || ""}"
       data-ui-element-type="${obj.uiElementType || ""}"
+      data-ui-grid-columns="${obj.uiGridColumns || ""}"
+      data-ui-grid-rows="${obj.uiGridRows || ""}"
+      data-ui-grid-gap="${obj.uiGridGap ?? ""}"
+      data-ui-padding="${obj.uiPadding ?? ""}"
+      data-ui-empty-text="${(obj.uiEmptyText || "").replace(/"/g, "&quot;")}"
+      data-ui-text-source="${obj.uiTextSource || ""}"
       data-local-checked="${!!obj.uiChecked}"
       data-ui-primary="${obj.uiColorPrimary || ""}"
       data-ui-secondary="${obj.uiColorSecondary || ""}"
@@ -940,7 +1045,19 @@ export function generateExportHtml(sourceProject: Project): string {
       const br =
         obj.uiBorderRadius ?? project.globalSettings?.uiBorderRadius ?? 8;
       let innerHtml = "";
-      if (obj.uiElementType === "panel") {
+      if (obj.uiElementType === "inventory_grid") {
+        const columns = Math.max(1, obj.uiGridColumns || 4);
+        const rows = Math.max(1, obj.uiGridRows || 3);
+        const gap = obj.uiGridGap ?? 8;
+        const padding = obj.uiPadding ?? 10;
+        innerHtml = `<div class="ui-smart-region ui-smart-region--inventory" style="border-color:${obj.uiColorPrimary || "var(--ui-primary)"}; background-color:${obj.uiColorSecondary || "rgba(0,0,0,0.68)"}; padding:${padding}px; grid-template-columns:repeat(${columns}, minmax(0, 1fr)); gap:${gap}px;"></div>`;
+      } else if (obj.uiElementType === "journal_text" || obj.uiElementType === "quest_list") {
+        const padding = obj.uiPadding ?? 14;
+        innerHtml = `<div class="ui-smart-region ui-smart-region--text" style="border-color:${obj.uiColorPrimary || "var(--ui-primary)"}; background-color:${obj.uiColorSecondary || "rgba(0,0,0,0.68)"}; color:${obj.textColor || obj.uiColorPrimary || "var(--ui-primary)"}; font-family:${obj.textFontFamily || project.globalSettings?.uiFontFamily || "sans-serif"}; font-size:${obj.textFontSize || 14}px; line-height:${obj.textLineHeight || 1.35}; padding:${padding}px;"></div>`;
+      } else if (obj.uiElementType === "stat_list") {
+        const padding = obj.uiPadding ?? 10;
+        innerHtml = `<div class="ui-smart-region ui-smart-region--stats" style="border-color:${obj.uiColorPrimary || "var(--ui-primary)"}; background-color:${obj.uiColorSecondary || "rgba(0,0,0,0.68)"}; color:${obj.textColor || obj.uiColorPrimary || "var(--ui-primary)"}; font-family:${obj.textFontFamily || project.globalSettings?.uiFontFamily || "sans-serif"}; font-size:${obj.textFontSize || 12}px; padding:${padding}px;"></div>`;
+      } else if (obj.uiElementType === "panel") {
         innerHtml = `<div style="width: 100%; height: 100%; pointer-events: none; background-color: ${obj.uiColorSecondary || "#171717"}; border: ${borderStyle} ${obj.uiColorPrimary || "#10b981"}; border-radius: ${br}px;"></div>`;
       } else if (obj.uiElementType === "progress") {
         innerHtml = `<div style="width: 100%; height: 100%; pointer-events: none; overflow: hidden; background-color: ${obj.uiColorSecondary || "#171717"}; border: ${borderStyle} ${obj.uiColorPrimary || "#10b981"}; border-radius: ${br}px;">
@@ -1121,6 +1238,210 @@ export function generateExportHtml(sourceProject: Project): string {
       return asset.dataURL || asset.src || fallback || '';
     };
 
+    const GITHUB_RAW_ASSET_BASE = 'https://raw.githubusercontent.com/thenabu222/entropic-ai/main/';
+    const REPOSITORY_MEDIA_EXTENSION = /\\.(png|jpe?g|gif|webp|svg|mp3|wav|ogg|m4a|mp4|webm|js|ts)(?:[?#].*)?$/i;
+    const cleanRepoPathPart = (value) => String(value || '')
+      .trim()
+      .replace(/^\\/+|\\/+$/g, '')
+      .split('/')
+      .filter(part => part && part !== '.' && part !== '..')
+      .join('/');
+    const normalizeRepoFileMatchName = (value) => String(value || '')
+      .trim()
+      .replace(/^.*[\\\\/]/, '')
+      .replace(
+        /^(.+?\\.(?:png|jpe?g|gif|webp|svg|mp3|wav|ogg|m4a|mp4|webm|js|ts))(?:_crop.*)?$/i,
+        '$1',
+      )
+      .replace(/(?:_crop)+$/i, '')
+      .toLowerCase();
+    const normalizeRepoFileMatchStem = (value) =>
+      normalizeRepoFileMatchName(value).replace(REPOSITORY_MEDIA_EXTENSION, '');
+    const rawGithubUrl = (repoPath) =>
+      GITHUB_RAW_ASSET_BASE + String(repoPath || '')
+        .split('/')
+        .filter(Boolean)
+        .map(part => encodeURIComponent(part))
+        .join('/');
+    const scoreRepoPathForAsset = (asset, filePath) => {
+      const assetName = normalizeRepoFileMatchName(asset.name || asset.id);
+      const assetStem = normalizeRepoFileMatchStem(asset.name || asset.id);
+      const fileName = normalizeRepoFileMatchName(filePath);
+      const fileStem = normalizeRepoFileMatchStem(filePath);
+      if (!assetName && !assetStem) return 0;
+      let score = 0;
+      if (assetName && assetName === fileName) score += 120;
+      if (
+        assetStem &&
+        assetStem === fileStem &&
+        (assetStem.length >= 4 || !['root', 'finder/images', 'images'].includes(cleanRepoPathPart(asset.category || '').toLowerCase()))
+      ) {
+        score += 90;
+      }
+      if (filePath.includes('assets/_cavebot-assets/')) score += 30;
+      const category = cleanRepoPathPart(asset.category || '').toLowerCase();
+      if (category && !['root', 'finder/images', 'images'].includes(category)) {
+        category.split('/').forEach(part => {
+          if (part && filePath.toLowerCase().includes('/' + part + '/')) score += 8;
+        });
+      }
+      return score;
+    };
+    let repoRelinkPromise = null;
+    const shouldRelinkAssetFromRepo = (asset) => {
+      if (!asset || String(asset.id || '').startsWith('github:')) return false;
+      const src = assetSrc(asset);
+      if (!src) return true;
+      if (src.startsWith('data:')) return false;
+      if (src.includes('/assets/_cavebot-assets/')) return false;
+      return src.includes('raw.githubusercontent.com/thenabu222/entropic-ai/main/assets/');
+    };
+    const relinkMissingAssetsFromGitHub = async () => {
+      const assetsNeedingRelink = assets.filter(asset => shouldRelinkAssetFromRepo(asset) && (asset.name || asset.id));
+      if (!assetsNeedingRelink.length || typeof fetch !== 'function') return 0;
+      if (repoRelinkPromise) return repoRelinkPromise;
+      repoRelinkPromise = (async () => {
+        try {
+          const response = await fetch('https://api.github.com/repos/thenabu222/entropic-ai/git/trees/main?recursive=1');
+          if (!response.ok) throw new Error('GitHub tree request failed: ' + response.status);
+          const treeData = await response.json();
+          const files = (Array.isArray(treeData.tree) ? treeData.tree : [])
+            .filter(file =>
+              file &&
+              file.type === 'blob' &&
+              typeof file.path === 'string' &&
+              file.path.startsWith('assets/') &&
+              REPOSITORY_MEDIA_EXTENSION.test(file.path)
+          );
+          let recovered = 0;
+          assetsNeedingRelink.forEach(asset => {
+            let bestPath = '';
+            let bestScore = 0;
+            files.forEach(file => {
+              const score = scoreRepoPathForAsset(asset, file.path);
+              if (score > bestScore) {
+                bestScore = score;
+                bestPath = file.path;
+              }
+            });
+            if (bestPath && bestScore >= 90) {
+              asset.src = rawGithubUrl(bestPath);
+              asset.dataURL = '';
+              asset.exportSource = 'github_inferred';
+              recovered += 1;
+            }
+          });
+          if (recovered) {
+            document.querySelectorAll('[data-runtime-src][data-asset-id]').forEach(element => {
+              const asset = assets.find(candidate => candidate.id === element.getAttribute('data-asset-id'));
+              const src = assetSrc(asset);
+              if (!src) return;
+              if (element.getAttribute('src') !== src) {
+                element.setAttribute('src', src);
+                if (element.tagName === 'VIDEO' && typeof element.load === 'function') element.load();
+              }
+            });
+            if (typeof window.__cavebotRefreshAssetLinkedViews === 'function') {
+              window.__cavebotRefreshAssetLinkedViews();
+            }
+            if (typeof updateSmartUiRegions === 'function') updateSmartUiRegions();
+            const globalCursorAssetId = globalSettings.customCursorAssetId || '';
+            if (globalCursorAssetId && typeof setAnimatedCursor === 'function') setAnimatedCursor(globalCursorAssetId);
+            console.info('Cavebot export relinked ' + recovered + ' missing asset URL' + (recovered === 1 ? '' : 's') + ' from GitHub.');
+          }
+          return recovered;
+        } catch (error) {
+          console.warn('Cavebot export could not relink missing GitHub assets.', error);
+          return 0;
+        }
+      })();
+      return repoRelinkPromise;
+    };
+
+    const escapeForHtml = (value) => String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+    const inventoryIconSrc = (itemId) => {
+      const item = inventoryItems.find(candidate => candidate.id === itemId);
+      if (!item || !item.iconAssetId) return '';
+      return assetSrc(assets.find(asset => asset.id === item.iconAssetId));
+    };
+
+    const visibleLoreEntriesForSource = (source) => {
+      const entries = gameData.loreEntries || [];
+      return entries.filter(entry => {
+        if (entry.requiredFlagId && !state.flags[entry.requiredFlagId] && !(state.unlockedLoreEntryIds || []).includes(entry.id)) return false;
+        if (source === 'journal') return entry.entryType === 'journal';
+        if (source === 'quest_note') return entry.entryType === 'quest_note';
+        if (source === 'lore') return entry.entryType === 'lore';
+        return true;
+      });
+    };
+
+    const updateSmartUiRegions = () => {
+      document.querySelectorAll('[data-ui-element-type="inventory_grid"]').forEach(obj => {
+        const region = obj.querySelector('.ui-smart-region--inventory');
+        if (!region) return;
+        const columns = Math.max(1, Number(obj.getAttribute('data-ui-grid-columns')) || 4);
+        const rows = Math.max(1, Number(obj.getAttribute('data-ui-grid-rows')) || 3);
+        const total = columns * rows;
+        const emptyText = obj.getAttribute('data-ui-empty-text') || 'Inventory empty';
+        let html = '';
+        for (let index = 0; index < total; index++) {
+          const itemId = state.inventory[index] || '';
+          const item = inventoryItems.find(candidate => candidate.id === itemId);
+          const iconSrc = itemId ? inventoryIconSrc(itemId) : '';
+          html += '<div class="ui-smart-region__slot">';
+          if (iconSrc) {
+            html += '<img src="' + iconSrc + '" alt="" draggable="false" />';
+          } else if (item) {
+            html += '<span>' + escapeForHtml((item.name || '').slice(0, 2)) + '</span>';
+          }
+          html += '</div>';
+        }
+        if (!state.inventory.length) {
+          html += '<div class="ui-smart-region__empty">' + escapeForHtml(emptyText) + '</div>';
+        }
+        region.innerHTML = html;
+      });
+
+      document.querySelectorAll('[data-ui-element-type="journal_text"]').forEach(obj => {
+        const region = obj.querySelector('.ui-smart-region--text');
+        if (!region) return;
+        const source = obj.getAttribute('data-ui-text-source') || 'all';
+        const entries = visibleLoreEntriesForSource(source).slice(0, 6);
+        const emptyText = obj.getAttribute('data-ui-empty-text') || 'No entries yet.';
+        region.innerHTML = entries.length
+          ? entries.map(entry => '<article><strong>' + escapeForHtml(entry.title || 'Untitled') + '</strong>' + (entry.content ? '<p>' + escapeForHtml(entry.content) + '</p>' : '') + '</article>').join('')
+          : '<span>' + escapeForHtml(emptyText) + '</span>';
+      });
+
+      document.querySelectorAll('[data-ui-element-type="quest_list"]').forEach(obj => {
+        const region = obj.querySelector('.ui-smart-region--text');
+        if (!region) return;
+        const quests = (gameData.quests || []).filter(quest => (state.activeQuests || []).includes(quest.id) || (state.completedQuests || []).includes(quest.id)).slice(0, 6);
+        const emptyText = obj.getAttribute('data-ui-empty-text') || 'No active quests.';
+        region.innerHTML = quests.length
+          ? quests.map(quest => '<article><strong>' + escapeForHtml(quest.name || 'Untitled quest') + '</strong><p>' + escapeForHtml((state.completedQuests || []).includes(quest.id) ? 'Complete' : (quest.description || 'Active objective')) + '</p></article>').join('')
+          : '<span>' + escapeForHtml(emptyText) + '</span>';
+      });
+
+      document.querySelectorAll('[data-ui-element-type="stat_list"]').forEach(obj => {
+        const region = obj.querySelector('.ui-smart-region--stats');
+        if (!region) return;
+        const primary = obj.getAttribute('data-ui-primary') || 'var(--ui-primary)';
+        const entries = Object.entries(state.needs || {});
+        const fallback = [['hunger', 70], ['rest', 70], ['novelty', 70], ['connection', 70]];
+        region.innerHTML = (entries.length ? entries : fallback).slice(0, 8).map(([label, value]) =>
+          '<div class="ui-smart-region__meter"><span>' + escapeForHtml(label) + '</span><i><b style="width:' + Math.max(0, Math.min(100, Number(value) || 0)) + '%; background-color:' + primary + '"></b></i></div>'
+        ).join('');
+      });
+    };
+
     const buildAudioSrc = (asset) => {
       const src = assetSrc(asset);
       if (!src) return "";
@@ -1131,13 +1452,22 @@ export function generateExportHtml(sourceProject: Project): string {
 
     const applyAssetVolume = (audio, asset) => {
       audio.volume = Math.max(0, Math.min(1, asset?.volume ?? 1));
+      audio.muted = !!(typeof state !== 'undefined' && state.isMuted);
       return audio;
     };
 
+    const activeRuntimeAudio = [];
+
     const playAudioAsset = (asset) => {
       const src = buildAudioSrc(asset);
-      if (!src) return null;
+      if (!src || (typeof state !== 'undefined' && state.isMuted)) return null;
       const audio = applyAssetVolume(new Audio(src), asset);
+      activeRuntimeAudio.splice(
+        0,
+        activeRuntimeAudio.length,
+        ...activeRuntimeAudio.filter(candidate => !candidate.paused)
+      );
+      activeRuntimeAudio.push(audio);
       audio.play().catch(e => console.warn("Audio play failed", e));
       return audio;
     };
@@ -1228,7 +1558,8 @@ export function generateExportHtml(sourceProject: Project): string {
       activeUiMenus: [],
       triggeredRuleIds: [],
       runtimePositions: {},
-      time: 8,
+      isMuted: false,
+      time: ${project.globalSettings?.dayNightStartHour ?? 8},
       day: 1
     };
 
@@ -1245,6 +1576,76 @@ export function generateExportHtml(sourceProject: Project): string {
     state.relationships = state.relationships || {};
     state.talkCounts = state.talkCounts || {};
     state.runtimePositions = state.runtimePositions || {};
+    state.isMuted = !!state.isMuted;
+
+    const normalizeRuntimeLookup = (value) => String(value || '')
+      .trim()
+      .replace(/^.*\\//, '')
+      .replace(/\\.[a-z0-9]+$/i, '')
+      .replace(/(?:_crop|_cropped|_copy|copy)+$/gi, '')
+      .replace(/[^a-z0-9]+/gi, '')
+      .toLowerCase();
+
+    const addInventoryItem = (itemId) => {
+      if (!itemId) return false;
+      if (!state.inventory.includes(itemId)) {
+        state.inventory.push(itemId);
+        updateInventoryUI();
+        checkQuestAutoComplete();
+        saveGame();
+        return true;
+      }
+      return false;
+    };
+
+    const relationshipBaseValue = (targetId) => {
+      const character = (gameData.characters || []).find(char => char.id === targetId);
+      if (character) return character.defaultAffinity || 0;
+      const faction = (gameData.factions || []).find(group => group.id === targetId);
+      return faction ? (faction.defaultAffinity || 0) : 0;
+    };
+
+    const resolveRelationshipTargetId = (targetId) => {
+      if (!targetId) return '';
+      const normalized = normalizeRuntimeLookup(targetId);
+      const character = (gameData.characters || []).find(char => char.id === targetId || normalizeRuntimeLookup(char.name) === normalized);
+      if (character) return character.id;
+      const faction = (gameData.factions || []).find(group => group.id === targetId || normalizeRuntimeLookup(group.name) === normalized);
+      return faction ? faction.id : targetId;
+    };
+
+    const changeRelationship = (targetId, amount) => {
+      const resolvedTarget = resolveRelationshipTargetId(targetId);
+      const numericAmount = Number(amount) || 0;
+      if (!resolvedTarget || !numericAmount) return;
+      state.relationships[resolvedTarget] = Math.max(-100, Math.min(100, (state.relationships[resolvedTarget] ?? relationshipBaseValue(resolvedTarget)) + numericAmount));
+      if (typeof window.buildRelationshipsPanel === 'function') {
+        window.buildRelationshipsPanel();
+      }
+      saveGame();
+    };
+
+    const inferInventoryItemForObject = (obj, explicitItemId) => {
+      if (explicitItemId) return explicitItemId;
+      const objectAssetId =
+        obj.getAttribute('data-object-asset-id') ||
+        obj.querySelector('[data-asset-id]')?.getAttribute('data-asset-id') ||
+        '';
+      const objectName = normalizeRuntimeLookup(obj.getAttribute('data-object-name') || '');
+      const imgSrc = obj.querySelector('img')?.getAttribute('src') || '';
+      const objectSrc = normalizeRuntimeLookup(imgSrc);
+      const item = inventoryItems.find(candidate => {
+        if (objectAssetId && candidate.iconAssetId === objectAssetId) return true;
+        const itemName = normalizeRuntimeLookup(candidate.name);
+        if (objectName && itemName && (itemName === objectName || objectName.includes(itemName) || itemName.includes(objectName))) return true;
+        const iconAsset = candidate.iconAssetId ? assets.find(asset => asset.id === candidate.iconAssetId) : null;
+        const iconSrc = normalizeRuntimeLookup(assetSrc(iconAsset));
+        const iconName = normalizeRuntimeLookup(iconAsset && iconAsset.name);
+        if (objectSrc && ((iconSrc && iconSrc === objectSrc) || (iconName && (iconName === objectSrc || objectSrc.includes(iconName))))) return true;
+        return false;
+      });
+      return item ? item.id : '';
+    };
 
     let saveGame = () => {
       try {
@@ -1457,13 +1858,15 @@ export function generateExportHtml(sourceProject: Project): string {
         if (!q || !q.rewards) return;
         q.rewards.forEach(reward => {
           if (reward.type === 'give_item') {
-            if (reward.targetId && !state.inventory.includes(reward.targetId)) {
-              state.inventory.push(reward.targetId);
+            if (reward.targetId && addInventoryItem(reward.targetId)) {
               const item = (gameData.inventoryItems || []).find(i => i.id === reward.targetId);
               showSimpleDialogue('Reward: ' + (item ? item.name : reward.targetId), 'System');
             }
           } else if (reward.type === 'set_flag') {
-            if (reward.targetId) state.flags[reward.targetId] = true;
+            if (reward.targetId) {
+              state.flags[reward.targetId] = true;
+              updateGameFlagsUI();
+            }
           } else if (reward.type === 'modify_status') {
             if (reward.targetId) {
               if (reward.targetId in state.needs) {
@@ -1549,6 +1952,7 @@ export function generateExportHtml(sourceProject: Project): string {
 
         if (choice.setGameFlag) {
           state.flags[choice.setGameFlag] = true;
+          updateGameFlagsUI();
         }
         if (choice.startQuestId && !state.activeQuests.includes(choice.startQuestId) && !state.completedQuests.includes(choice.startQuestId)) {
           state.activeQuests.push(choice.startQuestId);
@@ -1573,11 +1977,9 @@ export function generateExportHtml(sourceProject: Project): string {
         if (choice.showLoreEntryId) {
           unlockLoreEntry(choice.showLoreEntryId, true);
         }
-        if (choice.giveItemId && !state.inventory.includes(choice.giveItemId)) {
-          state.inventory.push(choice.giveItemId);
+        if (choice.giveItemId && addInventoryItem(choice.giveItemId)) {
           const item = (gameData.inventoryItems || []).find(i => i.id === choice.giveItemId);
           showSimpleDialogue('You received: ' + (item ? item.name : 'an item'), 'System');
-          updateInventoryUI();
         }
         if (choice.consumeItemId) {
           const idx = state.inventory.indexOf(choice.consumeItemId);
@@ -1600,7 +2002,7 @@ export function generateExportHtml(sourceProject: Project): string {
           const fe = choice.reputationEffect;
           const relationshipTarget = fe.characterId || fe.factionId;
           if (relationshipTarget) {
-            state.relationships[relationshipTarget] = Math.max(-100, Math.min(100, (state.relationships[relationshipTarget] || 0) + fe.value));
+            changeRelationship(relationshipTarget, fe.value);
           }
         }
         if (choice.timeCost) {
@@ -1683,6 +2085,7 @@ export function generateExportHtml(sourceProject: Project): string {
       saveGame = () => {
          _origSaveGame();
          updateGameFlagsUI();
+         updateSmartUiRegions();
       };
       
       updateGameFlagsUI();
@@ -1693,6 +2096,7 @@ export function generateExportHtml(sourceProject: Project): string {
 	          const el = document.getElementById('need-' + track.domId);
 	          if (el) el.style.width = percentForTrack(state.needs[track.id] ?? track.defaultValue ?? 0, track) + '%';
 	        });
+          updateSmartUiRegions();
 	      };
 	      updateNeedsUI();
 
@@ -1702,6 +2106,7 @@ export function generateExportHtml(sourceProject: Project): string {
 	          const el = document.getElementById('skill-' + track.domId);
 	          if (el) el.style.width = percentForTrack(state.skills[track.id] ?? track.defaultValue ?? 0, track) + '%';
 	        });
+          updateSmartUiRegions();
 	      };
       updateSkillsUI();
 
@@ -1710,10 +2115,11 @@ export function generateExportHtml(sourceProject: Project): string {
         project.globalSettings?.useDayNightCycle
           ? `
         setInterval(() => {
-          state.time += 0.1;
+          state.time += ${project.globalSettings?.dayNightHoursPerTick ?? 0.1};
           if (state.time >= 24) {
-            state.time = 0;
-            state.day = (state.day || 1) + 1;
+            const daysElapsed = Math.max(1, Math.floor(state.time / 24));
+            state.time = state.time % 24;
+            state.day = (state.day || 1) + daysElapsed;
             triggerDayReset();
           }
 
@@ -1731,7 +2137,7 @@ export function generateExportHtml(sourceProject: Project): string {
             const m = Math.floor((state.time % 1) * 60).toString().padStart(2, "0");
             timeDisplay.innerText = 'Day ' + (state.day || 1) + ' · ' + h + ':' + m;
           }
-        }, 1000);
+        }, ${Math.max(100, project.globalSettings?.dayNightTickMs ?? 1000)});
       `
           : ""
       }
@@ -1888,6 +2294,18 @@ export function generateExportHtml(sourceProject: Project): string {
             saveGame();
           }
 
+          const timeCost = Number(obj.getAttribute('data-time-cost') || 0);
+          if (timeCost) {
+            state.time = ((state.time || ${project.globalSettings?.dayNightStartHour ?? 8}) + timeCost) % 24;
+            saveGame();
+          }
+
+          const reputationTarget = obj.getAttribute('data-reputation-target') || '';
+          const reputationValue = Number(obj.getAttribute('data-reputation-val') || 0);
+          if (reputationTarget && reputationValue) {
+            changeRelationship(reputationTarget, reputationValue);
+          }
+
           const interaction = obj.getAttribute('data-interaction');
           const data = obj.getAttribute('data-interaction-data');
           const giveItemId = obj.getAttribute('data-give-item');
@@ -1901,11 +2319,9 @@ export function generateExportHtml(sourceProject: Project): string {
           }
           
           if (interaction === 'give-item' || interaction === 'collect') {
-            if (giveItemId && !state.inventory.includes(giveItemId)) {
-              state.inventory.push(giveItemId);
+            const itemIdToGive = inferInventoryItemForObject(obj, giveItemId);
+            if (itemIdToGive && addInventoryItem(itemIdToGive)) {
               showSimpleDialogue("You obtained an item!", "System");
-              updateInventoryUI();
-              checkQuestAutoComplete();
             }
             if (interaction === 'collect') {
               obj.style.display = 'none';
@@ -1978,11 +2394,13 @@ export function generateExportHtml(sourceProject: Project): string {
               state.flags[data] = true;
               checkQuestAutoComplete();
               saveGame();
+              updateGameFlagsUI();
             }
           } else if (interaction === 'clear_flag') {
             if (data) {
               delete state.flags[data];
               saveGame();
+              updateGameFlagsUI();
             }
           } else if (interaction === 'toggle_flag') {
             if (data) {
@@ -2114,11 +2532,17 @@ export function generateExportHtml(sourceProject: Project): string {
               document.exitFullscreen?.();
             }
           } else if (interaction === 'toggle_mute') {
-            window.__cavebotMuted = !window.__cavebotMuted;
+            state.isMuted = !state.isMuted;
+            window.__cavebotMuted = state.isMuted;
             document.querySelectorAll('audio, video').forEach(media => {
-              media.muted = !!window.__cavebotMuted;
+              media.muted = state.isMuted;
             });
-            showSimpleDialogue(window.__cavebotMuted ? 'Audio muted.' : 'Audio unmuted.', 'System');
+            if (currentBgmAudio) currentBgmAudio.muted = state.isMuted;
+            activeRuntimeAudio.forEach(audio => {
+              audio.muted = state.isMuted;
+            });
+            showSimpleDialogue(state.isMuted ? 'Audio muted.' : 'Audio unmuted.', 'System');
+            saveGame();
           } else if (interaction === 'restart_game') {
             try { localStorage.removeItem(gameSaveKey); } catch(e) {}
             location.reload();
@@ -2143,6 +2567,9 @@ export function generateExportHtml(sourceProject: Project): string {
               state.inventory = state.inventory.filter(id => id !== selectedInventoryItemId);
               clearInventorySelection();
               updateInventoryUI();
+              if (typeof window.buildRelationshipsPanel === 'function') {
+                window.buildRelationshipsPanel();
+              }
               saveGame();
               showSimpleDialogue(reaction, char.name);
             } else {
@@ -2186,7 +2613,7 @@ export function generateExportHtml(sourceProject: Project): string {
             const bindingId = obj.getAttribute('data-ui-binding-id');
             if (bindingType === 'flag' && bindingId) {
                state.flags[bindingId] = !state.flags[bindingId];
-               // updateGameFlagsUI is called inside saveGame
+               updateGameFlagsUI();
             } else {
                const isChecked = obj.getAttribute('data-local-checked') === 'true';
                const newVal = !isChecked;
@@ -2210,9 +2637,7 @@ export function generateExportHtml(sourceProject: Project): string {
               const responses = JSON.parse(
                 decodeURIComponent(obj.getAttribute('data-click-responses') || '%5B%5D')
               );
-              const responsesToRun = obj.classList.contains('shell-control')
-                ? responses.slice(1)
-                : responses;
+              const responsesToRun = responses;
               const responseAttributes = {
                 interaction: 'data-interaction',
                 interactionData: 'data-interaction-data',
@@ -2417,7 +2842,7 @@ export function generateExportHtml(sourceProject: Project): string {
         if (factions.length > 0) {
           html += '<div style="font-size:11px;font-weight:bold;text-transform:uppercase;color:var(--ui-primary);opacity:0.7;padding:8px 0 4px 0;">Factions</div>';
           factions.forEach(faction => {
-            const value = state.relationships[faction.id] ?? 0;
+            const value = state.relationships[faction.id] ?? (faction.defaultAffinity || 0);
             const pct = Math.round(((value + 100) / 200) * 100);
             const clr = value >= 50 ? '#00ffcc' : value >= 0 ? '#7ec8e3' : value >= -50 ? '#e3a87e' : '#e35c5c';
             const label = value >= 50 ? 'Allied' : value >= 10 ? 'Friendly' : value >= -10 ? 'Neutral' : value >= -50 ? 'Unfriendly' : 'Hostile';
@@ -2429,6 +2854,21 @@ export function generateExportHtml(sourceProject: Project): string {
               <div style="height:6px;border-radius:3px;background:rgba(255,255,255,0.1);overflow:hidden;">
                 <div style="height:100%;width:\${pct}%;background:\${clr};border-radius:3px;"></div>
               </div>
+            </div>\`;
+          });
+        }
+        const knownRelationshipIds = new Set([...characters.map(char => char.id), ...factions.map(faction => faction.id)]);
+        const looseRelationships = Object.entries(state.relationships || {})
+          .filter(([id]) => !knownRelationshipIds.has(id))
+          .sort(([a], [b]) => a.localeCompare(b));
+        if (looseRelationships.length > 0) {
+          html += '<div style="font-size:11px;font-weight:bold;text-transform:uppercase;color:var(--ui-primary);opacity:0.7;padding:8px 0 4px 0;">Other live relationship tracks</div>';
+          looseRelationships.forEach(([id, value]) => {
+            const numericValue = Number(value) || 0;
+            const clr = numericValue >= 20 ? '#10b981' : numericValue <= -20 ? '#ef4444' : '#9ca3af';
+            html += \`<div style="padding:10px 12px;border:1px solid \${clr}40;border-radius:8px;background:rgba(0,0,0,.18);display:flex;justify-content:space-between;gap:10px;">
+              <span style="font-family:monospace;font-size:12px;word-break:break-all;opacity:.75;">\${id}</span>
+              <span style="font-size:12px;color:\${clr};font-weight:bold;">\${numericValue > 0 ? '+' + numericValue : numericValue}</span>
             </div>\`;
           });
         }
@@ -2544,16 +2984,18 @@ export function generateExportHtml(sourceProject: Project): string {
         });
         const itemOutcomes = (recipe.outcomes || []).filter(outcome => outcome.type === 'give_item' && outcome.targetId);
         if (itemOutcomes.length > 0) {
-          itemOutcomes.forEach(outcome => state.inventory.push(outcome.targetId));
+          itemOutcomes.forEach(outcome => addInventoryItem(outcome.targetId));
         } else if (recipe.resultItemId) {
-          state.inventory.push(recipe.resultItemId);
+          addInventoryItem(recipe.resultItemId);
         }
         (recipe.outcomes || []).forEach(outcome => {
           if (!outcome.targetId) return;
           if (outcome.type === 'set_flag') {
             state.flags[outcome.targetId] = true;
+            updateGameFlagsUI();
           } else if (outcome.type === 'clear_flag') {
             delete state.flags[outcome.targetId];
+            updateGameFlagsUI();
           } else if (outcome.type === 'change_need') {
             state.needs[outcome.targetId] = Math.max(0, Math.min(100, (state.needs[outcome.targetId] || 0) + (outcome.amount || 0)));
             updateNeedsUI();
@@ -2713,6 +3155,7 @@ export function generateExportHtml(sourceProject: Project): string {
           badge.style.display = state.inventory.length > 0 ? 'flex' : 'none';
         }
 
+        updateSmartUiRegions();
         if (!invList) return;
         
         if (state.inventory.length === 0) {
@@ -2723,7 +3166,10 @@ export function generateExportHtml(sourceProject: Project): string {
         let html = '<div class="inventory-grid">';
         state.inventory.forEach(itemId => {
           const itemDef = inventoryItems.find(i => i.id === itemId);
-          if (!itemDef) return;
+          if (!itemDef) {
+            html += '<div class="inventory-item unknown"><div style="font-weight:bold;color:var(--ui-primary);">Unlinked item</div><div style="font-family:monospace;font-size:11px;word-break:break-all;opacity:.75;margin-top:6px;">' + itemId + '</div></div>';
+            return;
+          }
           const iconAsset = itemDef.iconAssetId ? assets.find(a => a.id === itemDef.iconAssetId) : null;
           
           let iconHtml = '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.5"><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M8 21v-5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v5"/><path d="M8 10h8"/><path d="M8 14h8"/></svg>';
@@ -2763,8 +3209,18 @@ export function generateExportHtml(sourceProject: Project): string {
       
       // Initial render for the badge
       updateInventoryUI();
+      window.__cavebotRefreshAssetLinkedViews = () => {
+        updateInventoryUI();
+        if (typeof updateSmartUiRegions === 'function') updateSmartUiRegions();
+        if (globalCursorAssetId && typeof setAnimatedCursor === 'function') {
+          setAnimatedCursor(globalCursorAssetId);
+        }
+      };
     };
     initGame();
+    relinkMissingAssetsFromGitHub().catch(error => {
+      console.warn('Cavebot export relink failed after init.', error);
+    });
   `;
 
   let hudHtml = "";
@@ -2839,25 +3295,20 @@ export function generateExportHtml(sourceProject: Project): string {
     `;
     deviceControlsHtml = (deviceFrame.controls || [])
       .map((control) => {
-        const primaryResponse = control.clickResponses?.[0];
-        const primaryScriptSrc = primaryResponse?.scriptAssetId
-          ? resolveAssetSrc(
-              project.assets.find((asset) => asset.id === primaryResponse.scriptAssetId),
-              primaryResponse.scriptAssetId,
-            )
-          : "";
         return `
         <button
           id="shell-control-${control.id}"
           class="scene-object shell-control"
           type="button"
           aria-label="${control.name.replace(/"/g, "&quot;")}"
-          data-interaction="${primaryResponse?.interaction || "none"}"
-          data-interaction-data="${(primaryResponse?.interactionData || "").replace(/"/g, "&quot;")}"
-          data-give-item="${primaryResponse?.giveItemId || ""}"
-          data-target-ui="${primaryResponse?.targetUiId || ""}"
-          data-dialogue-tree="${primaryResponse?.dialogueTreeId || ""}"
-          data-script-src="${primaryScriptSrc}"
+          data-object-name="${control.name.replace(/"/g, "&quot;")}"
+          data-object-asset-id=""
+          data-interaction="none"
+          data-interaction-data=""
+          data-give-item=""
+          data-target-ui=""
+          data-dialogue-tree=""
+          data-script-src=""
           data-click-responses="${encodeURIComponent(JSON.stringify(control.clickResponses || []))}"
           data-cursor-asset="${control.cursorAssetId || ""}"
           style="position:absolute; left:${control.x}px; top:${control.y}px; width:${control.width}px; height:${control.height}px; z-index:4500; border:0; padding:0; background:transparent; cursor:${hasCursorAsset(control.cursorAssetId) ? "none" : control.cursor || "pointer"};"

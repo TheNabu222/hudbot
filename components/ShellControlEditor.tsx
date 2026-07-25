@@ -501,8 +501,8 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[12500] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[95vh] w-full max-w-7xl flex-col overflow-hidden border border-pink-400/60 bg-neutral-950 shadow-[0_0_60px_rgba(255,0,153,0.2)]">
+    <div className="fixed inset-0 z-[12500] flex items-center justify-center bg-black/85 p-2 backdrop-blur-sm sm:p-3">
+      <div className="shell-control-workshop flex h-[calc(100vh-1rem)] w-[calc(100vw-1rem)] max-w-none flex-col overflow-hidden border border-pink-400/60 bg-neutral-950 shadow-[0_0_60px_rgba(255,0,153,0.2)] sm:h-[calc(100vh-1.5rem)] sm:w-[calc(100vw-1.5rem)]">
         <div className="flex items-center justify-between border-b border-neutral-800 bg-neutral-900 px-4 py-3">
           <div>
             <div className="flex items-center gap-2 font-comic text-base font-bold text-white">
@@ -524,8 +524,8 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
           </button>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px]">
-          <div className="min-h-0 overflow-auto bg-[radial-gradient(circle_at_center,rgba(255,0,153,0.12),transparent_58%)] p-6">
+        <div className="shell-control-workshop__body grid min-h-0 flex-1">
+          <div className="shell-control-workshop__stage min-h-0 overflow-auto bg-[radial-gradient(circle_at_center,rgba(255,0,153,0.12),transparent_58%)] p-4">
             <div
               className="relative mx-auto w-fit max-w-full cursor-crosshair select-none touch-none"
               onPointerDown={beginDrawing}
@@ -542,7 +542,7 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
                 src={imageSrc}
                 alt="Device shell controls"
                 draggable={false}
-                className="block max-h-[76vh] max-w-full object-contain"
+                className="block max-h-[calc(100vh-10rem)] max-w-full object-contain"
               />
               <div
                 className="pointer-events-none absolute border-2 border-dashed border-emerald-300/80 bg-emerald-400/10"
@@ -562,7 +562,7 @@ export const ShellControlEditor: React.FC<ShellControlEditorProps> = ({
             </div>
           </div>
 
-          <aside className="min-h-0 overflow-y-auto border-l border-neutral-800 bg-neutral-900 p-4">
+          <aside className="shell-control-workshop__inspector min-h-0 overflow-y-auto border-l border-neutral-800 bg-neutral-900 p-4">
             {selected ? (
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-2">

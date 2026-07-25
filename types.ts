@@ -382,7 +382,11 @@ export interface SceneObject {
     | "tooltip"
     | "selection"
     | "image"
-    | "text";
+    | "text"
+    | "inventory_grid"
+    | "journal_text"
+    | "quest_list"
+    | "stat_list";
   uiColorPrimary?: string;
   uiColorSecondary?: string;
   uiIconType?:
@@ -412,8 +416,14 @@ export interface SceneObject {
     | "groove"
     | "ridge";
   uiBorderRadius?: number;
-  uiBindingType?: "none" | "need" | "flag" | "inventory_count";
+  uiBindingType?: "none" | "need" | "flag" | "inventory_count" | "inventory" | "journal" | "quests" | "stats";
   uiBindingId?: string;
+  uiGridColumns?: number;
+  uiGridRows?: number;
+  uiGridGap?: number;
+  uiPadding?: number;
+  uiEmptyText?: string;
+  uiTextSource?: "all" | "journal" | "quest_note" | "lore" | "quest_active" | "quest_completed";
   uiAnchor?: 
     | "top-left" 
     | "top-center" 
@@ -637,6 +647,9 @@ export interface Project {
   prefabs?: SceneObject[];
   globalSettings: {
     useDayNightCycle: boolean;
+    dayNightStartHour?: number;
+    dayNightHoursPerTick?: number;
+    dayNightTickMs?: number;
     enableNeeds: boolean;
     enableTTRPGStats: boolean;
     stageWidth: number;

@@ -121,7 +121,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
 
   return (
     <div
-      className="asset-picker-backdrop fixed inset-0 z-[70000] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      className="asset-picker-backdrop fixed inset-0 z-[70000] flex items-center justify-center bg-black/80 p-2 backdrop-blur-sm sm:p-3"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) event.stopPropagation();
       }}
@@ -133,7 +133,7 @@ export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
       }}
     >
       <div
-        className="asset-picker-dialog flex h-[84vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-neutral-600 bg-neutral-900 shadow-2xl"
+        className="asset-picker-dialog flex h-[calc(100vh-1rem)] w-[calc(100vw-1rem)] max-w-none flex-col overflow-hidden rounded-lg border border-neutral-600 bg-neutral-900 shadow-2xl sm:h-[calc(100vh-1.5rem)] sm:w-[calc(100vw-1.5rem)]"
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
       >
