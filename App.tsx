@@ -306,11 +306,92 @@ const INTERFACE_TEMPLATE_IMPACT: Record<InterfaceTemplateKind, string> = {
   choiceBar: "Opens as a lightweight action bar without covering the whole scene.",
 };
 
+const resolveInterfacePresetTemplate = (
+  groupTemplate: InterfaceTemplateKind,
+  presetName = "",
+): InterfaceTemplateKind => {
+  const lower = presetName.toLowerCase();
+
+  if (lower.includes("dialogue choice") || lower.includes("choice")) return "choiceBar";
+  if (lower.includes("inventory")) return "inventory";
+  if (
+    lower.includes("inspect item") ||
+    lower.includes("equipment") ||
+    lower.includes("loadout") ||
+    lower.includes("buying") ||
+    lower.includes("trading") ||
+    lower.includes("player menu") ||
+    lower.includes("character customization") ||
+    lower.includes("upgrade")
+  ) {
+    return "inventory";
+  }
+  if (lower.includes("craft")) return "crafting";
+  if (lower.includes("quest")) return "quest";
+  if (
+    lower.includes("player vitals") ||
+    lower.includes("objective chip") ||
+    lower.includes("minimap") ||
+    lower.includes("compass") ||
+    lower.includes("button prompts") ||
+    lower.includes("item wheel") ||
+    lower.includes("ability menu") ||
+    lower.includes("targeting") ||
+    lower.includes("game log")
+  ) {
+    return "hud";
+  }
+  if (lower.includes("world map") || lower.includes("stage select")) return "map";
+  if (lower.includes("map")) return "map";
+  if (lower.includes("relationship") || lower.includes("roster")) return "relationships";
+  if (
+    lower.includes("setting") ||
+    lower.includes("pause") ||
+    lower.includes("load / save") ||
+    lower.includes("load/save") ||
+    lower.includes("save")
+  ) {
+    return "settings";
+  }
+  if (lower.includes("sound player")) return "modal";
+  if (lower.includes("level editor")) return "map";
+  if (
+    lower.includes("journal") ||
+    lower.includes("lore") ||
+    lower.includes("almanac") ||
+    lower.includes("codex") ||
+    lower.includes("tutorial") ||
+    lower.includes("gallery") ||
+    lower.includes("collectable") ||
+    lower.includes("content browser")
+  ) {
+    return "journal";
+  }
+  return groupTemplate;
+};
+
 const interfaceTemplateLabel = (
   template: InterfaceTemplateKind,
   presetName = "",
 ) => {
   const lower = presetName.toLowerCase();
+  const resolvedTemplate = resolveInterfacePresetTemplate(template, presetName);
+  if (lower.includes("player menu")) return "menu hub";
+  if (lower.includes("inspect item")) return "item detail";
+  if (lower.includes("equipment") || lower.includes("loadout")) return "gear slots";
+  if (lower.includes("buying") || lower.includes("trading")) return "shop surface";
+  if (lower.includes("character customization")) return "profile editor";
+  if (lower.includes("upgrade")) return "upgrade board";
+  if (lower.includes("objective chip")) return "quest HUD";
+  if (lower.includes("minimap")) return "minimap HUD";
+  if (lower.includes("compass")) return "direction HUD";
+  if (lower.includes("button prompts")) return "input prompts";
+  if (lower.includes("item wheel")) return "quick wheel";
+  if (lower.includes("ability menu")) return "action bar";
+  if (lower.includes("targeting")) return "aim overlay";
+  if (lower.includes("game log")) return "event feed";
+  if (lower.includes("sound player")) return "audio controls";
+  if (lower.includes("level editor")) return "tool surface";
   if (lower.includes("inventory")) return "live item slots";
   if (lower.includes("craft")) return "recipe builder";
   if (lower.includes("quest")) return "quest tracker";
@@ -333,7 +414,21 @@ const interfaceTemplateLabel = (
     settings: "settings menu",
     choiceBar: "choice bar",
   };
-  return labels[template];
+  return labels[resolvedTemplate];
+};
+
+const interfaceGroupImpact = (
+  group: (typeof INTERFACE_PRESET_GROUPS)[number],
+) => {
+  const mappedTemplates = new Set(
+    group.presets.map((preset) =>
+      resolveInterfacePresetTemplate(group.template, preset),
+    ),
+  );
+  if (mappedTemplates.size > 1) {
+    return "Each card maps to its own canvas starter: live grids, HUD overlays, menus, logs, maps, or popup controls as needed.";
+  }
+  return INTERFACE_TEMPLATE_IMPACT[group.template];
 };
 
 const defaultTrackDefinition = (
@@ -683,6 +778,24 @@ export const DEFAULT_ASSETS: Asset[] = [];
 const getAssetDisplaySrc = (
   asset?: Pick<Asset, "id" | "src" | "dataURL"> | null,
 ) => asset?.src || asset?.dataURL || inferGitHubAssetIdSrc(asset?.id) || "";
+
+const getAssetPlacementSize = (
+  asset: Pick<Asset, "type" | "width" | "height">,
+  fallbackWidth = 100,
+  fallbackHeight = 100,
+  maxDimension = 320,
+) => {
+  const nativeWidth = Number(asset.width) || 0;
+  const nativeHeight = Number(asset.height) || 0;
+  if (asset.type !== "image" || nativeWidth <= 0 || nativeHeight <= 0) {
+    return { width: fallbackWidth, height: fallbackHeight };
+  }
+  const scale = Math.min(1, maxDimension / Math.max(nativeWidth, nativeHeight));
+  return {
+    width: Math.max(24, Math.round(nativeWidth * scale)),
+    height: Math.max(24, Math.round(nativeHeight * scale)),
+  };
+};
 
 const normalizeAssetForRuntime = (asset: Asset): Asset => {
   return asset;
@@ -2472,11 +2585,110 @@ const App: React.FC = () => {
     });
   };
 
+  const handleInventoryItemClickInPlay = (itemId: string) => {
+    const item = project.inventoryItems.find((candidate) => candidate.id === itemId);
+    if (!item) return;
+
+    if (selectedInventoryItemId === itemId) {
+      setSelectedInventoryItemId(null);
+      if (isInventoryOpen) setIsInventoryOpen(false);
+      setPreviewDialogue(
+        item.description
+          ? `(Item): ${item.description}`
+          : `You look at: ${item.name}.`,
+      );
+      return;
+    }
+
+    if (selectedInventoryItemId && selectedInventoryItemId !== itemId) {
+      const combination = (project.craftingRecipes || []).find((recipe) =>
+        recipeMatchesSelection(recipe, [selectedInventoryItemId, itemId]),
+      );
+
+      if (combination) {
+        setPlayerInventory((prev) =>
+          applyCraftingRecipeToInventory(prev, combination),
+        );
+        applyCraftingOutcomes(combination);
+        setSelectedInventoryItemId(null);
+        setPreviewDialogue(
+          combination.successMessage || "Items combined successfully!",
+        );
+      } else {
+        setPreviewDialogue("These objects do not combine.");
+        setSelectedInventoryItemId(null);
+      }
+      return;
+    }
+
+    setSelectedInventoryItemId(itemId);
+  };
+
   const renderSmartUiRegion = (obj: SceneObject) => {
     const primary = obj.uiColorPrimary || project.globalSettings.uiColorPrimary || "#00ffcc";
     const secondary = obj.uiColorSecondary || "rgba(0,0,0,0.68)";
     const padding = obj.uiPadding ?? 10;
     const isEditor = !isPlaying;
+    const border =
+      obj.uiBorderType === "none"
+        ? "none"
+        : `2px ${obj.uiBorderType === "solid" ? "solid" : "dashed"} ${primary}`;
+    const slotChrome =
+      obj.uiBorderType === "none"
+        ? { backgroundColor: "transparent", borderColor: "transparent" }
+        : undefined;
+
+    if (isEditor) {
+      const columns = Math.max(1, obj.uiGridColumns || 4);
+      const rows = Math.max(1, obj.uiGridRows || 3);
+      const label =
+        obj.uiElementType === "inventory_grid"
+          ? "LIVE ITEM SLOTS"
+          : obj.uiElementType === "journal_text"
+            ? "LIVE JOURNAL TEXT"
+            : obj.uiElementType === "quest_list"
+              ? "LIVE QUEST LIST"
+              : obj.uiElementType === "stat_list"
+                ? "LIVE STATS"
+                : "LIVE REGION";
+
+      return (
+        <div
+          className="h-full w-full overflow-hidden"
+          style={{
+            border: `2px dashed ${primary}`,
+            backgroundColor: "rgba(4,12,22,0.14)",
+            color: primary,
+            boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)",
+          }}
+        >
+          <div className="pointer-events-none absolute left-1 top-1 z-10 rounded border border-black/60 bg-black/80 px-1.5 py-0.5 font-mono text-[9px] font-bold leading-none text-cyan-100 shadow">
+            {label}
+          </div>
+          {obj.uiElementType === "inventory_grid" ? (
+            <div
+              className="absolute inset-2 grid"
+              style={{
+                paddingTop: 14,
+                gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                gap: Math.max(2, Math.min(8, obj.uiGridGap ?? 4)),
+              }}
+            >
+              {Array.from({ length: columns * rows }).map((_, index) => (
+                <div
+                  key={index}
+                  className="rounded-[2px] border border-cyan-200/45 bg-cyan-200/5"
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="pointer-events-none flex h-full w-full items-center justify-center px-3 pt-5 text-center font-mono text-[10px] font-bold uppercase tracking-wide text-cyan-100/80">
+              Resize over the matching panel
+            </div>
+          )}
+        </div>
+      );
+    }
 
     if (obj.uiElementType === "inventory_grid") {
       const columns = Math.max(1, obj.uiGridColumns || 4);
@@ -2490,24 +2702,36 @@ const App: React.FC = () => {
         <div
           className="ui-smart-region ui-smart-region--inventory"
           style={{
-            borderColor: primary,
+            border,
             backgroundColor: secondary,
             padding,
             gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
             gap,
           }}
         >
           {cells.map((itemId, index) => {
             const item = project.inventoryItems.find((candidate) => candidate.id === itemId);
             const iconSrc = itemId ? getInventoryIconSrc(itemId) : "";
+            const isSelected = selectedInventoryItemId === itemId;
             return (
-              <div key={`${itemId || "empty"}-${index}`} className="ui-smart-region__slot">
+              <button
+                type="button"
+                key={`${itemId || "empty"}-${index}`}
+                className={`ui-smart-region__slot ${itemId ? "ui-smart-region__slot--item" : ""} ${isSelected ? "ui-smart-region__slot--selected" : ""}`}
+                disabled={!itemId}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (itemId) handleInventoryItemClickInPlay(itemId);
+                }}
+                style={slotChrome}
+              >
                 {iconSrc ? (
                   <img src={iconSrc} alt="" draggable={false} />
                 ) : item ? (
                   <span>{item.name.slice(0, 2)}</span>
                 ) : null}
-              </div>
+              </button>
             );
           })}
           {!isEditor && playerInventory.length === 0 && (
@@ -2523,7 +2747,7 @@ const App: React.FC = () => {
         <div
           className="ui-smart-region ui-smart-region--text"
           style={{
-            borderColor: primary,
+            border,
             backgroundColor: secondary,
             color: obj.textColor || primary,
             fontFamily: obj.textFontFamily || project.globalSettings.uiFontFamily,
@@ -2557,7 +2781,7 @@ const App: React.FC = () => {
         <div
           className="ui-smart-region ui-smart-region--text"
           style={{
-            borderColor: primary,
+            border,
             backgroundColor: secondary,
             color: obj.textColor || primary,
             fontFamily: obj.textFontFamily || project.globalSettings.uiFontFamily,
@@ -2587,7 +2811,7 @@ const App: React.FC = () => {
         <div
           className="ui-smart-region ui-smart-region--stats"
           style={{
-            borderColor: primary,
+            border,
             backgroundColor: secondary,
             color: obj.textColor || primary,
             fontFamily: obj.textFontFamily || project.globalSettings.uiFontFamily,
@@ -2730,11 +2954,22 @@ const App: React.FC = () => {
     }
 
     const currentArr = targetScene.objects || [];
+    const shouldUseImageAsUiPageBacking =
+      isUI &&
+      asset.type === "image" &&
+      currentArr.length === 0;
+    const targetSceneWidth =
+      targetScene.width || project.globalSettings.stageWidth || 800;
+    const targetSceneHeight =
+      targetScene.height || project.globalSettings.stageHeight || 600;
+    const imagePlacement = getAssetPlacementSize(asset);
 
     const newObj: SceneObject = {
       id: uuidv4(),
       name:
-        asset.type === "audio"
+        shouldUseImageAsUiPageBacking
+          ? `${asset.name} Page Art`
+          : asset.type === "audio"
           ? `Sound cue: ${asset.name}`
           : asset.type === "video"
             ? `Video cue: ${asset.name}`
@@ -2743,10 +2978,12 @@ const App: React.FC = () => {
               : asset.name,
       src: actualSrc,
       _assetId: asset.id,
-      x: (targetScene.width || project.globalSettings.stageWidth || 800) / 2 - 50,
-      y: (targetScene.height || project.globalSettings.stageHeight || 600) / 2 - 50,
+      x: shouldUseImageAsUiPageBacking ? 0 : targetSceneWidth / 2 - 50,
+      y: shouldUseImageAsUiPageBacking ? 0 : targetSceneHeight / 2 - 50,
       width:
-        asset.type === "ui_element"
+        shouldUseImageAsUiPageBacking
+          ? targetSceneWidth
+          : asset.type === "ui_element"
           ? asset.uiElementType === "panel"
             ? 200
             : asset.uiElementType === "progress"
@@ -2762,9 +2999,13 @@ const App: React.FC = () => {
               ? 64
               : asset.type === "text"
                 ? 200
+                : asset.type === "image"
+                  ? imagePlacement.width
                 : 100,
       height:
-        asset.type === "ui_element"
+        shouldUseImageAsUiPageBacking
+          ? targetSceneHeight
+          : asset.type === "ui_element"
           ? asset.uiElementType === "panel"
             ? 200
             : asset.uiElementType === "progress"
@@ -2780,14 +3021,18 @@ const App: React.FC = () => {
               ? 64
               : asset.type === "text"
                 ? 50
+                : asset.type === "image"
+                  ? imagePlacement.height
                 : 100,
       rotation: 0,
       zIndex:
-        currentArr.length > 0
+        shouldUseImageAsUiPageBacking
+          ? 0
+          : currentArr.length > 0
           ? Math.max(...currentArr.map((o) => o.zIndex)) + 1
           : 0,
       opacity: 1,
-      locked: false,
+      locked: shouldUseImageAsUiPageBacking,
       cursor:
         asset.type === "prefab" || asset.type === "audio"
           ? "pointer"
@@ -2829,6 +3074,9 @@ const App: React.FC = () => {
       blendMode: "normal",
       parallaxSpeed: 1,
       hasPhysics: false,
+      ignoreClicks: shouldUseImageAsUiPageBacking,
+      stretchToScreen: shouldUseImageAsUiPageBacking,
+      objectFit: shouldUseImageAsUiPageBacking ? "contain" : undefined,
       scriptAssetId: asset.type === "script" ? asset.id : undefined,
       ...objDefaults,
     };
@@ -2843,7 +3091,11 @@ const App: React.FC = () => {
     };
     pushHistory(newProject);
     setSelectedObjectId(newObj.id);
-    showError(`${asset.name || "Asset"} placed in ${targetScene.name}.`);
+    showError(
+      shouldUseImageAsUiPageBacking
+        ? `${asset.name || "Graphic"} is now the locked page art. Add live zones over its empty panels.`
+        : `${asset.name || "Asset"} placed in ${targetScene.name}.`,
+    );
   };
 
   const handleDragStartAsset = (e: React.DragEvent, asset: any) => {
@@ -2906,11 +3158,13 @@ const App: React.FC = () => {
       reader.onerror = () => resolve(null);
       reader.onload = () => {
         const src = reader.result as string;
-        const asset: Asset = {
-          id: uuidv4(),
-          name: file.name,
-          src,
-          type: isAudio ? "audio" : isVideo ? "video" : "image",
+          const asset: Asset = {
+            id: uuidv4(),
+            name: file.name,
+            src,
+            width: undefined,
+            height: undefined,
+            type: isAudio ? "audio" : isVideo ? "video" : "image",
           category: isAudio
             ? "finder/audio"
             : isVideo
@@ -2935,7 +3189,11 @@ const App: React.FC = () => {
             maxDimension / Math.max(image.naturalWidth, image.naturalHeight),
           );
           resolve({
-            asset,
+            asset: {
+              ...asset,
+              width: image.naturalWidth,
+              height: image.naturalHeight,
+            },
             width: Math.max(24, Math.round(image.naturalWidth * scale)),
             height: Math.max(24, Math.round(image.naturalHeight * scale)),
           });
@@ -5840,18 +6098,8 @@ const App: React.FC = () => {
     const stageH = logicalStageHeight || 600;
     const primary = project.globalSettings.uiColorPrimary || "#00ffcc";
     const panelBg = project.globalSettings.uiColorBackground || "rgba(0,0,0,0.86)";
-    const resolveTemplate = (requested: InterfaceTemplateKind, name?: string): InterfaceTemplateKind => {
-      const normalized = (name || "").toLowerCase();
-      if (normalized.includes("inventory")) return "inventory";
-      if (normalized.includes("quest")) return "quest";
-      if (normalized.includes("craft")) return "crafting";
-      if (normalized.includes("map")) return "map";
-      if (normalized.includes("relationship") || normalized.includes("roster")) return "relationships";
-      if (normalized.includes("setting")) return "settings";
-      if (normalized.includes("journal") || normalized.includes("lore") || normalized.includes("almanac") || normalized.includes("codex")) return "journal";
-      return requested;
-    };
-    const resolvedTemplate = resolveTemplate(template, options.name);
+    const resolvedTemplate = resolveInterfacePresetTemplate(template, options.name);
+    const normalizedPresetName = (options.name || "").toLowerCase();
     const makeBase = (
       name: string,
       x: number,
@@ -5975,7 +6223,7 @@ const App: React.FC = () => {
                 : "No entries unlocked",
         textColor: primary,
         textFontSize: kind === "stat_list" ? 12 : 15,
-        ignoreClicks: true,
+        ignoreClicks: kind !== "inventory_grid",
         ...extra,
       }) as SceneObject;
 
@@ -6023,13 +6271,31 @@ const App: React.FC = () => {
         isOpenByDefault: false,
         blocksClicks: true,
         objects: [
-          panel("Inventory Art Backing", stageW * 0.1, stageH * 0.1, stageW * 0.8, stageH * 0.78, 10, "rgba(0,0,0,0.7)"),
-          text("Inventory Title", "INVENTORY", stageW * 0.15, stageH * 0.15, stageW * 0.5, 34, 12, 24),
-          smartRegion("inventory_grid", "Inventory Item Grid", stageW * 0.17, stageH * 0.25, stageW * 0.55, stageH * 0.5, 12, {
+          panel("Inventory Art Backing", stageW * 0.07, stageH * 0.08, stageW * 0.86, stageH * 0.84, 10, "rgba(0,0,0,0.72)"),
+          text("Inventory Title", "INVENTORY", stageW * 0.11, stageH * 0.125, stageW * 0.42, 34, 12, 24),
+          smartRegion("inventory_grid", "Inventory Item Grid", stageW * 0.11, stageH * 0.21, stageW * 0.42, stageH * 0.42, 12, {
+            uiGridColumns: 4,
+            uiGridRows: 3,
             uiEmptyText: "No items collected yet",
+            cursor: "pointer",
           }),
-          text("Inventory Hint", "Resize this item grid over your bag, shelf, or custom inventory art.", stageW * 0.18, stageH * 0.78, stageW * 0.5, 30, 12, 13),
-          button("Close Inventory", "Close", stageW * 0.72, stageH * 0.78, stageW * 0.11, 38, 13, "close_ui", { targetUiId: menuId }),
+          smartRegion("stat_list", "Needs / Stats Region", stageW * 0.56, stageH * 0.21, stageW * 0.33, stageH * 0.17, 12, {
+            uiPadding: 10,
+            textFontSize: 12,
+          }),
+          smartRegion("quest_list", "Quest List Region", stageW * 0.56, stageH * 0.41, stageW * 0.33, stageH * 0.23, 12, {
+            uiPadding: 12,
+            textFontSize: 12,
+            uiEmptyText: "No active quests.",
+          }),
+          smartRegion("journal_text", "Journal Text Region", stageW * 0.11, stageH * 0.68, stageW * 0.78, stageH * 0.14, 12, {
+            uiPadding: 10,
+            textFontSize: 11,
+            uiTextSource: "all",
+            uiEmptyText: "No notes unlocked yet.",
+          }),
+          text("Inventory Hint", "Click an item to inspect it. Select one item, then another, to combine.", stageW * 0.12, stageH * 0.84, stageW * 0.54, 30, 12, 13),
+          button("Close Inventory", "Close", stageW * 0.74, stageH * 0.827, stageW * 0.15, 38, 13, "close_ui", { targetUiId: menuId }),
         ],
       },
       quest: {
@@ -6058,6 +6324,7 @@ const App: React.FC = () => {
             uiGridColumns: 3,
             uiGridRows: 3,
             uiEmptyText: "Required items",
+            cursor: "pointer",
           }),
           button("Craft Button", "Craft", stageW * 0.55, stageH * 0.66, stageW * 0.14, 40, 13, "open_crafting"),
           button("Close Crafting", "Close", stageW * 0.72, stageH * 0.78, stageW * 0.11, 38, 13, "close_ui", { targetUiId: menuId }),
@@ -6113,6 +6380,378 @@ const App: React.FC = () => {
       },
     };
     const selected = templates[resolvedTemplate];
+    const closeButton = (
+      name = "Close Button",
+      label = "Close",
+      x = stageW * 0.72,
+      y = stageH * 0.78,
+      width = stageW * 0.11,
+      height = 38,
+    ) => button(name, label, x, y, width, height, 13, "close_ui", { targetUiId: menuId });
+    const titledScreen = (
+      title: string,
+      backingName = `${title} Backing`,
+    ) => [
+      panel(backingName, stageW * 0.1, stageH * 0.1, stageW * 0.8, stageH * 0.78, 10),
+      text(`${title} Title`, title.toUpperCase(), stageW * 0.15, stageH * 0.15, stageW * 0.52, 34, 12, 24),
+    ];
+    const buildPresetObjects = (): SceneObject[] => {
+      if (normalizedPresetName.includes("player menu")) {
+        return [
+          ...titledScreen("Player Menu"),
+          smartRegion("stat_list", "Player Vitals Region", stageW * 0.15, stageH * 0.25, stageW * 0.26, stageH * 0.25, 12, {
+            uiPadding: 10,
+            textFontSize: 12,
+          }),
+          smartRegion("quest_list", "Objective Summary Region", stageW * 0.45, stageH * 0.25, stageW * 0.3, stageH * 0.25, 12, {
+            uiPadding: 10,
+            textFontSize: 12,
+          }),
+          button("Inventory Shortcut", "Inventory", stageW * 0.16, stageH * 0.58, stageW * 0.17, 40, 13, "toggle_inventory"),
+          button("Crafting Shortcut", "Crafting", stageW * 0.36, stageH * 0.58, stageW * 0.17, 40, 13, "open_crafting"),
+          button("Lore Shortcut", "Codex", stageW * 0.56, stageH * 0.58, stageW * 0.17, 40, 13, "open_almanac"),
+          button("Settings Shortcut", "Settings", stageW * 0.16, stageH * 0.68, stageW * 0.17, 40, 13, "open_settings"),
+          button("Relationships Shortcut", "People", stageW * 0.36, stageH * 0.68, stageW * 0.17, 40, 13, "open_relationships"),
+          closeButton("Close Player Menu", "Close", stageW * 0.62, stageH * 0.68, stageW * 0.13, 40),
+        ];
+      }
+
+      if (normalizedPresetName.includes("inspect item")) {
+        return [
+          ...titledScreen("Inspect Item"),
+          smartRegion("inventory_grid", "Selectable Item Grid", stageW * 0.15, stageH * 0.25, stageW * 0.28, stageH * 0.38, 12, {
+            uiGridColumns: 3,
+            uiGridRows: 3,
+            uiEmptyText: "Collect items to inspect",
+            cursor: "pointer",
+          }),
+          smartRegion("journal_text", "Selected Item Detail Region", stageW * 0.48, stageH * 0.25, stageW * 0.28, stageH * 0.38, 12, {
+            uiPadding: 12,
+            textFontSize: 12,
+            uiTextSource: "all",
+            uiEmptyText: "Click an item to show its notes here.",
+          }),
+          button("Use Selected Item", "Use", stageW * 0.48, stageH * 0.68, stageW * 0.12, 38, 13, "set_flag", {
+            interactionData: "used_selected_item",
+          }),
+          closeButton("Close Inspect Item", "Close", stageW * 0.64, stageH * 0.68, stageW * 0.12, 38),
+        ];
+      }
+
+      if (normalizedPresetName.includes("equipment") || normalizedPresetName.includes("loadout")) {
+        const title = normalizedPresetName.includes("loadout") ? "Loadout" : "Equipment";
+        return [
+          ...titledScreen(title),
+          smartRegion("inventory_grid", `${title} Slot Grid`, stageW * 0.15, stageH * 0.25, stageW * 0.26, stageH * 0.46, 12, {
+            uiGridColumns: 2,
+            uiGridRows: 4,
+            uiEmptyText: "Gear slots",
+            cursor: "pointer",
+          }),
+          smartRegion("stat_list", `${title} Stat Preview`, stageW * 0.47, stageH * 0.25, stageW * 0.28, stageH * 0.25, 12, {
+            uiPadding: 10,
+            textFontSize: 12,
+          }),
+          smartRegion("journal_text", `${title} Notes Region`, stageW * 0.47, stageH * 0.55, stageW * 0.28, stageH * 0.16, 12, {
+            uiPadding: 10,
+            textFontSize: 11,
+            uiTextSource: "all",
+            uiEmptyText: "Selection notes",
+          }),
+          closeButton(`Close ${title}`, "Close", stageW * 0.64, stageH * 0.76, stageW * 0.12, 38),
+        ];
+      }
+
+      if (normalizedPresetName.includes("buying") || normalizedPresetName.includes("trading")) {
+        return [
+          ...titledScreen("Trade"),
+          smartRegion("inventory_grid", "Player Offer Grid", stageW * 0.14, stageH * 0.25, stageW * 0.24, stageH * 0.32, 12, {
+            uiGridColumns: 3,
+            uiGridRows: 3,
+            uiEmptyText: "Your items",
+            cursor: "pointer",
+          }),
+          panel("Trade Balance Panel", stageW * 0.41, stageH * 0.25, stageW * 0.16, stageH * 0.32, 11, "rgba(255,255,255,0.04)"),
+          text("Trade Balance Label", "VALUE", stageW * 0.445, stageH * 0.3, stageW * 0.09, 24, 12, 14),
+          button("Buy Button", "Buy", stageW * 0.43, stageH * 0.4, stageW * 0.12, 34, 13, "set_flag", {
+            interactionData: "trade_buy",
+          }),
+          button("Sell Button", "Sell", stageW * 0.43, stageH * 0.48, stageW * 0.12, 34, 13, "set_flag", {
+            interactionData: "trade_sell",
+          }),
+          smartRegion("inventory_grid", "Shop Stock Grid", stageW * 0.61, stageH * 0.25, stageW * 0.24, stageH * 0.32, 12, {
+            uiGridColumns: 3,
+            uiGridRows: 3,
+            uiEmptyText: "Shop stock",
+            cursor: "pointer",
+          }),
+          smartRegion("journal_text", "Trade Notes Region", stageW * 0.14, stageH * 0.63, stageW * 0.52, stageH * 0.12, 12, {
+            uiPadding: 10,
+            textFontSize: 11,
+            uiTextSource: "all",
+            uiEmptyText: "Offer details",
+          }),
+          closeButton("Close Trade", "Close", stageW * 0.71, stageH * 0.66, stageW * 0.12, 38),
+        ];
+      }
+
+      if (normalizedPresetName.includes("character customization")) {
+        return [
+          ...titledScreen("Character"),
+          panel("Character Preview Slot", stageW * 0.15, stageH * 0.25, stageW * 0.26, stageH * 0.42, 11, "rgba(255,255,255,0.04)"),
+          smartRegion("stat_list", "Character Stat Region", stageW * 0.47, stageH * 0.25, stageW * 0.29, stageH * 0.2, 12, {
+            uiPadding: 10,
+            textFontSize: 12,
+          }),
+          smartRegion("journal_text", "Character Notes Region", stageW * 0.47, stageH * 0.5, stageW * 0.29, stageH * 0.17, 12, {
+            uiPadding: 10,
+            textFontSize: 11,
+            uiTextSource: "all",
+            uiEmptyText: "Bio, tags, or unlock notes",
+          }),
+          button("Save Character", "Save Look", stageW * 0.47, stageH * 0.72, stageW * 0.13, 38, 13, "set_flag", {
+            interactionData: "character_customized",
+          }),
+          closeButton("Close Character", "Close", stageW * 0.64, stageH * 0.72, stageW * 0.12, 38),
+        ];
+      }
+
+      if (normalizedPresetName.includes("upgrade")) {
+        return [
+          ...titledScreen("Upgrades"),
+          smartRegion("stat_list", "Upgrade Stat Region", stageW * 0.15, stageH * 0.25, stageW * 0.24, stageH * 0.24, 12, {
+            uiPadding: 10,
+            textFontSize: 12,
+          }),
+          panel("Upgrade Board Region", stageW * 0.43, stageH * 0.23, stageW * 0.32, stageH * 0.34, 11, "rgba(255,255,255,0.04)"),
+          text("Upgrade Board Hint", "Place upgrade buttons, nodes, or item costs here.", stageW * 0.46, stageH * 0.34, stageW * 0.24, 58, 12, 13),
+          smartRegion("journal_text", "Upgrade Notes Region", stageW * 0.15, stageH * 0.56, stageW * 0.42, stageH * 0.14, 12, {
+            uiPadding: 10,
+            textFontSize: 11,
+            uiTextSource: "all",
+            uiEmptyText: "Upgrade details",
+          }),
+          button("Apply Upgrade", "Upgrade", stageW * 0.62, stageH * 0.62, stageW * 0.13, 38, 13, "set_flag", {
+            interactionData: "upgrade_applied",
+          }),
+          closeButton("Close Upgrades", "Close", stageW * 0.62, stageH * 0.72, stageW * 0.13, 38),
+        ];
+      }
+
+      if (normalizedPresetName.includes("sound player")) {
+        return [
+          ...titledScreen("Sound Player"),
+          panel("Track List Region", stageW * 0.16, stageH * 0.26, stageW * 0.42, stageH * 0.32, 11, "rgba(255,255,255,0.04)"),
+          text("Track List Label", "TRACKS", stageW * 0.2, stageH * 0.31, stageW * 0.2, 28, 12, 15),
+          button("Play Sound Button", "Play", stageW * 0.62, stageH * 0.3, stageW * 0.14, 38, 13, "sound"),
+          button("Mute Sound Button", "Mute", stageW * 0.62, stageH * 0.4, stageW * 0.14, 38, 13, "toggle_mute"),
+          closeButton("Close Sound Player", "Close", stageW * 0.62, stageH * 0.68, stageW * 0.14, 38),
+        ];
+      }
+
+      if (normalizedPresetName.includes("level editor")) {
+        return [
+          ...titledScreen("Level Editor"),
+          panel("Editable Map Surface", stageW * 0.15, stageH * 0.23, stageW * 0.42, stageH * 0.42, 11, "rgba(5,20,28,0.62)"),
+          text("Level Editor Hint", "Place room art, exits, hazards, or spawn buttons here.", stageW * 0.19, stageH * 0.41, stageW * 0.32, 58, 12, 13),
+          button("Test Room Button", "Test", stageW * 0.62, stageH * 0.28, stageW * 0.13, 38, 13, "set_flag", {
+            interactionData: "level_editor_test",
+          }),
+          button("Save Room Button", "Save", stageW * 0.62, stageH * 0.38, stageW * 0.13, 38, 13, "save_game"),
+          closeButton("Close Level Editor", "Close", stageW * 0.62, stageH * 0.68, stageW * 0.13, 38),
+        ];
+      }
+
+      if (normalizedPresetName.includes("gallery") || normalizedPresetName.includes("collectable")) {
+        const title = normalizedPresetName.includes("collectable") ? "Collectables" : "Gallery";
+        return [
+          ...titledScreen(title),
+          smartRegion("inventory_grid", `${title} Thumbnail Grid`, stageW * 0.15, stageH * 0.25, stageW * 0.32, stageH * 0.38, 12, {
+            uiGridColumns: 3,
+            uiGridRows: 3,
+            uiEmptyText: "Nothing unlocked yet",
+            cursor: "pointer",
+          }),
+          smartRegion("journal_text", `${title} Detail Region`, stageW * 0.52, stageH * 0.25, stageW * 0.24, stageH * 0.38, 12, {
+            uiPadding: 12,
+            textFontSize: 12,
+            uiTextSource: "all",
+            uiEmptyText: "Select an entry",
+          }),
+          closeButton(`Close ${title}`, "Close", stageW * 0.64, stageH * 0.7, stageW * 0.12, 38),
+        ];
+      }
+
+      if (
+        normalizedPresetName.includes("codex") ||
+        normalizedPresetName.includes("tutorial") ||
+        normalizedPresetName.includes("content browser")
+      ) {
+        const title = normalizedPresetName.includes("tutorial")
+          ? "Tutorial Guide"
+          : normalizedPresetName.includes("content browser")
+            ? "Content Browser"
+            : "Codex";
+        return [
+          ...titledScreen(title),
+          smartRegion("journal_text", `${title} Text Region`, stageW * 0.16, stageH * 0.25, stageW * 0.42, stageH * 0.46, 12, {
+            uiPadding: 14,
+            textFontSize: 13,
+            uiTextSource: "all",
+            uiEmptyText: "Unlocked entries appear here",
+          }),
+          panel(`${title} Index Region`, stageW * 0.62, stageH * 0.25, stageW * 0.17, stageH * 0.46, 11, "rgba(255,255,255,0.04)"),
+          text(`${title} Index Label`, "INDEX", stageW * 0.65, stageH * 0.31, stageW * 0.11, 28, 12, 14),
+          closeButton(`Close ${title}`, "Close", stageW * 0.66, stageH * 0.76, stageW * 0.12, 38),
+        ];
+      }
+
+      if (resolvedTemplate === "hud") {
+        if (normalizedPresetName.includes("player vitals")) {
+          return [
+            panel("Vitals HUD Backing", stageW * 0.03, stageH * 0.04, stageW * 0.28, stageH * 0.16, 10, "rgba(0,0,0,0.5)"),
+            smartRegion("stat_list", "Player Vitals HUD Region", stageW * 0.05, stageH * 0.06, stageW * 0.24, stageH * 0.12, 12, {
+              uiPadding: 8,
+              textFontSize: 11,
+            }),
+          ];
+        }
+        if (normalizedPresetName.includes("objective chip")) {
+          return [
+            panel("Objective Chip Backing", stageW * 0.33, stageH * 0.04, stageW * 0.34, stageH * 0.12, 10, "rgba(0,0,0,0.52)"),
+            smartRegion("quest_list", "Objective Chip Region", stageW * 0.35, stageH * 0.06, stageW * 0.3, stageH * 0.08, 12, {
+              uiPadding: 8,
+              textFontSize: 11,
+              uiEmptyText: "No tracked objective",
+            }),
+          ];
+        }
+        if (normalizedPresetName.includes("minimap")) {
+          return [
+            panel("Minimap Backing", stageW * 0.72, stageH * 0.05, stageW * 0.22, stageW * 0.22, 10, "rgba(5,20,28,0.62)"),
+            text("Minimap Label", "MAP", stageW * 0.745, stageH * 0.075, stageW * 0.08, 22, 12, 12),
+            button("Open Map From Minimap", "Open", stageW * 0.79, stageH * 0.22, stageW * 0.1, 30, 13, "open_map"),
+          ];
+        }
+        if (normalizedPresetName.includes("compass")) {
+          return [
+            panel("Compass Backing", stageW * 0.33, stageH * 0.04, stageW * 0.34, 38, 10, "rgba(0,0,0,0.48)"),
+            text("Compass Bearings", "W   N   E", stageW * 0.4, stageH * 0.055, stageW * 0.22, 24, 12, 14),
+          ];
+        }
+        if (normalizedPresetName.includes("button prompts")) {
+          return [
+            panel("Prompt Bar Backing", stageW * 0.22, stageH - 70, stageW * 0.56, 46, 10, "rgba(0,0,0,0.52)"),
+            button("Inspect Prompt", "Inspect", stageW * 0.25, stageH - 62, stageW * 0.13, 30, 12, "none"),
+            button("Inventory Prompt", "Inventory", stageW * 0.42, stageH - 62, stageW * 0.14, 30, 12, "toggle_inventory"),
+            button("Quest Prompt", "Quests", stageW * 0.6, stageH - 62, stageW * 0.12, 30, 12, "open_quest_log"),
+          ];
+        }
+        if (normalizedPresetName.includes("item wheel")) {
+          return [
+            panel("Item Wheel Backing", stageW * 0.35, stageH * 0.28, stageW * 0.3, stageW * 0.3, 10, "rgba(0,0,0,0.5)"),
+            smartRegion("inventory_grid", "Quick Item Wheel Region", stageW * 0.39, stageH * 0.32, stageW * 0.22, stageW * 0.22, 12, {
+              uiGridColumns: 3,
+              uiGridRows: 3,
+              uiEmptyText: "Quick items",
+              cursor: "pointer",
+            }),
+          ];
+        }
+        if (normalizedPresetName.includes("ability menu")) {
+          return [
+            panel("Ability Bar Backing", stageW * 0.25, stageH - 74, stageW * 0.5, 50, 10, "rgba(0,0,0,0.52)"),
+            button("Ability Slot 1", "Skill 1", stageW * 0.28, stageH - 64, stageW * 0.12, 32, 12, "open_skills"),
+            button("Ability Slot 2", "Skill 2", stageW * 0.44, stageH - 64, stageW * 0.12, 32, 12, "open_skills"),
+            button("Ability Slot 3", "Skill 3", stageW * 0.6, stageH - 64, stageW * 0.12, 32, 12, "open_skills"),
+          ];
+        }
+        if (normalizedPresetName.includes("targeting")) {
+          return [
+            panel("Targeting Edge Top", stageW * 0.24, stageH * 0.2, stageW * 0.52, 3, 10, primary),
+            panel("Targeting Edge Bottom", stageW * 0.24, stageH * 0.72, stageW * 0.52, 3, 10, primary),
+            panel("Targeting Edge Left", stageW * 0.24, stageH * 0.2, 3, stageH * 0.52, 10, primary),
+            panel("Targeting Edge Right", stageW * 0.76, stageH * 0.2, 3, stageH * 0.52, 10, primary),
+            text("Targeting Label", "TARGET", stageW * 0.42, stageH * 0.74, stageW * 0.18, 24, 12, 13),
+          ];
+        }
+        if (normalizedPresetName.includes("game log")) {
+          return [
+            panel("Game Log Backing", stageW * 0.03, stageH * 0.72, stageW * 0.34, stageH * 0.2, 10, "rgba(0,0,0,0.5)"),
+            smartRegion("journal_text", "Game Log Feed Region", stageW * 0.05, stageH * 0.74, stageW * 0.3, stageH * 0.16, 12, {
+              uiPadding: 10,
+              textFontSize: 11,
+              uiTextSource: "all",
+              uiEmptyText: "Events appear here",
+            }),
+          ];
+        }
+      }
+
+      return selected.objects;
+    };
+    const presetObjects = buildPresetObjects();
+    const presetBlocksClicks = resolvedTemplate === "hud" ? false : selected.blocksClicks;
+    const presetIsOpenByDefault =
+      resolvedTemplate === "hud" ? true : selected.isOpenByDefault;
+    const selectedScaffoldNames = new Set(
+      presetObjects.map((object) => object.name || ""),
+    );
+    const shellControlInteractionsByTemplate: Partial<
+      Record<InterfaceTemplateKind, InteractionType[]>
+    > = {
+      inventory: ["toggle_inventory"],
+      quest: ["open_quest_log"],
+      crafting: ["open_crafting"],
+      map: ["open_map"],
+      relationships: ["open_relationships"],
+      journal: ["open_almanac"],
+      settings: ["open_settings"],
+    };
+    const wireShellControlsToScreen = (
+      source: Project,
+      targetMenuId: string,
+    ): { project: Project; wiredCount: number } => {
+      const interactions = shellControlInteractionsByTemplate[resolvedTemplate];
+      const deviceFrame = source.globalSettings.deviceFrame;
+      if (!interactions?.length || !deviceFrame?.controls?.length) {
+        return { project: source, wiredCount: 0 };
+      }
+
+      let wiredCount = 0;
+      const controls = deviceFrame.controls.map((control) => {
+        let changed = false;
+        const responses = (control.clickResponses || []).map((response) => {
+          if (!interactions.includes(response.interaction)) return response;
+          changed = true;
+          return {
+            ...response,
+            interaction: "open_ui" as InteractionType,
+            interactionData: "",
+            targetUiId: targetMenuId,
+          };
+        });
+
+        if (!changed) return control;
+        wiredCount += 1;
+        return { ...control, clickResponses: responses };
+      });
+
+      if (!wiredCount) return { project: source, wiredCount: 0 };
+      return {
+        project: {
+          ...source,
+          globalSettings: {
+            ...source.globalSettings,
+            deviceFrame: {
+              ...deviceFrame,
+              controls,
+            },
+          },
+        },
+        wiredCount,
+      };
+    };
     const genericScaffoldNames = new Set([
       "Panel Backing",
       "Panel Title",
@@ -6131,15 +6770,31 @@ const App: React.FC = () => {
       !["modal", "hud", "journal", "choiceBar"].includes(resolvedTemplate) &&
       (existingEditableMenu.objects || []).length > 0 &&
       (existingEditableMenu.objects || []).every((object) =>
-        genericScaffoldNames.has(object.name || ""),
+        genericScaffoldNames.has(object.name || "") ||
+        selectedScaffoldNames.has(object.name || ""),
       );
 
     if (existingEditableMenu && !shouldRegenerateExisting) {
-      setProject((p) => ({ ...p, currentUiMenuId: existingEditableMenu.id }));
+      const { project: openedProject, wiredCount } = wireShellControlsToScreen(
+        {
+          ...project,
+          currentUiMenuId: existingEditableMenu.id,
+        },
+        existingEditableMenu.id,
+      );
+      if (wiredCount) {
+        pushHistory(openedProject);
+      } else {
+        setProject(openedProject);
+      }
       setEditorMode("ui_stage");
       setHideEditorHud(true);
       setSelectedObjectId(null);
-      showError(`Opened existing ${existingEditableMenu.name}. Edit it on the canvas.`);
+      showError(
+        wiredCount
+          ? `Opened existing ${existingEditableMenu.name} and wired ${wiredCount} shell control${wiredCount === 1 ? "" : "s"} to it.`
+          : `Opened existing ${existingEditableMenu.name}. Edit it on the canvas.`,
+      );
       return;
     }
 
@@ -6149,10 +6804,10 @@ const App: React.FC = () => {
       width: stageW,
       height: stageH,
       backgroundColor: "transparent",
-      objects: selected.objects,
-      blocksClicks: selected.blocksClicks,
-      isOpenByDefault: selected.isOpenByDefault,
-      closeOnClickOutside: selected.blocksClicks,
+      objects: presetObjects,
+      blocksClicks: presetBlocksClicks,
+      isOpenByDefault: presetIsOpenByDefault,
+      closeOnClickOutside: presetBlocksClicks,
     };
     const nextUiMenus = existingEditableMenu
       ? (project.uiMenus || []).map((menu) =>
@@ -6160,11 +6815,13 @@ const App: React.FC = () => {
         )
       : [...(project.uiMenus || []), newMenu];
 
-    pushHistory({
+    const { project: projectWithWiredShell, wiredCount } = wireShellControlsToScreen({
       ...project,
       uiMenus: nextUiMenus,
       currentUiMenuId: menuId,
-    });
+    }, menuId);
+
+    pushHistory(projectWithWiredShell);
     if (resolvedTemplate === "hud") {
       setHideEditorHud(false);
       setIsHudPlacementMode(true);
@@ -6172,7 +6829,17 @@ const App: React.FC = () => {
     }
     setEditorMode("ui_stage");
     if (shouldRegenerateExisting) {
-      showError(`Rebuilt ${newMenu.name} with the right functional regions.`);
+      showError(
+        wiredCount
+          ? `Rebuilt ${newMenu.name} with functional regions and wired ${wiredCount} shell control${wiredCount === 1 ? "" : "s"} to it.`
+          : `Rebuilt ${newMenu.name} with the right functional regions.`,
+      );
+    } else {
+      showError(
+        wiredCount
+          ? `${newMenu.name} is ready and ${wiredCount} shell control${wiredCount === 1 ? "" : "s"} now open it.`
+          : `${newMenu.name} is ready on the Screen UI canvas.`,
+      );
     }
   };
 
@@ -6394,55 +7061,71 @@ const App: React.FC = () => {
     const shouldCreateMenu = !targetMenu;
     const menuId = targetMenu?.id || uuidv4();
     const menuName = targetMenu?.name || "Custom Interface Screen";
+    const existingRegion = targetMenu?.objects?.find((object) => object.uiElementType === kind);
+    if (existingRegion) {
+      setEditorMode("ui_stage");
+      setHideEditorHud(true);
+      setSelectedObjectId(existingRegion.id);
+      showError(`This interface already has a ${existingRegion.name || "smart region"} selected. Resize or style this one instead of stacking another.`);
+      return;
+    }
+    const hasInventoryGrid = targetMenu?.objects?.some((object) => object.uiElementType === "inventory_grid");
+    const hasPageArt = targetMenu?.objects?.some(
+      (object) =>
+        Boolean(object.src) &&
+        object.locked &&
+        object.ignoreClicks &&
+        object.stretchToScreen,
+    );
     const maxZ = Math.max(0, ...((targetMenu?.objects || []).map((object) => object.zIndex || 0)));
     const regionDefaults: Record<SmartUiRegionKind, Partial<SceneObject>> = {
       inventory_grid: {
         name: "Inventory Item Grid",
-        x: stageW * 0.18,
-        y: stageH * 0.28,
-        width: stageW * 0.52,
-        height: stageH * 0.42,
+        x: hasPageArt ? stageW * 0.405 : stageW * 0.18,
+        y: hasPageArt ? stageH * 0.225 : stageH * 0.28,
+        width: hasPageArt ? stageW * 0.53 : stageW * 0.52,
+        height: hasPageArt ? stageH * 0.52 : stageH * 0.42,
         uiElementType: "inventory_grid",
         uiBindingType: "inventory",
-        uiGridColumns: 4,
-        uiGridRows: 3,
-        uiGridGap: 8,
-        uiPadding: 10,
+        uiGridColumns: hasPageArt ? 6 : 4,
+        uiGridRows: hasPageArt ? 4 : 3,
+        uiGridGap: hasPageArt ? 4 : 8,
+        uiPadding: hasPageArt ? 6 : 10,
         uiEmptyText: "Inventory empty",
       },
       journal_text: {
         name: "Journal Text Region",
-        x: stageW * 0.18,
-        y: stageH * 0.22,
-        width: stageW * 0.58,
-        height: stageH * 0.5,
+        x: hasPageArt ? stageW * 0.18 : hasInventoryGrid ? stageW * 0.11 : stageW * 0.18,
+        y: hasPageArt ? stageH * 0.19 : hasInventoryGrid ? stageH * 0.68 : stageH * 0.22,
+        width: hasPageArt ? stageW * 0.62 : hasInventoryGrid ? stageW * 0.78 : stageW * 0.58,
+        height: hasPageArt ? stageH * 0.55 : hasInventoryGrid ? stageH * 0.14 : stageH * 0.5,
         uiElementType: "journal_text",
         uiBindingType: "journal",
         uiTextSource: "all",
-        uiPadding: 16,
-        textFontSize: 14,
+        uiPadding: hasPageArt ? 18 : hasInventoryGrid ? 10 : 16,
+        textFontSize: hasPageArt ? 13 : hasInventoryGrid ? 11 : 14,
         textColor: project.globalSettings.uiColorPrimary || "#00ffcc",
         uiEmptyText: "No entries yet.",
       },
       quest_list: {
         name: "Quest List Region",
-        x: stageW * 0.16,
-        y: stageH * 0.24,
-        width: stageW * 0.62,
-        height: stageH * 0.46,
+        x: hasPageArt ? stageW * 0.52 : hasInventoryGrid ? stageW * 0.56 : stageW * 0.16,
+        y: hasPageArt ? stageH * 0.2 : hasInventoryGrid ? stageH * 0.41 : stageH * 0.24,
+        width: hasPageArt ? stageW * 0.35 : hasInventoryGrid ? stageW * 0.33 : stageW * 0.62,
+        height: hasPageArt ? stageH * 0.42 : hasInventoryGrid ? stageH * 0.23 : stageH * 0.46,
         uiElementType: "quest_list",
         uiBindingType: "quests",
-        uiPadding: 14,
-        textFontSize: 13,
+        uiPadding: hasPageArt ? 12 : hasInventoryGrid ? 12 : 14,
+        textFontSize: hasPageArt ? 12 : hasInventoryGrid ? 12 : 13,
         textColor: project.globalSettings.uiColorPrimary || "#00ffcc",
         uiEmptyText: "No active quests.",
       },
       stat_list: {
         name: "Needs / Stats Region",
-        x: stageW * 0.58,
-        y: stageH * 0.14,
-        width: stageW * 0.28,
-        height: stageH * 0.28,
+        x: hasPageArt ? stageW * 0.55 : hasInventoryGrid ? stageW * 0.56 : stageW * 0.58,
+        y: hasPageArt ? stageH * 0.18 : hasInventoryGrid ? stageH * 0.21 : stageH * 0.14,
+        width: hasPageArt ? stageW * 0.32 : hasInventoryGrid ? stageW * 0.33 : stageW * 0.28,
+        height: hasPageArt ? stageH * 0.24 : hasInventoryGrid ? stageH * 0.17 : stageH * 0.28,
         uiElementType: "stat_list",
         uiBindingType: "stats",
         uiPadding: 10,
@@ -6462,10 +7145,10 @@ const App: React.FC = () => {
       parallaxSpeed: 1,
       interaction: "none",
       isUiElement: true,
-      ignoreClicks: true,
+      ignoreClicks: kind !== "inventory_grid",
       uiColorPrimary: project.globalSettings.uiColorPrimary || "#00ffcc",
-      uiColorSecondary: "rgba(4,12,22,0.56)",
-      uiBorderType: "dashed",
+      uiColorSecondary: hasPageArt ? "transparent" : "rgba(4,12,22,0.56)",
+      uiBorderType: hasPageArt ? "none" : "dashed",
       uiBorderRadius: 4,
       hasPhysics: false,
       ...regionDefaults[kind],
@@ -8003,7 +8686,7 @@ const App: React.FC = () => {
               {(editorMode === "stage" || editorMode === "ui_stage") &&
                 !isPlaying && (
                   <div
-                    className={`studio-quick-edit-toolbar ${quickEditPos ? "absolute" : "relative self-center mb-3"} z-[5000] flex max-w-[calc(100vw-2rem)] flex-wrap justify-center bg-neutral-900 border border-neutral-700 p-1 rounded-lg shadow-2xl items-center gap-1`}
+                    className={`studio-quick-edit-toolbar ${quickEditPos ? "absolute" : "relative self-center mb-3"} z-30 flex max-w-[calc(100vw-2rem)] flex-wrap justify-center bg-neutral-900 border border-neutral-700 p-1 rounded-lg shadow-2xl items-center gap-1`}
                     style={{
                       ...(quickEditPos && {
                         left: quickEditPos.x,
@@ -8216,6 +8899,32 @@ const App: React.FC = () => {
                           title="Draw where needs, skills, or meters should appear"
                         >
                           Stats
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditorMode("stage")}
+                          className="ml-1 rounded border border-neutral-500/50 bg-neutral-950/70 px-2 py-1 text-[11px] font-bold text-neutral-200 hover:border-white/60 hover:text-white"
+                          title="Return to the room canvas without opening Interface Studio"
+                        >
+                          Back to room
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const menuId = project.currentUiMenuId;
+                            editorModeBeforePlayRef.current = "ui_stage";
+                            setEditorMode("ui_stage");
+                            setIsPlaying(true);
+                            setRuntimeOverrides({});
+                            setTriggeredObjects(new Set());
+                            setCollectedObjects([]);
+                            setTriggeredResponseIds(new Set());
+                            setActiveUiMenus(menuId ? [menuId] : []);
+                          }}
+                          className="rounded border border-emerald-300/45 bg-emerald-400/15 px-2 py-1 text-[11px] font-bold text-emerald-100 hover:bg-emerald-400/25"
+                          title="Start play mode with this Screen UI already open"
+                        >
+                          Test this UI
                         </button>
                       </div>
                     )}
@@ -8775,9 +9484,10 @@ const App: React.FC = () => {
                                   : obj.locked
                                     ? "default"
                                     : "move",
-                                pointerEvents: obj.ignoreClicks
-                                  ? "none"
-                                  : undefined,
+                                pointerEvents:
+                                  obj.ignoreClicks && (isPlaying || obj.locked)
+                                    ? "none"
+                                    : undefined,
                                 outline:
                                   isSelected && !isPlaying
                                     ? "2px solid #34d399"
@@ -9441,6 +10151,12 @@ const App: React.FC = () => {
                       (m) => m.id === uiId,
                     );
                     if (!uiMenu) return null;
+                    const uiMenuWidth =
+                      uiMenu.width || logicalStageWidth || project.globalSettings.stageWidth || 800;
+                    const uiMenuHeight =
+                      uiMenu.height || logicalStageHeight || project.globalSettings.stageHeight || 600;
+                    const uiMenuScaleX = logicalStageWidth / Math.max(1, uiMenuWidth);
+                    const uiMenuScaleY = logicalStageHeight / Math.max(1, uiMenuHeight);
 
                     return (
                       <div
@@ -9451,7 +10167,7 @@ const App: React.FC = () => {
                           inset: 0,
                           width: logicalStageWidth,
                           height: logicalStageHeight,
-                          overflow: "visible",
+                          overflow: "hidden",
                         }}
                       >
                         {/* Background fill + click blocker when this UI blocks scene interaction */}
@@ -9467,9 +10183,19 @@ const App: React.FC = () => {
                             style={{ backgroundColor: uiMenu.backgroundColor }}
                           />
                         )}
-                        {uiMenu.objects
-                          .sort((a, b) => a.zIndex - b.zIndex)
-                          .map((obj) => {
+                        <div
+                          className="absolute left-0 top-0"
+                          style={{
+                            width: uiMenuWidth,
+                            height: uiMenuHeight,
+                            transform: `scale(${uiMenuScaleX}, ${uiMenuScaleY})`,
+                            transformOrigin: "top left",
+                            pointerEvents: "none",
+                          }}
+                        >
+                          {uiMenu.objects
+                            .sort((a, b) => a.zIndex - b.zIndex)
+                            .map((obj) => {
                             if (isPlaying && collectedObjects.includes(obj.id))
                               return null;
                             if (
@@ -9566,28 +10292,28 @@ const App: React.FC = () => {
                               .filter(Boolean)
                               .join(" ");
 
-                            return (
-                              <div
-                                key={`ui-obj-${obj.id}`}
-                                onClick={() => handleObjectClick(obj)}
-                                onPointerDown={(e) =>
-                                  handleObjectPointerDown(e, obj)
-                                }
-                                onPointerEnter={() => {
-                                  if (isPlaying && hasPlayableCursorAsset(obj.cursorAssetId)) {
-                                    setHoverCursorAssetId(obj.cursorAssetId);
+                              return (
+                                <div
+                                  key={`ui-obj-${obj.id}`}
+                                  onClick={() => handleObjectClick(obj)}
+                                  onPointerDown={(e) =>
+                                    handleObjectPointerDown(e, obj)
                                   }
-                                }}
-                                onPointerLeave={() => {
-                                  if (obj.cursorAssetId) {
-                                    setHoverCursorAssetId(null);
-                                  }
-                                }}
-                                onDragStart={(e) => e.preventDefault()}
-                                onPointerMove={handleObjectPointerMove}
-                                onPointerUp={handleObjectPointerUp}
-                                className={`absolute ${animClass}`}
-                                style={{
+                                  onPointerEnter={() => {
+                                    if (isPlaying && hasPlayableCursorAsset(obj.cursorAssetId)) {
+                                      setHoverCursorAssetId(obj.cursorAssetId);
+                                    }
+                                  }}
+                                  onPointerLeave={() => {
+                                    if (obj.cursorAssetId) {
+                                      setHoverCursorAssetId(null);
+                                    }
+                                  }}
+                                  onDragStart={(e) => e.preventDefault()}
+                                  onPointerMove={handleObjectPointerMove}
+                                  onPointerUp={handleObjectPointerUp}
+                                  className={`absolute ${animClass}`}
+                                  style={{
                                   ...animStyle,
                                   filter: filterStr || undefined,
                                   left: obj.stretchToScreen ? 0 : renderX,
@@ -9605,13 +10331,14 @@ const App: React.FC = () => {
                                       : obj.cursor,
                                   backgroundColor: "rgba(255, 255, 255, 0.01)",
                                   mixBlendMode: obj.blendMode || "normal",
-                                  pointerEvents: obj.ignoreClicks
-                                    ? "none"
-                                    : "auto",
+                                  pointerEvents:
+                                    obj.ignoreClicks && (isPlaying || obj.locked)
+                                      ? "none"
+                                      : "auto",
                                   touchAction: "none",
                                   userSelect: "none",
-                                }}
-                              >
+                                  }}
+                                >
                                 {obj.isUiElement &&
                                   (() => {
                                     const borderStyle =
@@ -10035,9 +10762,10 @@ const App: React.FC = () => {
                                       </div>
                                     );
                                   })()}
-                              </div>
-                            );
-                          })}
+                                </div>
+                              );
+                            })}
+                        </div>
                       </div>
                     );
                   })}
@@ -15107,6 +15835,52 @@ const App: React.FC = () => {
                               onClear={selectedObject.src ? () => updateObject(selectedObject.id, { src: "" }) : undefined}
                             />
                           )}
+
+                          {editorMode === "ui_stage" &&
+                            !selectedObject.isHitbox &&
+                            !selectedObject.isText &&
+                            !selectedObject.isScript &&
+                            !selectedObject.isUiElement &&
+                            selectedObject.src && (
+                              <div className="rounded-lg border border-cyan-300/25 bg-cyan-400/10 p-3">
+                                <div className="font-comic text-sm font-bold text-cyan-100">
+                                  Graphic Page Art
+                                </div>
+                                <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+                                  Fill this Screen UI with the selected graphic, lock it behind the live zones, and keep clicks passing to buttons and regions.
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const sceneW =
+                                      currentScene.width ||
+                                      project.globalSettings.stageWidth ||
+                                      800;
+                                    const sceneH =
+                                      currentScene.height ||
+                                      project.globalSettings.stageHeight ||
+                                      600;
+                                    updateObject(selectedObject.id, {
+                                      name: selectedObject.name?.includes("Page Art")
+                                        ? selectedObject.name
+                                        : `${selectedObject.name || "Graphic"} Page Art`,
+                                      x: 0,
+                                      y: 0,
+                                      width: sceneW,
+                                      height: sceneH,
+                                      zIndex: 0,
+                                      locked: true,
+                                      ignoreClicks: true,
+                                      stretchToScreen: true,
+                                      objectFit: "contain",
+                                    });
+                                  }}
+                                  className="mt-3 w-full rounded border border-cyan-300/45 bg-cyan-400/15 px-3 py-2 text-sm font-bold text-cyan-100 hover:bg-cyan-400/25"
+                                >
+                                  Use as full-page graphic
+                                </button>
+                              </div>
+                            )}
 
                           <div className="space-y-3">
                         <LabelWithHelp
@@ -20276,7 +21050,7 @@ const App: React.FC = () => {
                 <div className="interface-smart-region-bar">
                   <div>
                     <strong>Add live zones to the open screen</strong>
-                    <span>After you drop your own graphic on a Screen UI canvas, draw boxes where Cavebot should fill real game data.</span>
+                    <span>Drop a graphic onto an empty Screen UI to make it the locked page art, then draw boxes where Cavebot should fill real game data.</span>
                   </div>
                   <button type="button" onClick={() => createSmartUiRegion("inventory_grid")}>
                     + Items go here
@@ -20324,7 +21098,7 @@ const App: React.FC = () => {
                   <div className="interface-impact-row">
                     <span>What it does</span>
                     <strong>
-                      {INTERFACE_TEMPLATE_IMPACT[activeInterfaceGroup.template]}
+                      {interfaceGroupImpact(activeInterfaceGroup)}
                     </strong>
                   </div>
                   <div className="interface-template-preview">
@@ -20335,21 +21109,27 @@ const App: React.FC = () => {
                   </div>
                 </div>
                 <div className="interface-preset-list custom-scrollbar">
-                  {activeInterfaceGroup.presets.map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() =>
-                        createInterfaceTemplate(activeInterfaceGroup.template, {
-                          name: preset,
-                        })
-                      }
-                      className="interface-preset-button"
-                    >
-                      <span>{preset}</span>
-                      <small>{interfaceTemplateLabel(activeInterfaceGroup.template, preset)}</small>
-                    </button>
-                  ))}
+                  {activeInterfaceGroup.presets.map((preset) => {
+                    const presetTemplate = resolveInterfacePresetTemplate(
+                      activeInterfaceGroup.template,
+                      preset,
+                    );
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() =>
+                          createInterfaceTemplate(presetTemplate, {
+                            name: preset,
+                          })
+                        }
+                        className="interface-preset-button"
+                      >
+                        <span>{preset}</span>
+                        <small>{interfaceTemplateLabel(activeInterfaceGroup.template, preset)}</small>
+                      </button>
+                    );
+                  })}
                 </div>
               </aside>
               )}
@@ -26636,7 +27416,7 @@ const App: React.FC = () => {
           return (
         <ImageEditorModal
           asset={editingAsset}
-          onSave={(newSrc, isNew) => {
+          onSave={(newSrc, isNew, dimensions) => {
             const originalAsset = project.assets.find(
               (a) => a.id === editingAssetId,
             );
@@ -26646,7 +27426,14 @@ const App: React.FC = () => {
                 ...originalAsset,
                 id: uuidv4(),
                 src: newSrc,
+                dataURL: undefined,
+                width: dimensions.width,
+                height: dimensions.height,
+                category: "edited/images",
                 name: `${originalAsset.name}_crop`,
+                exportSource: "embedded_fallback",
+                exportReason:
+                  "Edited image is a baked PNG and must export as embedded data.",
               };
               setProject((p) => ({
                 ...p,
@@ -26656,7 +27443,18 @@ const App: React.FC = () => {
               setProject((p) => ({
                 ...p,
                 assets: p.assets.map((a) =>
-                  a.id === editingAssetId ? { ...a, src: newSrc } : a,
+                  a.id === editingAssetId
+                    ? {
+                        ...a,
+                        src: newSrc,
+                        dataURL: undefined,
+                        width: dimensions.width,
+                        height: dimensions.height,
+                        exportSource: "embedded_fallback",
+                        exportReason:
+                          "Edited image is a baked PNG and must export as embedded data.",
+                      }
+                    : a,
                 ),
                 prefabs: (p.prefabs || []).map(o => o._assetId === editingAssetId ? { ...o, src: newSrc } : o),
                 scenes: p.scenes.map(s => ({

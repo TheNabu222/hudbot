@@ -243,12 +243,19 @@ export const prepareProjectForExport = (
   const includeEmbeddedAssetData = options.includeEmbeddedAssetData ?? true;
   const keepFavoriteAssets = options.keepFavoriteAssets ?? false;
   const prepareAsset = (asset: Asset): Asset => {
-    const inferredSrc = inferGitHubAssetSrc(asset);
-    const hasLinkedSrc = Boolean(inferredSrc);
     const hasEmbeddedSource =
       isEmbeddedSource(asset.src) || isEmbeddedSource(asset.dataURL);
+    const normalizedCategory = cleanPathPart(asset.category || "").toLowerCase();
+    const looksLikeEditedAsset =
+      asset.exportSource === "embedded_fallback" ||
+      normalizedCategory.startsWith("edited/") ||
+      /(?:^|[_\s.-])(crop|cropped|edited|cutout)(?:[_\s.-]|$)/i.test(asset.name || "") ||
+      /(?:^|[_\s.-])(crop|cropped|edited|cutout)(?:[_\s.-]|$)/i.test(asset.id || "");
+    const isEditedEmbeddedAsset = hasEmbeddedSource && looksLikeEditedAsset;
+    const inferredSrc = isEditedEmbeddedAsset ? "" : inferGitHubAssetSrc(asset);
+    const hasLinkedSrc = Boolean(inferredSrc);
     if (includeEmbeddedAssetData === "fallback") {
-      if (asset.exportSource === "embedded_fallback" && hasEmbeddedSource) {
+      if (isEditedEmbeddedAsset) {
         const embeddedSrc = isEmbeddedSource(asset.src) ? asset.src : asset.dataURL;
         return {
           ...asset,
@@ -294,9 +301,20 @@ export const prepareProjectForExport = (
     const strippedAsset: Asset = {
       ...asset,
       dataURL: undefined,
-      src: inferredSrc,
-      exportSource: hasLinkedSrc ? "github_inferred" : undefined,
-      exportReason: hasLinkedSrc
+      src:
+        isEditedEmbeddedAsset && hasEmbeddedSource
+          ? (isEmbeddedSource(asset.src) ? asset.src : asset.dataURL) || ""
+          : inferredSrc,
+      exportSource:
+        isEditedEmbeddedAsset && hasEmbeddedSource
+          ? "embedded_fallback"
+          : hasLinkedSrc
+            ? "github_inferred"
+            : undefined,
+      exportReason: isEditedEmbeddedAsset && hasEmbeddedSource
+        ? asset.exportReason ||
+          "Edited image is a baked PNG and must export as embedded data."
+        : hasLinkedSrc
         ? "Base64 stripped and replaced with inferred GitHub raw asset URL."
         : "Embedded data stripped; no repository URL could be inferred.",
     };

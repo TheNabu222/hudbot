@@ -809,26 +809,47 @@ export function generateExportHtml(sourceProject: Project): string {
       box-sizing: border-box;
       border: 2px dashed currentColor;
       overflow: hidden;
-      pointer-events: none;
+      pointer-events: auto;
     }
     .ui-smart-region--inventory {
       display: grid;
     }
     .ui-smart-region__slot {
+      appearance: none;
+      border-radius: 0;
+      color: inherit;
+      font: inherit;
+      padding: 0;
       min-width: 0;
       min-height: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(0,0,0,0.32);
+      border: 1px solid var(--slot-border, rgba(255,255,255,0.14));
+      background: var(--slot-bg, rgba(0,0,0,0.32));
       overflow: hidden;
     }
+    .ui-smart-region__slot--item {
+      cursor: pointer;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+    }
+    .ui-smart-region__slot--item:hover {
+      border-color: var(--ui-primary);
+      box-shadow: 0 0 14px var(--ui-primary-glow);
+      transform: translateY(-1px);
+    }
+    .ui-smart-region__slot--selected {
+      border-color: var(--ui-primary);
+      box-shadow: 0 0 18px var(--ui-primary-glow);
+    }
     .ui-smart-region__slot img {
-      width: 100%;
-      height: 100%;
+      width: var(--slot-icon-size, 72%);
+      height: var(--slot-icon-size, 72%);
+      max-width: 100%;
+      max-height: 100%;
       object-fit: contain;
       image-rendering: pixelated;
+      pointer-events: none;
     }
     .ui-smart-region__slot span {
       color: rgba(255,255,255,0.74);
@@ -946,13 +967,13 @@ export function generateExportHtml(sourceProject: Project): string {
       Array.isArray(obj.clickResponses) && obj.clickResponses.length > 0;
     const hasInteractiveUiRole =
       obj.isUiElement &&
-      (obj.uiElementType === "button" || obj.uiElementType === "toggle");
+      (obj.uiElementType === "button" ||
+        obj.uiElementType === "toggle" ||
+        obj.uiElementType === "inventory_grid");
     const shouldReceiveClicks =
-      !obj.ignoreClicks &&
-      (obj.isHitbox ||
-        hasPrimaryInteraction ||
-        hasClickResponses ||
-        hasInteractiveUiRole);
+      hasInteractiveUiRole ||
+      (!obj.ignoreClicks &&
+        (obj.isHitbox || hasPrimaryInteraction || hasClickResponses));
     const peStr = shouldReceiveClicks
       ? "pointer-events: auto; touch-action: manipulation;"
       : "pointer-events: none;";
@@ -1044,19 +1065,27 @@ export function generateExportHtml(sourceProject: Project): string {
                         : "2px solid";
       const br =
         obj.uiBorderRadius ?? project.globalSettings?.uiBorderRadius ?? 8;
+      const smartBorder =
+        obj.uiBorderType === "none"
+          ? "none"
+          : `2px ${obj.uiBorderType === "solid" ? "solid" : "dashed"} ${obj.uiColorPrimary || "var(--ui-primary)"}`;
+      const smartSlotVars =
+        obj.uiBorderType === "none"
+          ? "--slot-bg:transparent; --slot-border:transparent;"
+          : "";
       let innerHtml = "";
       if (obj.uiElementType === "inventory_grid") {
         const columns = Math.max(1, obj.uiGridColumns || 4);
         const rows = Math.max(1, obj.uiGridRows || 3);
         const gap = obj.uiGridGap ?? 8;
         const padding = obj.uiPadding ?? 10;
-        innerHtml = `<div class="ui-smart-region ui-smart-region--inventory" style="border-color:${obj.uiColorPrimary || "var(--ui-primary)"}; background-color:${obj.uiColorSecondary || "rgba(0,0,0,0.68)"}; padding:${padding}px; grid-template-columns:repeat(${columns}, minmax(0, 1fr)); gap:${gap}px;"></div>`;
+        innerHtml = `<div class="ui-smart-region ui-smart-region--inventory" style="border:${smartBorder}; background-color:${obj.uiColorSecondary || "rgba(0,0,0,0.68)"}; padding:${padding}px; grid-template-columns:repeat(${columns}, minmax(0, 1fr)); grid-template-rows:repeat(${rows}, minmax(0, 1fr)); gap:${gap}px; ${smartSlotVars}"></div>`;
       } else if (obj.uiElementType === "journal_text" || obj.uiElementType === "quest_list") {
         const padding = obj.uiPadding ?? 14;
-        innerHtml = `<div class="ui-smart-region ui-smart-region--text" style="border-color:${obj.uiColorPrimary || "var(--ui-primary)"}; background-color:${obj.uiColorSecondary || "rgba(0,0,0,0.68)"}; color:${obj.textColor || obj.uiColorPrimary || "var(--ui-primary)"}; font-family:${obj.textFontFamily || project.globalSettings?.uiFontFamily || "sans-serif"}; font-size:${obj.textFontSize || 14}px; line-height:${obj.textLineHeight || 1.35}; padding:${padding}px;"></div>`;
+        innerHtml = `<div class="ui-smart-region ui-smart-region--text" style="border:${smartBorder}; background-color:${obj.uiColorSecondary || "rgba(0,0,0,0.68)"}; color:${obj.textColor || obj.uiColorPrimary || "var(--ui-primary)"}; font-family:${obj.textFontFamily || project.globalSettings?.uiFontFamily || "sans-serif"}; font-size:${obj.textFontSize || 14}px; line-height:${obj.textLineHeight || 1.35}; padding:${padding}px;"></div>`;
       } else if (obj.uiElementType === "stat_list") {
         const padding = obj.uiPadding ?? 10;
-        innerHtml = `<div class="ui-smart-region ui-smart-region--stats" style="border-color:${obj.uiColorPrimary || "var(--ui-primary)"}; background-color:${obj.uiColorSecondary || "rgba(0,0,0,0.68)"}; color:${obj.textColor || obj.uiColorPrimary || "var(--ui-primary)"}; font-family:${obj.textFontFamily || project.globalSettings?.uiFontFamily || "sans-serif"}; font-size:${obj.textFontSize || 12}px; padding:${padding}px;"></div>`;
+        innerHtml = `<div class="ui-smart-region ui-smart-region--stats" style="border:${smartBorder}; background-color:${obj.uiColorSecondary || "rgba(0,0,0,0.68)"}; color:${obj.textColor || obj.uiColorPrimary || "var(--ui-primary)"}; font-family:${obj.textFontFamily || project.globalSettings?.uiFontFamily || "sans-serif"}; font-size:${obj.textFontSize || 12}px; padding:${padding}px;"></div>`;
       } else if (obj.uiElementType === "panel") {
         innerHtml = `<div style="width: 100%; height: 100%; pointer-events: none; background-color: ${obj.uiColorSecondary || "#171717"}; border: ${borderStyle} ${obj.uiColorPrimary || "#10b981"}; border-radius: ${br}px;"></div>`;
       } else if (obj.uiElementType === "progress") {
@@ -1199,11 +1228,15 @@ export function generateExportHtml(sourceProject: Project): string {
 
         const w = menu.width || project.globalSettings?.stageWidth || 800;
         const h = menu.height || project.globalSettings?.stageHeight || 600;
+        const fitScaleX = exportWidth / Math.max(1, w);
+        const fitScaleY = exportHeight / Math.max(1, h);
         const pe = menu.blocksClicks ? "auto" : "none";
         const clickOutsideAttr = menu.closeOnClickOutside ? `data-close-on-outside="true"` : "";
         return `
-        <div id="ui-menu-${menu.id}" class="ui-menu-layer" ${clickOutsideAttr} style="display: ${menu.isOpenByDefault ? "block" : "none"}; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: ${w}px; height: ${h}px; pointer-events: ${pe}; overflow: visible; z-index: ${10000 + idx}; background-color: ${menu.backgroundColor || "transparent"}">
-          ${uiObjectsHtml}
+        <div id="ui-menu-${menu.id}" class="ui-menu-layer" ${clickOutsideAttr} style="display: ${menu.isOpenByDefault ? "block" : "none"}; position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: ${pe}; overflow: hidden; z-index: ${10000 + idx}; background-color: ${menu.backgroundColor || "transparent"}">
+          <div class="ui-menu-layer__content" style="position:absolute; left:0; top:0; width:${w}px; height:${h}px; transform:scale(${fitScaleX}, ${fitScaleY}); transform-origin:top left; pointer-events:none;">
+            ${uiObjectsHtml}
+          </div>
         </div>
       `;
       })
@@ -1370,6 +1403,8 @@ export function generateExportHtml(sourceProject: Project): string {
       if (!item || !item.iconAssetId) return '';
       return assetSrc(assets.find(asset => asset.id === item.iconAssetId));
     };
+    let selectedInventoryItemId = null;
+    let selectedInventoryItemIds = [];
 
     const visibleLoreEntriesForSource = (source) => {
       const entries = gameData.loreEntries || [];
@@ -1395,13 +1430,14 @@ export function generateExportHtml(sourceProject: Project): string {
           const itemId = state.inventory[index] || '';
           const item = inventoryItems.find(candidate => candidate.id === itemId);
           const iconSrc = itemId ? inventoryIconSrc(itemId) : '';
-          html += '<div class="ui-smart-region__slot">';
+          const selected = itemId && selectedInventoryItemIds.includes(itemId);
+          html += '<button type="button" class="ui-smart-region__slot' + (itemId ? ' ui-smart-region__slot--item' : '') + (selected ? ' ui-smart-region__slot--selected' : '') + '" ' + (itemId ? 'onclick="handleInventoryItemClick(\\'' + itemId + '\\')"' : 'tabindex="-1"') + '>';
           if (iconSrc) {
             html += '<img src="' + iconSrc + '" alt="" draggable="false" />';
           } else if (item) {
             html += '<span>' + escapeForHtml((item.name || '').slice(0, 2)) + '</span>';
           }
-          html += '</div>';
+          html += '</button>';
         }
         if (!state.inventory.length) {
           html += '<div class="ui-smart-region__empty">' + escapeForHtml(emptyText) + '</div>';
@@ -1586,12 +1622,17 @@ export function generateExportHtml(sourceProject: Project): string {
       .replace(/[^a-z0-9]+/gi, '')
       .toLowerCase();
 
+    let refreshInventoryViews = () => {
+      updateSmartUiRegions();
+    };
+    let refreshQuestProgress = () => {};
+
     const addInventoryItem = (itemId) => {
       if (!itemId) return false;
       if (!state.inventory.includes(itemId)) {
         state.inventory.push(itemId);
-        updateInventoryUI();
-        checkQuestAutoComplete();
+        refreshInventoryViews();
+        refreshQuestProgress();
         saveGame();
         return true;
       }
@@ -1692,6 +1733,7 @@ export function generateExportHtml(sourceProject: Project): string {
       const scaleWrapper = document.getElementById('scale-wrapper');
       
       let currentScale = 1;
+      const baseDevicePixelRatio = window.devicePixelRatio || 1;
       const resizeGame = () => {
         const gameW = ${layoutWidth};
         let gameH = ${layoutHeight};
@@ -1703,7 +1745,7 @@ export function generateExportHtml(sourceProject: Project): string {
         const maxGameH = globalSettings.dialoguePosition === 'below' ? Math.max(0, winH - 240) : winH;
         
         const viewportPadding = 16;
-        currentScale = Math.max(
+        const fitScale = Math.max(
           0.05,
           Math.min(
             1,
@@ -1711,11 +1753,19 @@ export function generateExportHtml(sourceProject: Project): string {
             (maxGameH - viewportPadding * 2) / gameH,
           ),
         );
+        const browserZoomRatio = Math.max(
+          0.5,
+          Math.min(3, (window.devicePixelRatio || baseDevicePixelRatio) / baseDevicePixelRatio),
+        );
+        currentScale = Math.max(0.05, Math.min(3, fitScale * browserZoomRatio));
         gamePositioner.style.transform =
           'translate(-50%, -50%) scale(' + currentScale + ')';
         gamePositioner.style.transformOrigin = 'center center';
       };
       window.addEventListener('resize', resizeGame);
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', resizeGame);
+      }
       resizeGame();
 
       // Close-on-click-outside for UI menus
@@ -1944,6 +1994,7 @@ export function generateExportHtml(sourceProject: Project): string {
         buildQuestLog();
         saveGame();
       };
+      refreshQuestProgress = checkQuestAutoComplete;
 
       window.chooseDialogue = (choiceIdx) => {
         if (!activeDialogue) return;
@@ -2321,7 +2372,8 @@ export function generateExportHtml(sourceProject: Project): string {
           if (interaction === 'give-item' || interaction === 'collect') {
             const itemIdToGive = inferInventoryItemForObject(obj, giveItemId);
             if (itemIdToGive && addInventoryItem(itemIdToGive)) {
-              showSimpleDialogue("You obtained an item!", "System");
+              const item = inventoryItems.find(candidate => candidate.id === itemIdToGive);
+              showSimpleDialogue(data || ('You obtained: ' + (item ? item.name : 'an item') + '!'), "System");
             }
             if (interaction === 'collect') {
               obj.style.display = 'none';
@@ -2331,9 +2383,9 @@ export function generateExportHtml(sourceProject: Project): string {
               }
               saveGame();
             }
-          } else if (interaction === 'dialogue' || interaction === 'flavor_text') {
+          } else if (interaction === 'dialogue' || interaction === 'start-dialogue' || interaction === 'flavor_text') {
             const treeId = obj.getAttribute('data-dialogue-tree');
-            if (interaction === 'dialogue' && treeId) {
+            if ((interaction === 'dialogue' || interaction === 'start-dialogue') && treeId) {
               startDialogue(treeId);
             } else {
               showSimpleDialogue(data, "");
@@ -3015,9 +3067,6 @@ export function generateExportHtml(sourceProject: Project): string {
         });
       };
 
-      let selectedInventoryItemId = null;
-      let selectedInventoryItemIds = [];
-
       const clearInventorySelection = () => {
         selectedInventoryItemId = null;
         selectedInventoryItemIds = [];
@@ -3029,7 +3078,10 @@ export function generateExportHtml(sourceProject: Project): string {
 
         if (selectedInventoryItemIds.includes(itemId)) {
           clearInventorySelection();
-          toggleInventory();
+          const defaultInventoryOverlay = document.getElementById('inventory-overlay');
+          if (defaultInventoryOverlay && getComputedStyle(defaultInventoryOverlay).display !== 'none') {
+            toggleInventory();
+          }
           flavorText.innerText = itemDef.description ? ('(Item): ' + itemDef.description) : ('You look at: ' + itemDef.name);
           flavorText.style.display = 'block';
           setTimeout(() => flavorText.style.display = 'none', 3000);
@@ -3206,6 +3258,7 @@ export function generateExportHtml(sourceProject: Project): string {
         html += '</div>';
         invList.innerHTML = html;
       };
+      refreshInventoryViews = updateInventoryUI;
       
       // Initial render for the badge
       updateInventoryUI();

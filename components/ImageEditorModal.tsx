@@ -5,7 +5,7 @@ import { Asset } from '../types';
 
 interface ImageEditorModalProps {
   asset: Asset;
-  onSave: (newSrc: string, isNew: boolean) => void;
+  onSave: (newSrc: string, isNew: boolean, dimensions: { width: number; height: number }) => void;
   onClose: () => void;
 }
 
@@ -141,7 +141,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSav
     if (!canvas) return;
     try {
       const base64Image = canvas.toDataURL('image/png');
-      onSave(base64Image, isNew);
+      onSave(base64Image, isNew, { width: canvas.width, height: canvas.height });
     } catch (e) {
       setErrorMsg("Error saving image. If it's an external URL, it might have CORS restrictions that prevent editing. Try re-uploading the image directly.");
       console.error(e);

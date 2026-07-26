@@ -276,6 +276,8 @@ export interface Asset {
   id: string;
   src: string;
   dataURL?: string;
+  width?: number;
+  height?: number;
   exportSource?: "linked" | "github_inferred" | "embedded_fallback";
   exportReason?: string;
   name: string;

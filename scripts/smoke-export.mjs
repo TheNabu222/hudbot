@@ -33,7 +33,8 @@ const source = `
         { id: "bgm-asset", src: audio("bgm"), name: "BGM", type: "audio", category: "used" },
 	        { id: "cursor-asset", src: data("cursor"), name: "Cursor", type: "image", category: "used" },
 	        { id: "frame-asset", src: data("frame"), name: "Frame", type: "image", category: "used" },
-	        { id: "dataurl-only-asset", src: "", dataURL: data("dataurl-only"), name: "DataURL Only", type: "image", category: "used" },
+        { id: "dataurl-only-asset", src: "", dataURL: data("dataurl-only"), name: "DataURL Only", type: "image", category: "used" },
+        { id: "edited-page-asset", src: data("edited-page-art"), width: 620, height: 346, name: "Inventory Screen.png_crop", type: "image", category: "edited/images", exportSource: "embedded_fallback" },
 	        { id: "unused-library-asset", src: data("unused"), name: "Unused Library", type: "image", category: "library" },
 	        { id: "github:assets/_cavebot-assets/used-repo.png", src: "https://raw.githubusercontent.com/thenabu222/entropic-ai/main/assets/_cavebot-assets/used-repo.png", name: "Used Repo", type: "image", category: "repo" },
 	      ],
@@ -149,7 +150,31 @@ const source = `
           width: 800,
           height: 600,
           backgroundColor: "#000",
-          objects: [],
+          objects: [
+            {
+              id: "edited-page-art",
+              name: "Inventory Screen Page Art",
+              src: "",
+              _assetId: "edited-page-asset",
+              x: 0,
+              y: 0,
+              width: 800,
+              height: 600,
+              rotation: 0,
+              zIndex: 0,
+              opacity: 1,
+              locked: true,
+              cursor: "default",
+              animation: "none",
+              interaction: "none",
+              ignoreClicks: true,
+              stretchToScreen: true,
+              objectFit: "contain",
+              blendMode: "normal",
+              parallaxSpeed: 1,
+              hasPhysics: false,
+            },
+          ],
         },
       ],
       dialogueTrees: [
@@ -345,6 +370,7 @@ const source = `
 	      "cursor-asset",
 	      "frame-asset",
 	      "dataurl-only-asset",
+	      "edited-page-asset",
 	      "github:assets/_cavebot-assets/used-repo.png",
 	    ].forEach((assetId) => assert.equal(assetIds.has(assetId), true, assetId + " should be retained"));
 
@@ -356,7 +382,9 @@ const source = `
 	    assert.equal(fullLibrary.assets.some((asset) => asset.id === "unused-library-asset"), true, "full-library export should keep unused library assets");
 
 	    const repoRefs = prepareProjectForExport(project, { includeEmbeddedAssetData: false });
-	    assert.equal(repoRefs.assets.some((asset) => String(asset.src).startsWith("data:")), false, "repo-reference export should strip embedded base64 sources");
+	    const editedRepoRef = repoRefs.assets.find((asset) => asset.id === "edited-page-asset");
+	    assert.equal(editedRepoRef?.src.startsWith("data:image/png"), true, "edited embedded assets should not be replaced by inferred repository URLs");
+	    assert.equal(repoRefs.assets.some((asset) => asset.id !== "edited-page-asset" && String(asset.src).startsWith("data:")), false, "repo-reference export should strip embedded base64 sources except edited fallbacks");
 	    const repoAsset = repoRefs.assets.find((asset) => asset.id === "github:assets/_cavebot-assets/used-repo.png");
 	    assert.equal(repoAsset?.src, "https://raw.githubusercontent.com/thenabu222/entropic-ai/main/assets/_cavebot-assets/used-repo.png", "repo-reference export should keep raw GitHub URLs");
 	    return html;
@@ -418,6 +446,9 @@ dom.window.chooseDialogue(0);
 
 const dataUrlImage = dom.window.document.querySelector("#dataurl-obj img");
 assert.ok(dataUrlImage?.getAttribute("src")?.startsWith("data:image/png"), "dataURL-only object image should resolve in exported runtime");
+const editedPageImage = dom.window.document.querySelector("#edited-page-art img");
+assert.ok(editedPageImage?.getAttribute("src")?.startsWith("data:image/png"), "edited UI page art should resolve from embedded data");
+assert.equal(editedPageImage?.style.objectFit, "contain", "edited UI page art should preserve aspect ratio in export");
 dom.window.document.getElementById("dataurl-obj").click();
 dom.window.document.getElementById("hookah-obj").click();
 dom.window.closeDialogue();
