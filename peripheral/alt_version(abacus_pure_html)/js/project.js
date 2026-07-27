@@ -24,6 +24,7 @@ const Project = {
   newProject() {
     if (!confirm('Create a new project? Unsaved changes will be lost.')) return;
     State.project = {
+      id: `anzu-${Date.now()}`,
       name: 'Untitled Project',
       canvasWidth: 800,
       canvasHeight: 600,
