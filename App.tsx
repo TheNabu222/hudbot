@@ -798,7 +798,12 @@ const getAssetPlacementSize = (
 };
 
 const normalizeAssetForRuntime = (asset: Asset): Asset => {
-  return asset;
+  const src = getAssetDisplaySrc(asset);
+  return {
+    ...asset,
+    src,
+    type: asset.type || "image",
+  };
 };
 
 const collectScenePreloadAssetValues = (project: Project) => {
@@ -1581,14 +1586,41 @@ const App: React.FC = () => {
 	      );
 	    });
 	    const hydrateObjectAsset = (o: any) => {
-	      if (o._assetId) {
-	        const asset = assets.find((a: any) => a.id === o._assetId);
-	        if (asset) return { ...o, src: getAssetDisplaySrc(asset) };
+	      const assetId = o._assetId || o.assetId;
+	      if (assetId) {
+	        const asset = assets.find((a: any) => a.id === assetId);
+	        if (asset) {
+            return {
+              ...o,
+              _assetId: assetId,
+              src: o.src || getAssetDisplaySrc(asset),
+            };
+          }
 	      }
 	      return o;
 	    };
+      const importedStageWidth =
+        parsed.globalSettings?.stageWidth ||
+        parsed.canvasWidth ||
+        parsed.scenes?.[0]?.width ||
+        800;
+      const importedStageHeight =
+        parsed.globalSettings?.stageHeight ||
+        parsed.canvasHeight ||
+        parsed.scenes?.[0]?.height ||
+        600;
+      const hydrateScene = (scene: any) => ({
+        ...scene,
+        width: scene.width || importedStageWidth,
+        height: scene.height || importedStageHeight,
+        backgroundColor:
+          scene.backgroundColor || scene.bgColor || "transparent",
+        objects: (scene.objects || []).map(hydrateObjectAsset),
+      });
 	    return {
 	      ...parsed,
+        id: parsed.id || `imported-${Date.now()}`,
+        currentSceneId: parsed.currentSceneId || parsed.activeSceneId,
 	      prefabs: (parsed.prefabs || []).map(hydrateObjectAsset),
       dialogueTrees: parsed.dialogueTrees
         ? parsed.dialogueTrees.map((t: any) => ({
@@ -1609,16 +1641,10 @@ const App: React.FC = () => {
       inventoryItems: parsed.inventoryItems || [],
       assets: assets,
       scenes: parsed.scenes
-        ? parsed.scenes.map((s: any) => ({
-            ...s,
-	            objects: (s.objects || []).map(hydrateObjectAsset),
-          }))
+        ? parsed.scenes.map(hydrateScene)
         : [],
       uiMenus: parsed.uiMenus
-        ? parsed.uiMenus.map((s: any) => ({
-            ...s,
-	            objects: (s.objects || []).map(hydrateObjectAsset),
-          }))
+        ? parsed.uiMenus.map(hydrateScene)
         : [],
       maps: (parsed.maps || []).map((map: any, index: number) => ({
         id: map.id || `map-${index + 1}`,
@@ -1634,6 +1660,8 @@ const App: React.FC = () => {
       currentUiMenuId: parsed.currentUiMenuId || null,
       globalSettings: {
         ...(parsed.globalSettings || {}),
+        stageWidth: importedStageWidth,
+        stageHeight: importedStageHeight,
       },
     };
   };
@@ -1917,7 +1945,7 @@ const App: React.FC = () => {
       const strippedProject = prepareProjectForExport(project, {
         assetScope: mode === "library" ? "all" : "used",
         includeEmbeddedAssetData:
-          mode === "library" ? true : mode === "references" ? false : "fallback",
+          mode === "references" ? false : true,
         keepFavoriteAssets: mode === "library",
       });
       const jsonStr = JSON.stringify(strippedProject);
@@ -1944,7 +1972,7 @@ const App: React.FC = () => {
           ? "Exported full-library JSON."
           : mode === "references"
             ? "Exported repo-reference JSON without embedded base64."
-            : "Exported clean JSON with only used assets.",
+            : "Exported self-contained JSON with all used asset data.",
       );
     } catch (err) {
       showError("Failed to export project: " + err);
@@ -1970,7 +1998,7 @@ const App: React.FC = () => {
           }
         }
         const parsed = JSON.parse(content);
-        if (parsed && parsed.id && parsed.scenes) {
+        if (parsed && Array.isArray(parsed.scenes)) {
           mergeImportedProjectIntoCurrent(parsed);
         } else {
           showError("Invalid project file format.");
@@ -7902,13 +7930,13 @@ const App: React.FC = () => {
 	                          setIsBackupMenuOpen(false);
 	                        }}
 	                        className="flex flex-col items-start justify-center gap-0.5 rounded-lg border border-emerald-400/35 bg-emerald-400/10 px-2.5 py-2 text-left font-semibold text-emerald-100 transition-all hover:bg-emerald-400/20 active:scale-95"
-	                        title="Download editable JSON with only assets currently referenced by the game. Embedded data is kept only for used assets with no usable link."
+	                        title="Download editable JSON with only assets currently referenced by the game. Used uploads stay embedded so images survive cross-editor imports."
 	                      >
 	                        <span className="flex items-center gap-1.5">
 	                          <Download size={13} /> Clean
 	                        </span>
 	                        <span className="text-[9px] font-medium text-emerald-100/75">
-	                          fallback only
+	                          self-contained
 	                        </span>
 	                      </button>
 	                      <button
