@@ -1,6 +1,143 @@
+/* ===== PROJECT FORMAT COMPATIBILITY ===== */
+const ProjectCompatibility = {
+  _githubAssetSource(assetId) {
+    if (!assetId || !assetId.startsWith('github:')) return '';
+    const path = assetId.slice('github:'.length)
+      .split('/')
+      .filter(part => part && part !== '.' && part !== '..')
+      .map(encodeURIComponent)
+      .join('/');
+    return path
+      ? `https://raw.githubusercontent.com/thenabu222/entropic-ai/main/${path}`
+      : '';
+  },
+
+  _assetSource(asset) {
+    return asset.dataURL || asset.src || this._githubAssetSource(asset.id) || '';
+  },
+
+  _interactionToClickAction(interaction) {
+    const actions = {
+      scene_change: 'scene-change',
+      dialogue: 'start-dialogue',
+      give_item: 'give-item',
+      'give-item': 'give-item',
+      custom_script: 'custom',
+    };
+    return actions[interaction] || (interaction === 'none' ? 'none' : null);
+  },
+
+  normalize(project) {
+    if (!project || typeof project !== 'object') {
+      throw new Error('Project data must be an object.');
+    }
+
+    const rawScenes = Array.isArray(project.scenes) ? project.scenes : [];
+    const firstScene = rawScenes[0] || {};
+    const stageWidth = Number(
+      project.canvasWidth ||
+      project.globalSettings?.stageWidth ||
+      firstScene.width ||
+      800
+    );
+    const stageHeight = Number(
+      project.canvasHeight ||
+      project.globalSettings?.stageHeight ||
+      firstScene.height ||
+      600
+    );
+    const assets = (Array.isArray(project.assets) ? project.assets : []).map((asset, index) => {
+      const source = this._assetSource(asset);
+      return {
+        ...asset,
+        id: asset.id || `imported-asset-${index + 1}`,
+        name: asset.name || `Imported Asset ${index + 1}`,
+        src: asset.src || source,
+        dataURL: source,
+        width: Number(asset.width) || 100,
+        height: Number(asset.height) || 100,
+        type: asset.type || 'image',
+      };
+    });
+    const assetsById = new Map(assets.map(asset => [asset.id, asset]));
+
+    const normalizeObject = (object, sceneIndex, objectIndex) => {
+      const linkedAssetId = object.assetId || object._assetId || '';
+      let linkedAsset = linkedAssetId ? assetsById.get(linkedAssetId) : null;
+      const objectSource = object.src || '';
+
+      if (!linkedAsset && objectSource) {
+        linkedAsset = assets.find(asset =>
+          asset.src === objectSource || asset.dataURL === objectSource
+        );
+      }
+
+      if (!linkedAsset && objectSource && !object.isText && !object.isHitbox) {
+        linkedAsset = {
+          id: linkedAssetId || `imported-object-asset-${sceneIndex + 1}-${objectIndex + 1}`,
+          name: object.name || `Imported Object ${objectIndex + 1}`,
+          src: objectSource,
+          dataURL: objectSource,
+          width: Number(object.width) || 100,
+          height: Number(object.height) || 100,
+          type: 'image',
+        };
+        assets.push(linkedAsset);
+        assetsById.set(linkedAsset.id, linkedAsset);
+      }
+
+      const mappedClickAction = this._interactionToClickAction(object.interaction);
+      return {
+        ...object,
+        id: object.id || `imported-object-${sceneIndex + 1}-${objectIndex + 1}`,
+        assetId: linkedAsset?.id || linkedAssetId,
+        width: Number(object.width) || linkedAsset?.width || 100,
+        height: Number(object.height) || linkedAsset?.height || 100,
+        rotation: Number(object.rotation) || 0,
+        opacity: object.opacity == null ? 1 : Number(object.opacity),
+        blendMode: object.blendMode || 'normal',
+        flipX: Boolean(object.flipX),
+        flipY: Boolean(object.flipY),
+        locked: Boolean(object.locked),
+        visible: object.visible !== false,
+        zIndex: Number.isFinite(Number(object.zIndex)) ? Number(object.zIndex) : objectIndex,
+        clickAction: object.clickAction || mappedClickAction || 'none',
+        dialogueTreeId: object.dialogueTreeId || '',
+        targetSceneId: object.targetSceneId || '',
+      };
+    };
+
+    const scenes = rawScenes.map((scene, sceneIndex) => ({
+      ...scene,
+      id: scene.id || `imported-scene-${sceneIndex + 1}`,
+      name: scene.name || `Scene ${sceneIndex + 1}`,
+      bgColor: scene.bgColor || scene.backgroundColor || 'transparent',
+      objects: (Array.isArray(scene.objects) ? scene.objects : []).map((object, objectIndex) =>
+        normalizeObject(object, sceneIndex, objectIndex)
+      ),
+      hitboxes: Array.isArray(scene.hitboxes) ? scene.hitboxes : [],
+    }));
+    const requestedSceneId = project.activeSceneId || project.currentSceneId;
+    const activeSceneId = scenes.some(scene => scene.id === requestedSceneId)
+      ? requestedSceneId
+      : scenes[0]?.id || null;
+
+    return {
+      ...project,
+      id: project.id || `anzu-${Date.now()}`,
+      canvasWidth: stageWidth,
+      canvasHeight: stageHeight,
+      scenes,
+      assets,
+      activeSceneId,
+    };
+  },
+};
+
 /* ===== GLOBAL STATE ===== */
 const State = {
   project: {
+    id: `anzu-${Date.now()}`,
     name: 'Untitled Project',
     canvasWidth: 800,
     canvasHeight: 600,
@@ -176,7 +313,7 @@ const State = {
   fromJSON(json) {
     try {
       const data = typeof json === 'string' ? JSON.parse(json) : json;
-      this.project = data;
+      this.project = ProjectCompatibility.normalize(data);
       this.undoStack = [];
       this.redoStack = [];
       this.selectedObjectId = null;
