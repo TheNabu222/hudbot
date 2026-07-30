@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import ReactDOM from "react-dom";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -134,7 +134,10 @@ import {
   DeviceFrameCalibrator,
   DeviceFrameOverlay,
 } from "./components/DeviceFrameCalibrator";
-import { ClickResponseEditor } from "./components/ClickResponseEditor";
+import {
+  ClickResponseEditor,
+  ClickResponseTypePicker,
+} from "./components/ClickResponseEditor";
 import { AnimatedCursor } from "./components/AnimatedCursor";
 import { CursorBehaviorPicker } from "./components/CursorBehaviorPicker";
 import { HelpCenterModal } from "./components/HelpCenterModal";
@@ -281,6 +284,7 @@ const INTERFACE_PRESET_GROUPS: Array<{
     template: "journal",
     presets: [
       "Codex",
+      "Almanac",
       "Journal",
       "Quest Log",
       "Tutorial Guide",
@@ -356,9 +360,9 @@ const resolveInterfacePresetTemplate = (
   if (lower.includes("sound player")) return "modal";
   if (lower.includes("level editor")) return "map";
   if (
+    lower.includes("almanac") ||
     lower.includes("journal") ||
     lower.includes("lore") ||
-    lower.includes("almanac") ||
     lower.includes("codex") ||
     lower.includes("tutorial") ||
     lower.includes("gallery") ||
@@ -391,6 +395,7 @@ const interfaceTemplateLabel = (
   if (lower.includes("targeting")) return "aim overlay";
   if (lower.includes("game log")) return "event feed";
   if (lower.includes("sound player")) return "audio controls";
+  if (lower.includes("almanac")) return "almanac browser";
   if (lower.includes("level editor")) return "tool surface";
   if (lower.includes("inventory")) return "live item slots";
   if (lower.includes("craft")) return "recipe builder";
@@ -730,20 +735,26 @@ const LabelWithHelp = ({
   label,
   helpText,
   className = "",
+  hideTooltip = false,
 }: {
   label: string;
   helpText: string;
   className?: string;
+  hideTooltip?: boolean;
 }) => (
   <div className={`flex items-center gap-1 group relative w-max ${className}`}>
     <label className="text-sm font-medium text-neutral-400">{label}</label>
-    <HelpCircle
-      size={14}
-      className="text-neutral-500 hover:text-neutral-300 cursor-help transition-colors"
-    />
-    <div className="absolute left-0 top-full mt-1 hidden group-hover:block w-56 p-2 bg-neutral-950 text-neutral-300 text-sm rounded border border-neutral-700 shadow-xl z-[100] pointer-events-none whitespace-normal font-normal leading-relaxed">
-      {helpText}
-    </div>
+    {!hideTooltip && (
+      <>
+        <HelpCircle
+          size={14}
+          className="text-neutral-500 hover:text-neutral-300 cursor-help transition-colors"
+        />
+        <div className="absolute left-0 top-full mt-1 hidden group-hover:block w-56 p-2 bg-neutral-950 text-neutral-300 text-sm rounded border border-neutral-700 shadow-xl z-[100] pointer-events-none whitespace-normal font-normal leading-relaxed">
+          {helpText}
+        </div>
+      </>
+    )}
   </div>
 );
 
@@ -1025,6 +1036,18 @@ const App: React.FC = () => {
 
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [selectedMultiIds, setSelectedMultiIds] = useState<string[]>([]);
+  type ObjectGeometryEdit = Partial<
+    Pick<SceneObject, "x" | "y" | "width" | "height" | "rotation">
+  >;
+  const [transientObjectEdits, setTransientObjectEdits] = useState<
+    Record<string, ObjectGeometryEdit>
+  >({});
+  const transientObjectEditsRef = useRef<Record<string, ObjectGeometryEdit>>({});
+  const transientFrameRef = useRef<number | null>(null);
+  const objectElementRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const dragStartObjectByIdRef = useRef<Record<string, SceneObject>>({});
+  const dragManipulatedObjectIdsRef = useRef<string[]>([]);
+  const dragSelectionIdsRef = useRef<string[]>([]);
   const [selectionBox, setSelectionBox] = useState<{
     x: number;
     y: number;
@@ -2532,6 +2555,10 @@ const App: React.FC = () => {
   const selectedObject = currentScene?.objects.find(
     (o) => o.id === selectedObjectId,
   );
+  const currentSceneObjectsForRender = useMemo(
+    () => [...currentScene.objects].sort((a, b) => a.zIndex - b.zIndex),
+    [currentScene.objects],
+  );
   const hasPlayableCursorAsset = (assetId?: string | null) =>
     Boolean(
       assetId &&
@@ -2895,24 +2922,63 @@ const App: React.FC = () => {
     pushHistory(newProject);
   };
 
-  const updateObjectTransient = (id: string, updates: Partial<SceneObject>) => {
-    if (!currentScene) return;
-    const isUI = editorMode === "ui_stage" && !isPlaying;
-    setProject((prev) => ({
-      ...prev,
+  const applyObjectGeometryEdits = (
+    sourceProject: Project,
+    edits: Record<string, ObjectGeometryEdit>,
+    targetSceneId = currentScene.id,
+    isUI = editorMode === "ui_stage" && !isPlaying,
+  ): Project => {
+    const editIds = Object.keys(edits);
+    if (!editIds.length) return sourceProject;
+    return {
+      ...sourceProject,
       [isUI ? "uiMenus" : "scenes"]: (
-        prev[isUI ? "uiMenus" : "scenes"] || []
-      ).map((s) =>
-        s.id === currentScene.id
+        sourceProject[isUI ? "uiMenus" : "scenes"] || []
+      ).map((scene) =>
+        scene.id === targetSceneId
           ? {
-              ...s,
-              objects: s.objects.map((o) =>
-                o.id === id ? { ...o, ...updates } : o,
+              ...scene,
+              objects: scene.objects.map((object) =>
+                edits[object.id] ? { ...object, ...edits[object.id] } : object,
               ),
             }
-          : s,
+          : scene,
       ),
-    }));
+    };
+  };
+
+  const queueObjectGeometryEdits = (
+    edits: Record<string, ObjectGeometryEdit>,
+  ) => {
+    transientObjectEditsRef.current = edits;
+    if (transientFrameRef.current !== null) return;
+    transientFrameRef.current = window.requestAnimationFrame(() => {
+      transientFrameRef.current = null;
+      Object.entries(transientObjectEditsRef.current).forEach(([id, edit]) => {
+        const element = objectElementRefs.current[id];
+        if (!element) return;
+        if (edit.x !== undefined) element.style.left = `${edit.x}px`;
+        if (edit.y !== undefined) element.style.top = `${edit.y}px`;
+        if (edit.width !== undefined) element.style.width = `${edit.width}px`;
+        if (edit.height !== undefined) element.style.height = `${edit.height}px`;
+        if (edit.rotation !== undefined) {
+          element.style.transform = `rotate(${edit.rotation}deg)`;
+        }
+      });
+    });
+  };
+
+  useEffect(
+    () => () => {
+      if (transientFrameRef.current !== null) {
+        window.cancelAnimationFrame(transientFrameRef.current);
+      }
+    },
+    [],
+  );
+
+  const updateObjectTransient = (id: string, updates: Partial<SceneObject>) => {
+    queueObjectGeometryEdits({ [id]: updates as ObjectGeometryEdit });
   };
 
   const handleInsertAssetToStage = (asset: any) => {
@@ -3592,15 +3658,21 @@ const App: React.FC = () => {
 
     if (e.shiftKey) {
       if (selectedMultiIds.includes(obj.id)) {
-        setSelectedMultiIds((prev) => prev.filter((id) => id !== obj.id));
+        const nextSelectedIds = selectedMultiIds.filter((id) => id !== obj.id);
+        setSelectedMultiIds(nextSelectedIds);
         setSelectedObjectId((prev) => (prev === obj.id ? null : prev));
+        dragSelectionIdsRef.current = nextSelectedIds;
       } else {
         if (!selectedMultiIds.includes(selectedObjectId || "")) {
-          setSelectedMultiIds(
-            selectedObjectId ? [selectedObjectId, obj.id] : [obj.id],
-          );
+          const nextSelectedIds = selectedObjectId
+            ? [selectedObjectId, obj.id]
+            : [obj.id];
+          setSelectedMultiIds(nextSelectedIds);
+          dragSelectionIdsRef.current = nextSelectedIds;
         } else {
-          setSelectedMultiIds((prev) => [...prev, obj.id]);
+          const nextSelectedIds = [...selectedMultiIds, obj.id];
+          setSelectedMultiIds(nextSelectedIds);
+          dragSelectionIdsRef.current = nextSelectedIds;
         }
         setSelectedObjectId(obj.id);
       }
@@ -3610,14 +3682,30 @@ const App: React.FC = () => {
       if (!selectedMultiIds.includes(obj.id)) {
         setSelectedObjectId(obj.id);
         setSelectedMultiIds([obj.id]);
+        dragSelectionIdsRef.current = [obj.id];
       } else {
         setSelectedObjectId(obj.id);
+        dragSelectionIdsRef.current = selectedMultiIds;
       }
     }
 
     draggingIdRef.current = obj.id;
     setDraggingId(obj.id);
     dragStartProjectRef.current = project;
+    dragStartObjectByIdRef.current = Object.fromEntries(
+      currentScene.objects.map((sceneObject) => [sceneObject.id, sceneObject]),
+    );
+    const moveRootIds =
+      dragSelectionIdsRef.current.length > 1 &&
+      dragSelectionIdsRef.current.includes(obj.id)
+        ? dragSelectionIdsRef.current
+        : [obj.id];
+    const descendantIds = getDescendantIds(moveRootIds, currentScene.objects);
+    dragManipulatedObjectIdsRef.current = Array.from(
+      new Set([...moveRootIds, ...descendantIds]),
+    );
+    transientObjectEditsRef.current = {};
+    setTransientObjectEdits({});
     didDragRef.current = false;
 
     // Calculate offset from top-left of object
@@ -3643,6 +3731,12 @@ const App: React.FC = () => {
     e.stopPropagation();
     setResizingId(obj.id);
     dragStartProjectRef.current = project;
+    dragStartObjectByIdRef.current = Object.fromEntries(
+      currentScene.objects.map((sceneObject) => [sceneObject.id, sceneObject]),
+    );
+    dragManipulatedObjectIdsRef.current = [obj.id];
+    transientObjectEditsRef.current = {};
+    setTransientObjectEdits({});
     setResizeStart({
       w: obj.width,
       h: obj.height,
@@ -3664,6 +3758,12 @@ const App: React.FC = () => {
     e.stopPropagation();
     setRotatingId(obj.id);
     dragStartProjectRef.current = project;
+    dragStartObjectByIdRef.current = Object.fromEntries(
+      currentScene.objects.map((sceneObject) => [sceneObject.id, sceneObject]),
+    );
+    dragManipulatedObjectIdsRef.current = [obj.id];
+    transientObjectEditsRef.current = {};
+    setTransientObjectEdits({});
 
     // Find absolute center of the object relative to viewport
     const parentEl = (e.currentTarget as HTMLElement).parentElement;
@@ -3830,115 +3930,24 @@ const App: React.FC = () => {
       newY = Math.round(newY / grid) * grid;
     }
 
-    if (
-      selectedMultiIds.length > 1 &&
-      selectedMultiIds.includes(activeDraggingId)
-    ) {
-      const startSceneList =
-        editorMode === "ui_stage"
-          ? dragStartProjectRef.current?.uiMenus
-          : dragStartProjectRef.current?.scenes;
-      const startScene = startSceneList?.find(
-        (s: any) =>
-          s.id ===
-          (editorMode === "ui_stage"
-            ? dragStartProjectRef.current?.currentUiMenuId
-            : dragStartProjectRef.current?.currentSceneId),
-      );
-      const startDragObj = startScene?.objects.find(
-        (o: any) => o.id === activeDraggingId,
-      );
+    const startDragObj = dragStartObjectByIdRef.current[activeDraggingId];
+    if (!startDragObj) return;
 
-      if (!startDragObj) return;
-      const dx = newX - startDragObj.x;
-      const dy = newY - startDragObj.y;
-
-      setProject((prev) => {
-        const isUI = editorMode === "ui_stage" && !isPlaying;
-        const sceneList = isUI ? prev.uiMenus : prev.scenes;
-        if (!sceneList) return prev;
-
-        return {
-          ...prev,
-          [isUI ? "uiMenus" : "scenes"]: sceneList.map((s: any) =>
-            s.id === (isUI ? prev.currentUiMenuId : prev.currentSceneId)
-              ? {
-                  ...s,
-                  objects: s.objects.map((o: any) => {
-                    const descendantIds = getDescendantIds(
-                      selectedMultiIds,
-                      s.objects,
-                    );
-                    if (
-                      !selectedMultiIds.includes(o.id) &&
-                      !descendantIds.includes(o.id)
-                    )
-                      return o;
-                    const startObj = startScene?.objects.find(
-                      (so: any) => so.id === o.id,
-                    );
-                    if (!startObj) return o;
-                    return { ...o, x: startObj.x + dx, y: startObj.y + dy };
-                  }),
-                }
-              : s,
-          ),
-        };
-      });
-    } else {
-      const startSceneList =
-        editorMode === "ui_stage"
-          ? dragStartProjectRef.current?.uiMenus
-          : dragStartProjectRef.current?.scenes;
-      const startScene = startSceneList?.find(
-        (s: any) =>
-          s.id ===
-          (editorMode === "ui_stage"
-            ? dragStartProjectRef.current?.currentUiMenuId
-            : dragStartProjectRef.current?.currentSceneId),
-      );
-      const startDragObj = startScene?.objects.find(
-        (o: any) => o.id === activeDraggingId,
-      );
-      if (!startDragObj) return;
-
-      const dx = newX - startDragObj.x;
-      const dy = newY - startDragObj.y;
-
-      setProject((prev) => {
-        const isUI = editorMode === "ui_stage" && !isPlaying;
-        const sceneList = isUI ? prev.uiMenus : prev.scenes;
-        if (!sceneList) return prev;
-
-        return {
-          ...prev,
-          [isUI ? "uiMenus" : "scenes"]: sceneList.map((s: any) =>
-            s.id === (isUI ? prev.currentUiMenuId : prev.currentSceneId)
-              ? {
-                  ...s,
-                  objects: s.objects.map((o: any) => {
-                    const descendantIds = getDescendantIds(
-                      [activeDraggingId],
-                      s.objects,
-                    );
-                    if (
-                      o.id !== activeDraggingId &&
-                      !descendantIds.includes(o.id)
-                    )
-                      return o;
-
-                    const startObj = startScene?.objects.find(
-                      (so: any) => so.id === o.id,
-                    );
-                    if (!startObj) return o;
-                    return { ...o, x: startObj.x + dx, y: startObj.y + dy };
-                  }),
-                }
-              : s,
-          ),
-        };
-      });
-    }
+    const dx = newX - startDragObj.x;
+    const dy = newY - startDragObj.y;
+    const manipulatedIds = dragManipulatedObjectIdsRef.current.length
+      ? dragManipulatedObjectIdsRef.current
+      : [activeDraggingId];
+    const edits = manipulatedIds.reduce<Record<string, ObjectGeometryEdit>>(
+      (acc, id) => {
+        const startObj = dragStartObjectByIdRef.current[id];
+        if (!startObj) return acc;
+        acc[id] = { x: startObj.x + dx, y: startObj.y + dy };
+        return acc;
+      },
+      {},
+    );
+    queueObjectGeometryEdits(edits);
   };
 
   const handleObjectPointerUp = (e: React.PointerEvent) => {
@@ -3984,12 +3993,27 @@ const App: React.FC = () => {
 
     const activeDraggingId = draggingIdRef.current || draggingId;
     if (activeDraggingId || resizingId || rotatingId) {
-      if (dragStartProjectRef.current) {
+      const finalEdits = transientObjectEditsRef.current;
+      if (
+        didDragRef.current &&
+        Object.keys(finalEdits).length > 0
+      ) {
+        const isUI = editorMode === "ui_stage" && !isPlaying;
+        const targetSceneId = currentScene.id;
+        setProject((prev) =>
+          applyObjectGeometryEdits(prev, finalEdits, targetSceneId, isUI),
+        );
+      }
+      if (didDragRef.current && dragStartProjectRef.current) {
         setHistory((h) => ({
           past: [...h.past.slice(-20), dragStartProjectRef.current!],
           future: [],
         }));
       }
+      transientObjectEditsRef.current = {};
+      dragStartObjectByIdRef.current = {};
+      dragManipulatedObjectIdsRef.current = [];
+      setTransientObjectEdits({});
     }
     if (activeDraggingId) {
       if (!didDragRef.current && !e.shiftKey) {
@@ -5505,7 +5529,14 @@ const App: React.FC = () => {
             audioSrc: undefined,
             requireItemId: undefined,
             consumeRequiredItem: false,
-            requiredSkill: "none",
+            requiredSkill:
+              response.interaction === "skill_check"
+                ? obj.requiredSkill
+                : "none",
+            skillCheckDifficulty:
+              response.interaction === "skill_check"
+                ? obj.skillCheckDifficulty
+                : undefined,
             needsEffect: undefined,
             reputationEffect: undefined,
             grantSkill: undefined,
@@ -6611,11 +6642,14 @@ const App: React.FC = () => {
       }
 
       if (
+        normalizedPresetName.includes("almanac") ||
         normalizedPresetName.includes("codex") ||
         normalizedPresetName.includes("tutorial") ||
         normalizedPresetName.includes("content browser")
       ) {
-        const title = normalizedPresetName.includes("tutorial")
+        const title = normalizedPresetName.includes("almanac")
+          ? "Almanac"
+          : normalizedPresetName.includes("tutorial")
           ? "Tutorial Guide"
           : normalizedPresetName.includes("content browser")
             ? "Content Browser"
@@ -6629,7 +6663,7 @@ const App: React.FC = () => {
             uiEmptyText: "Unlocked entries appear here",
           }),
           panel(`${title} Index Region`, stageW * 0.62, stageH * 0.25, stageW * 0.17, stageH * 0.46, 11, "rgba(255,255,255,0.04)"),
-          text(`${title} Index Label`, "INDEX", stageW * 0.65, stageH * 0.31, stageW * 0.11, 28, 12, 14),
+          text(`${title} Index Label`, normalizedPresetName.includes("almanac") ? "LORE / JOURNAL / QUEST NOTES" : "INDEX", stageW * 0.65, stageH * 0.31, stageW * 0.17, 42, 12, 13),
           closeButton(`Close ${title}`, "Close", stageW * 0.66, stageH * 0.76, stageW * 0.12, 38),
         ];
       }
@@ -7074,6 +7108,453 @@ const App: React.FC = () => {
     setIsHudPlacementMode(false);
     setSelectedObjectId(hudBar.objects[1]?.id || null);
     showError("Created a starter HUD kit. Edit the generated screens like normal canvas objects.");
+  };
+
+  const createInterfaceScreenKit = (
+    presetNames: string[],
+    kitLabel: string,
+  ) => {
+    const stageW = logicalStageWidth || project.globalSettings.stageWidth || 800;
+    const stageH = logicalStageHeight || project.globalSettings.stageHeight || 600;
+    const primary = project.globalSettings.uiColorPrimary || "#00ffcc";
+    const panelBg =
+      project.globalSettings.uiColorBackground || "rgba(0,0,0,0.86)";
+    const uniqueNames = Array.from(new Set(presetNames));
+    const idByName = Object.fromEntries(
+      uniqueNames.map((name) => [name, uuidv4()]),
+    ) as Record<string, string>;
+
+    const findId = (...needles: string[]) => {
+      const match = uniqueNames.find((name) => {
+        const lower = name.toLowerCase();
+        return needles.some((needle) => lower.includes(needle));
+      });
+      return match ? idByName[match] : "";
+    };
+
+    const targetByBuiltin: Partial<Record<InteractionType, string>> = {
+      toggle_inventory: findId("inventory", "item wheel", "equipment", "loadout", "player menu"),
+      open_quest_log: findId("quest", "objective", "game log"),
+      open_almanac: findId("almanac", "codex", "journal", "lore", "tutorial", "gallery", "collectable", "content browser"),
+      open_map: findId("world map", "map", "minimap", "compass", "stage select"),
+      open_crafting: findId("craft", "recipe", "buying", "trading"),
+      open_relationships: findId("relationship", "roster", "character"),
+      open_settings: findId("setting", "pause", "load", "save", "mode select"),
+      open_skills: findId("player menu", "ability", "skills", "vitals"),
+    };
+
+    const makeBase = (
+      name: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      zIndex: number,
+    ): Partial<SceneObject> => ({
+      id: uuidv4(),
+      name,
+      x,
+      y,
+      width,
+      height,
+      zIndex,
+      opacity: 1,
+      rotation: 0,
+      locked: false,
+      blendMode: "normal",
+      parallaxSpeed: 1,
+      cursor: "pointer",
+    });
+
+    const panel = (
+      name: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      zIndex: number,
+      color = panelBg,
+    ): SceneObject =>
+      ({
+        ...makeBase(name, x, y, width, height, zIndex),
+        isUiElement: true,
+        uiElementType: "panel",
+        uiColorPrimary: primary,
+        uiColorSecondary: color,
+        uiBorderRadius: 8,
+        ignoreClicks: true,
+      }) as SceneObject;
+
+    const text = (
+      name: string,
+      content: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      zIndex: number,
+      size = 16,
+    ): SceneObject =>
+      ({
+        ...makeBase(name, x, y, width, height, zIndex),
+        isText: true,
+        textContent: content,
+        textColor: primary,
+        textFontSize: size,
+        textWeight: "bold",
+        textAlign: "left",
+        ignoreClicks: true,
+      }) as SceneObject;
+
+    const button = (
+      name: string,
+      label: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      zIndex: number,
+      interaction: InteractionType,
+      extra: Partial<SceneObject> = {},
+    ): SceneObject => {
+      const mappedTarget = targetByBuiltin[interaction];
+      return ({
+        ...makeBase(name, x, y, width, height, zIndex),
+        isUiElement: true,
+        uiElementType: "button",
+        textContent: label,
+        textFontSize: height < 34 ? 11 : 14,
+        uiColorPrimary: primary,
+        uiColorSecondary: "rgba(0,0,0,0.72)",
+        uiBorderRadius: 6,
+        interaction: mappedTarget ? "open_ui" : interaction,
+        targetUiId: mappedTarget || extra.targetUiId,
+        ...extra,
+      }) as SceneObject;
+    };
+
+    const smartRegion = (
+      kind: SmartUiRegionKind,
+      name: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      zIndex: number,
+      extra: Partial<SceneObject> = {},
+    ): SceneObject =>
+      ({
+        ...makeBase(name, x, y, width, height, zIndex),
+        isUiElement: true,
+        uiElementType: kind,
+        uiBindingType:
+          kind === "inventory_grid"
+            ? "inventory"
+            : kind === "quest_list"
+              ? "quests"
+              : kind === "stat_list"
+                ? "stats"
+                : "journal",
+        uiColorPrimary: primary,
+        uiColorSecondary: "rgba(4,12,22,0.56)",
+        uiBorderType: "dashed",
+        uiBorderRadius: 6,
+        uiGridColumns: kind === "inventory_grid" ? 4 : undefined,
+        uiGridRows: kind === "inventory_grid" ? 3 : undefined,
+        uiGridGap: kind === "inventory_grid" ? 6 : undefined,
+        uiPadding: kind === "inventory_grid" ? 8 : 14,
+        uiEmptyText:
+          kind === "inventory_grid"
+            ? "Inventory empty"
+            : kind === "quest_list"
+              ? "No active quests"
+              : kind === "stat_list"
+                ? "No meters configured"
+                : "No entries unlocked",
+        textColor: primary,
+        textFontSize: kind === "stat_list" ? 12 : 13,
+        ignoreClicks: kind !== "inventory_grid",
+        ...extra,
+      }) as SceneObject;
+
+    const navButtons = (selfName: string, y = stageH * 0.78) => {
+      const targets = [
+        ["Inventory", findId("inventory")],
+        ["Quests", findId("quest")],
+        ["Almanac", findId("almanac", "codex", "journal")],
+        ["Map", findId("map")],
+        ["Settings", findId("setting", "pause")],
+      ].filter(([, id]) => id && id !== idByName[selfName]);
+      return targets.slice(0, 5).map(([label, id], index) =>
+        button(
+          `${selfName} Nav ${label}`,
+          label,
+          stageW * 0.16 + index * stageW * 0.12,
+          y,
+          stageW * 0.1,
+          34,
+          14,
+          "open_ui",
+          { targetUiId: id },
+        ),
+      );
+    };
+
+    const closeButton = (selfName: string) =>
+      button(
+        `Close ${selfName}`,
+        "Close",
+        stageW * 0.74,
+        stageH * 0.78,
+        stageW * 0.11,
+        36,
+        15,
+        "close_ui",
+        { targetUiId: idByName[selfName] },
+      );
+
+    const screenShell = (name: string, title = name) => [
+      panel(`${name} Backing`, stageW * 0.08, stageH * 0.08, stageW * 0.84, stageH * 0.8, 10),
+      text(`${name} Title`, title.toUpperCase(), stageW * 0.13, stageH * 0.13, stageW * 0.55, 34, 12, 22),
+    ];
+
+    const buildObjects = (name: string): SceneObject[] => {
+      const lower = name.toLowerCase();
+      const inventoryId = findId("inventory", "item wheel", "equipment", "loadout", "player menu");
+      const inspectId = findId("inspect item", "collectable viewer", "content browser");
+      const questId = findId("quest", "objective", "game log");
+      const almanacId = findId("almanac", "codex", "journal", "lore", "tutorial", "gallery", "collectable", "content browser");
+      const mapId = findId("world map", "map", "minimap", "compass", "stage select");
+      const craftId = findId("craft", "recipe", "buying", "trading");
+      const settingsId = findId("setting", "pause", "load", "save", "mode select");
+      const relationshipId = findId("relationship", "roster", "character");
+
+      if (lower.includes("hud") || lower.includes("action bar") || lower.includes("button prompt")) {
+        return [
+          panel(`${name} Bar`, stageW * 0.13, stageH - 72, stageW * 0.74, 54, 10, "rgba(0,0,0,0.52)"),
+          ...(inventoryId ? [button("HUD Items", "Items", stageW * 0.16, stageH - 62, 72, 34, 12, "open_ui", { targetUiId: inventoryId })] : []),
+          ...(questId ? [button("HUD Quest", "Quests", stageW * 0.28, stageH - 62, 78, 34, 12, "open_ui", { targetUiId: questId })] : []),
+          ...(almanacId ? [button("HUD Almanac", "Lore", stageW * 0.41, stageH - 62, 68, 34, 12, "open_ui", { targetUiId: almanacId })] : []),
+          ...(mapId ? [button("HUD Map", "Map", stageW * 0.52, stageH - 62, 62, 34, 12, "open_ui", { targetUiId: mapId })] : []),
+          ...(craftId ? [button("HUD Craft", "Craft", stageW * 0.62, stageH - 62, 70, 34, 12, "open_ui", { targetUiId: craftId })] : []),
+          ...(settingsId ? [button("HUD Settings", "Gear", stageW * 0.73, stageH - 62, 58, 34, 12, "open_ui", { targetUiId: settingsId })] : []),
+        ];
+      }
+
+      if (lower.includes("player menu") || lower.includes("pause")) {
+        return [
+          ...screenShell(name, lower.includes("pause") ? "Pause Menu" : "Player Menu"),
+          smartRegion("stat_list", `${name} Vitals`, stageW * 0.14, stageH * 0.24, stageW * 0.28, stageH * 0.2, 12),
+          smartRegion("quest_list", `${name} Objectives`, stageW * 0.46, stageH * 0.24, stageW * 0.34, stageH * 0.2, 12),
+          ...(inventoryId ? [button(`${name} Inventory`, "Inventory", stageW * 0.15, stageH * 0.52, stageW * 0.17, 40, 13, "open_ui", { targetUiId: inventoryId })] : []),
+          ...(questId ? [button(`${name} Quests`, "Quest Log", stageW * 0.35, stageH * 0.52, stageW * 0.17, 40, 13, "open_ui", { targetUiId: questId })] : []),
+          ...(almanacId ? [button(`${name} Almanac`, "Almanac", stageW * 0.55, stageH * 0.52, stageW * 0.17, 40, 13, "open_ui", { targetUiId: almanacId })] : []),
+          ...(mapId ? [button(`${name} Map`, "Map", stageW * 0.15, stageH * 0.63, stageW * 0.17, 40, 13, "open_ui", { targetUiId: mapId })] : []),
+          ...(relationshipId ? [button(`${name} People`, "People", stageW * 0.35, stageH * 0.63, stageW * 0.17, 40, 13, "open_ui", { targetUiId: relationshipId })] : []),
+          ...(settingsId && settingsId !== idByName[name] ? [button(`${name} Settings`, "Settings", stageW * 0.55, stageH * 0.63, stageW * 0.17, 40, 13, "open_ui", { targetUiId: settingsId })] : []),
+          closeButton(name),
+        ];
+      }
+
+      if (lower.includes("inspect item")) {
+        return [
+          ...screenShell(name, "Inspect Item"),
+          smartRegion("inventory_grid", "Inspectable Item Slots", stageW * 0.14, stageH * 0.24, stageW * 0.28, stageH * 0.42, 12, {
+            uiEmptyText: "Select an item",
+            cursor: "pointer",
+          }),
+          smartRegion("journal_text", "Item Detail Region", stageW * 0.47, stageH * 0.24, stageW * 0.32, stageH * 0.42, 12, {
+            uiEmptyText: "Item notes and use text",
+          }),
+          button("Use Inspected Item", "Use", stageW * 0.47, stageH * 0.7, stageW * 0.12, 36, 13, "set_flag", {
+            interactionData: "used_selected_item",
+          }),
+          ...(inventoryId ? [button("Back To Inventory", "Back", stageW * 0.62, stageH * 0.7, stageW * 0.12, 36, 13, "open_ui", { targetUiId: inventoryId })] : []),
+          closeButton(name),
+        ];
+      }
+
+      if (lower.includes("inventory") || lower.includes("item wheel") || lower.includes("equipment") || lower.includes("loadout")) {
+        return [
+          ...screenShell(name, "Inventory"),
+          smartRegion("inventory_grid", "Live Item Grid", stageW * 0.13, stageH * 0.22, stageW * 0.4, stageH * 0.42, 12, {
+            uiGridColumns: 4,
+            uiGridRows: 3,
+            uiEmptyText: "No items collected yet",
+            cursor: "pointer",
+          }),
+          smartRegion("journal_text", "Selected Item Notes", stageW * 0.57, stageH * 0.22, stageW * 0.28, stageH * 0.2, 12, {
+            uiEmptyText: "Item details",
+          }),
+          smartRegion("stat_list", "Inventory Stats", stageW * 0.57, stageH * 0.48, stageW * 0.28, stageH * 0.16, 12),
+          ...(inspectId ? [button("Open Item Inspector", "Inspect", stageW * 0.14, stageH * 0.7, stageW * 0.13, 36, 13, "open_ui", { targetUiId: inspectId })] : []),
+          ...(craftId ? [button("Open Crafting From Inventory", "Craft", stageW * 0.3, stageH * 0.7, stageW * 0.13, 36, 13, "open_ui", { targetUiId: craftId })] : []),
+          ...navButtons(name, stageH * 0.78),
+          closeButton(name),
+        ];
+      }
+
+      if (lower.includes("quest")) {
+        return [
+          ...screenShell(name, "Quest Log"),
+          smartRegion("quest_list", "Live Quest Step List", stageW * 0.14, stageH * 0.23, stageW * 0.34, stageH * 0.48, 12),
+          smartRegion("journal_text", "Quest Detail Notes", stageW * 0.53, stageH * 0.23, stageW * 0.31, stageH * 0.48, 12, {
+            uiEmptyText: "Tracked objective details",
+          }),
+          ...navButtons(name),
+          closeButton(name),
+        ];
+      }
+
+      if (lower.includes("almanac") || lower.includes("codex") || lower.includes("journal") || lower.includes("lore") || lower.includes("gallery") || lower.includes("collectable")) {
+        return [
+          ...screenShell(name, lower.includes("almanac") ? "Almanac" : name),
+          panel(`${name} Index`, stageW * 0.13, stageH * 0.23, stageW * 0.22, stageH * 0.48, 11, "rgba(255,255,255,0.04)"),
+          text(`${name} Index Label`, "LORE / JOURNAL / QUEST NOTES", stageW * 0.16, stageH * 0.28, stageW * 0.16, 70, 12, 12),
+          smartRegion("journal_text", `${name} Entry Text`, stageW * 0.4, stageH * 0.23, stageW * 0.44, stageH * 0.48, 12, {
+            uiEmptyText: "Unlocked lore appears here",
+            uiTextSource: "all",
+          }),
+          ...navButtons(name),
+          closeButton(name),
+        ];
+      }
+
+      if (lower.includes("map") || lower.includes("stage select")) {
+        return [
+          ...screenShell(name, "Map"),
+          panel(`${name} Art Surface`, stageW * 0.14, stageH * 0.23, stageW * 0.56, stageH * 0.47, 11, "rgba(5,20,28,0.62)"),
+          text(`${name} Hint`, "Drop map art here, then add location buttons that change rooms.", stageW * 0.2, stageH * 0.42, stageW * 0.42, 70, 12, 14),
+          button(`${name} Location 1`, "Location", stageW * 0.48, stageH * 0.34, stageW * 0.14, 36, 13, "scene_change", {
+            interactionData: project.scenes.find((scene) => scene.id !== project.currentSceneId)?.id || project.scenes[0]?.id || "",
+          }),
+          ...navButtons(name),
+          closeButton(name),
+        ];
+      }
+
+      if (lower.includes("craft")) {
+        return [
+          ...screenShell(name, "Crafting"),
+          panel("Recipe Browser", stageW * 0.14, stageH * 0.24, stageW * 0.28, stageH * 0.43, 11, "rgba(255,255,255,0.04)"),
+          text("Recipe Browser Label", "RECIPES", stageW * 0.17, stageH * 0.29, stageW * 0.2, 28, 12, 14),
+          smartRegion("inventory_grid", "Crafting Item Slots", stageW * 0.48, stageH * 0.24, stageW * 0.32, stageH * 0.34, 12, {
+            uiGridColumns: 3,
+            uiGridRows: 3,
+            uiEmptyText: "Required items",
+            cursor: "pointer",
+          }),
+          button("Craft Selected Recipe", "Craft", stageW * 0.55, stageH * 0.64, stageW * 0.14, 38, 13, "open_crafting"),
+          ...navButtons(name),
+          closeButton(name),
+        ];
+      }
+
+      if (lower.includes("relationship") || lower.includes("character") || lower.includes("roster")) {
+        return [
+          ...screenShell(name, "People"),
+          panel("Roster List", stageW * 0.14, stageH * 0.24, stageW * 0.28, stageH * 0.44, 11, "rgba(255,255,255,0.04)"),
+          smartRegion("journal_text", "Character Detail Notes", stageW * 0.47, stageH * 0.24, stageW * 0.33, stageH * 0.27, 12, {
+            uiEmptyText: "Character notes",
+          }),
+          smartRegion("stat_list", "Relationship Meter Region", stageW * 0.47, stageH * 0.56, stageW * 0.33, stageH * 0.12, 12),
+          ...navButtons(name),
+          closeButton(name),
+        ];
+      }
+
+      if (lower.includes("setting") || lower.includes("save") || lower.includes("load")) {
+        return [
+          ...screenShell(name, "Settings"),
+          button("Toggle Mute Button", "Mute / Unmute", stageW * 0.18, stageH * 0.28, stageW * 0.2, 42, 13, "toggle_mute"),
+          button("Save Game Button", "Save Game", stageW * 0.18, stageH * 0.4, stageW * 0.2, 42, 13, "save_game"),
+          button("Load Game Button", "Load Game", stageW * 0.43, stageH * 0.4, stageW * 0.2, 42, 13, "load_game"),
+          button("Fullscreen Button", "Fullscreen", stageW * 0.43, stageH * 0.28, stageW * 0.2, 42, 13, "toggle_fullscreen"),
+          ...navButtons(name),
+          closeButton(name),
+        ];
+      }
+
+      return [
+        ...screenShell(name),
+        smartRegion("journal_text", `${name} Main Text`, stageW * 0.15, stageH * 0.25, stageW * 0.5, stageH * 0.36, 12, {
+          uiEmptyText: "Screen content",
+        }),
+        ...navButtons(name),
+        closeButton(name),
+      ];
+    };
+
+    const menus = uniqueNames.map((name): Scene => {
+      const lower = name.toLowerCase();
+      const resolvedTemplate = resolveInterfacePresetTemplate("modal", name);
+      const isHud =
+        resolvedTemplate === "hud" ||
+        lower.includes("hud") ||
+        lower.includes("action bar") ||
+        lower.includes("button prompt");
+      return {
+        id: idByName[name],
+        name,
+        width: stageW,
+        height: stageH,
+        backgroundColor: "transparent",
+        objects: buildObjects(name),
+        blocksClicks: !isHud,
+        isOpenByDefault: isHud,
+        closeOnClickOutside: !isHud,
+      };
+    });
+
+    const generatedNames = new Set(uniqueNames);
+    pushHistory({
+      ...project,
+      uiMenus: [
+        ...(project.uiMenus || []).filter((menu) => !generatedNames.has(menu.name)),
+        ...menus,
+      ],
+      currentUiMenuId: menus[0]?.id || project.currentUiMenuId,
+      globalSettings: {
+        ...project.globalSettings,
+        hideAllDefaultHud: true,
+        enableAlmanacHud: true,
+        enableMapHud: true,
+        enableSettingsHud: true,
+        enableSkillsHud: true,
+      },
+    });
+    setEditorMode("ui_stage");
+    setInterfaceStudioPane("screens");
+    setHideEditorHud(false);
+    setSelectedObjectId(menus[0]?.objects[0]?.id || null);
+    showError(`${kitLabel} created ${menus.length} linked interface screen${menus.length === 1 ? "" : "s"}.`);
+  };
+
+  const createActiveInterfaceCategoryKit = () => {
+    const group =
+      INTERFACE_PRESET_GROUPS.find(
+        (candidate) => candidate.id === activeInterfacePresetGroup,
+      ) || INTERFACE_PRESET_GROUPS[0];
+    createInterfaceScreenKit(group.presets, `${group.title} kit`);
+  };
+
+  const createPointClickAdventureKit = () => {
+    createInterfaceScreenKit(
+      [
+        "HUD Action Bar",
+        "Player Menu",
+        "Inventory",
+        "Inspect Item",
+        "Quest Log",
+        "Almanac",
+        "World Map",
+        "Crafting",
+        "Relationships",
+        "Settings Menu",
+        "Pause Menu",
+      ],
+      "Point-and-click adventure UI kit",
+    );
   };
 
   const createSmartUiRegion = (kind: SmartUiRegionKind) => {
@@ -8693,6 +9174,67 @@ const App: React.FC = () => {
                   >
                     <Type size={14} />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAssetPickerCb({
+                        title: "Choose sound cue",
+                        helperText:
+                          "Pick audio to place a visible sound cue on this canvas. Select the cue to adjust click actions, trim, volume, and conditions.",
+                        filterType: "audio",
+                        selectLabel: "Place sound cue",
+                        onSelect: (id) => {
+                          const asset = project.assets.find((a) => a.id === id);
+                          if (asset) handleInsertAssetToStage(asset);
+                          setAssetPickerCb(null);
+                        },
+                      })
+                    }
+                    className="rounded border border-indigo-400/40 bg-neutral-950/90 p-2 text-indigo-200 hover:bg-indigo-500/15"
+                    title="Add sound cue"
+                  >
+                    <Music size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      createInterfaceTemplate("inventory", { name: "Inventory" })
+                    }
+                    className="rounded border border-emerald-400/40 bg-neutral-950/90 px-2 py-1 text-xs font-bold text-emerald-100 hover:bg-emerald-500/15"
+                    title="Create or open the Inventory Screen UI canvas"
+                  >
+                    Inventory
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      createInterfaceTemplate("inventory", { name: "Inspect Item" })
+                    }
+                    className="rounded border border-amber-400/40 bg-neutral-950/90 px-2 py-1 text-xs font-bold text-amber-100 hover:bg-amber-500/15"
+                    title="Create or open the Item Inspector Screen UI canvas"
+                  >
+                    Item inspector
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      createInterfaceTemplate("hud", { name: "Objective Chip" })
+                    }
+                    className="rounded border border-fuchsia-400/40 bg-neutral-950/90 px-2 py-1 text-xs font-bold text-fuchsia-100 hover:bg-fuchsia-500/15"
+                    title="Create or open an always-visible quest objective HUD"
+                  >
+                    Objective HUD
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      createInterfaceTemplate("journal", { name: "Almanac" })
+                    }
+                    className="rounded border border-blue-400/40 bg-neutral-950/90 px-2 py-1 text-xs font-bold text-blue-100 hover:bg-blue-500/15"
+                    title="Create or open the Almanac Screen UI canvas"
+                  >
+                    Almanac GUI
+                  </button>
                 </div>
               )}
 
@@ -9021,7 +9563,7 @@ const App: React.FC = () => {
 
               <div
                 data-play-cursor-surface={isPlaying ? "true" : undefined}
-                className={`studio-stage-frame relative mx-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 overflow-visible ${isPlaying ? "border-transparent" : "border-neutral-800 border"}`}
+                className={`studio-stage-frame relative mx-auto my-auto shadow-[0_0_100px_rgba(0,0,0,0.5)] shrink-0 overflow-visible ${isPlaying ? "border-transparent" : "border-neutral-800 border"} ${draggingId || resizingId || rotatingId || selectionStart ? "is-transforming" : ""}`}
                 style={{
                   width: showDeviceFrame
                     ? deviceFrame!.outerWidth
@@ -9058,7 +9600,7 @@ const App: React.FC = () => {
                           overflow: "hidden",
                         }}
                       >
-                        {bgScene.objects
+                        {[...bgScene.objects]
                           .filter(
                             (obj) =>
                               !deviceFrame ||
@@ -9253,8 +9795,7 @@ const App: React.FC = () => {
                       )}
 
                       {/* Render Stage Objects */}
-                      {currentScene.objects
-                        .sort((a, b) => a.zIndex - b.zIndex)
+                      {currentSceneObjectsForRender
                         .map((obj) => {
                           if (isPlaying && collectedObjects.includes(obj.id))
                             return null;
@@ -9298,10 +9839,15 @@ const App: React.FC = () => {
                             (obj.id === selectedObjectId ||
                               selectedMultiIds.includes(obj.id)) &&
                             !activeUiMenus.length;
+                          const transientEdit = transientObjectEdits[obj.id];
+                          const renderWidth = transientEdit?.width ?? obj.width;
+                          const renderHeight = transientEdit?.height ?? obj.height;
                           const phys = physicsState[obj.id];
-                          let renderX = phys ? phys.x : obj.x;
-                          let renderY = phys ? phys.y : obj.y;
-                          const renderRot = phys ? phys.rotation : obj.rotation;
+                          let renderX = transientEdit?.x ?? (phys ? phys.x : obj.x);
+                          let renderY = transientEdit?.y ?? (phys ? phys.y : obj.y);
+                          const renderRot =
+                            transientEdit?.rotation ??
+                            (phys ? phys.rotation : obj.rotation);
 
                           if (isPlaying && runtimeOverrides[obj.id]) {
                             const ov = runtimeOverrides[obj.id];
@@ -9321,8 +9867,8 @@ const App: React.FC = () => {
 
                           const isOutOfBounds =
                             !isPlaying &&
-                            (renderX + obj.width < 0 ||
-                              renderY + obj.height < 0 ||
+                            (renderX + renderWidth < 0 ||
+                              renderY + renderHeight < 0 ||
                               renderX > stageW ||
                               renderY > stageH);
 
@@ -9385,6 +9931,9 @@ const App: React.FC = () => {
                           return (
                             <div
                               key={obj.id}
+                              ref={(element) => {
+                                objectElementRefs.current[obj.id] = element;
+                              }}
                               onClick={() => {
                                 const anyBlockingUi = activeUiMenus.some(
                                   (id) =>
@@ -9483,8 +10032,8 @@ const App: React.FC = () => {
                                 filter: filterStr || undefined,
                                 left: obj.stretchToScreen ? 0 : renderX,
                                 top: obj.stretchToScreen ? 0 : renderY,
-                                width: obj.stretchToScreen ? "100%" : obj.width,
-                                height: obj.stretchToScreen ? "100%" : obj.height,
+                                width: obj.stretchToScreen ? "100%" : renderWidth,
+                                height: obj.stretchToScreen ? "100%" : renderHeight,
                                 zIndex: Math.max(0, obj.zIndex),
                                 opacity: obj.hidden
                                   ? (isPlaying ? 0 : 0.2)
@@ -10100,7 +10649,7 @@ const App: React.FC = () => {
                                   </div>
                                   {resizingId === obj.id && (
                                     <div className="pointer-events-none absolute -bottom-10 right-0 z-[8000] whitespace-nowrap rounded border border-emerald-400/60 bg-neutral-950/95 px-2 py-1 font-mono text-[10px] font-bold text-emerald-300 shadow-xl">
-                                      {Math.round(obj.width)} × {Math.round(obj.height)}
+                                      {Math.round(renderWidth)} × {Math.round(renderHeight)}
                                       {resizeStart.preserveAspect &&
                                       resizeStart.anchor.length === 2
                                         ? " · freeform (Shift keeps shape)"
@@ -10221,7 +10770,7 @@ const App: React.FC = () => {
                             pointerEvents: "none",
                           }}
                         >
-                          {uiMenu.objects
+                          {[...uiMenu.objects]
                             .sort((a, b) => a.zIndex - b.zIndex)
                             .map((obj) => {
                             if (isPlaying && collectedObjects.includes(obj.id))
@@ -17979,84 +18528,37 @@ const App: React.FC = () => {
                             label="First Click Response"
                             helpText="Choose the first thing this object does. Add more responses underneath."
                           />
-                          <select
-                            value={selectedObject.interaction}
-                            onChange={(e) =>
-                              updateObject(selectedObject.id, {
-                                interaction: e.target
-                                  .value as InteractionType,
-                              })
-                            }
-                            className="mt-1 w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1.5 text-sm"
-                          >
-                                <option value="none">None (No Action)</option>
-
-                                <optgroup label="Story & Dialogues">
-                                  <option value="dialogue">Start Conversation (Dialogue Tree)</option>
-                                  <option value="set_flag">Set Story Flag</option>
-                                  <option value="clear_flag">Clear Story Flag</option>
-                                  <option value="toggle_flag">Toggle Story Flag</option>
-                                  <option value="skill_check">Skill Check (Attributes/Dice)</option>
-                                </optgroup>
-
-                                <optgroup label="Object Visibility">
-                                  <option value="show_object">Show Another Object</option>
-                                  <option value="hide_object">Hide Another Object</option>
-                                  <option value="toggle_object">Toggle Another Object</option>
-                                </optgroup>
-
-                                <optgroup label="Items & Inventory">
-                                  <option value="give-item">Give Item to Player</option>
-                                  <option value="collect">Collect Item (And Hide Object)</option>
-                                  <option value="open_crafting">Open Crafting Menu</option>
-                                </optgroup>
-
-                                <optgroup label="Navigation & Scenes (Maps)">
-                                  <option value="scene_change">Change Room / Teleport Map</option>
-                                  <option value="open_map">Open Fast Travel Map</option>
-                                </optgroup>
-
-	                                <optgroup label="Quests & Lore">
-	                                  <option value="start_quest">Start Quest</option>
-	                                  <option value="complete_quest_objective">Complete Quest Step</option>
-	                                  <option value="complete_quest">Complete Quest (Force)</option>
-	                                  <option value="open_quest_log">Open Quest Log</option>
-	                                  <option value="open_almanac">Open Almanac / Lore</option>
-	                                  <option value="unlock_lore_entry">Unlock Lore / Journal Entry</option>
-	                                  <option value="show_lore_entry">Show Lore Popup</option>
-	                                  <option value="open_relationships">Open Relationships Menu</option>
-	                                </optgroup>
-
-                                <optgroup label="Overlays & Interface">
-                                  <option value="open_ui">Open Screen UI</option>
-                                  <option value="close_ui">Close Screen UI</option>
-                                  <option value="toggle_inventory">Toggle Built-in Inventory</option>
-                                  <option value="toggle_needs_hud">Toggle Needs HUD</option>
-                                  <option value="toggle_skills_hud">Toggle Skills HUD</option>
-                                  <option value="open_skills">Open Skills Menu</option>
-                                  <option value="open_settings">Open Player Settings</option>
-                                  <option value="gift_item">Give Selected Item to Character</option>
-                                </optgroup>
-
-                                <optgroup label="Media & Code">
-                                  <option value="play_cutscene">Play Fullscreen Video (Cutscene)</option>
-                                  <option value="sound">Play SFX / Audio</option>
-                                  <option value="run_script">Execute Custom Script</option>
-                                  <option value="link">Open Web URL</option>
-                                  <option value="modify_number">Modify Number Var (Progress/Text)</option>
-                                </optgroup>
-
-                                <optgroup label="System Controls">
-                                  <option value="save_game">Save Game State</option>
-                                  <option value="load_game">Load Game State</option>
-                                  <option value="restart_scene">Restart Current Region</option>
-                                  <option value="restart_game">Restart Full Game</option>
-                                  <option value="advance_day">Advance to Next Day</option>
-                                  <option value="toggle_fullscreen">Toggle Fullscreen</option>
-                                  <option value="toggle_mute">Toggle Audio Mute</option>
-                                  <option value="exit_game">Close Game Execution</option>
-                                </optgroup>
-                          </select>
+                          <div className="mt-1">
+                            <ClickResponseTypePicker
+                              value={selectedObject.interaction}
+                              targetUiId={selectedObject.targetUiId}
+                              uiMenus={project.uiMenus || []}
+                              onChange={(interaction) =>
+                                updateObject(selectedObject.id, {
+                                  interaction,
+                                  targetUiId:
+                                    interaction === "open_ui" ||
+                                    interaction === "close_ui"
+                                      ? selectedObject.targetUiId
+                                      : "",
+                                })
+                              }
+                              onChooseAction={(updates) =>
+                                updateObject(selectedObject.id, {
+                                  interaction:
+                                    updates.interaction ||
+                                    selectedObject.interaction,
+                                  targetUiId:
+                                    updates.targetUiId !== undefined
+                                      ? updates.targetUiId
+                                      : updates.interaction === "open_ui" ||
+                                          updates.interaction === "close_ui"
+                                        ? selectedObject.targetUiId
+                                        : "",
+                                })
+                              }
+                            />
+                          </div>
 
                           {selectedObject.interaction !== "none" && (
                             <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-neutral-800">
@@ -20933,6 +21435,14 @@ const App: React.FC = () => {
                       Pick a player-facing screen first. Cavebot opens a canvas where you can drop your own art, then draw live zones for items, journal text, quest steps, maps, or meters.
                     </p>
                   </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={createPointClickAdventureKit}
+                      className="rounded-xl border border-cyan-300/50 bg-cyan-400/15 px-3 py-2 font-comic text-sm font-bold text-cyan-100 hover:bg-cyan-400/25"
+                    >
+                      Build adventure kit
+                    </button>
                   {interfaceStudioPane === "workshop" && (
                     <button
                       type="button"
@@ -20942,6 +21452,7 @@ const App: React.FC = () => {
                       Advanced: generate HUD kit
                     </button>
                   )}
+                  </div>
                 </div>
 
                 <div className="interface-pane-tabs" role="tablist" aria-label="Interface Studio sections">
@@ -21135,6 +21646,13 @@ const App: React.FC = () => {
                     <span className="mock-panel mock-panel--side" />
                     <span className="mock-panel mock-panel--bottom" />
                   </div>
+                  <button
+                    type="button"
+                    onClick={createActiveInterfaceCategoryKit}
+                    className="interface-action-button interface-action-button--green mt-3 w-full justify-center"
+                  >
+                    Build this category
+                  </button>
                 </div>
                 <div className="interface-preset-list custom-scrollbar">
                   {activeInterfaceGroup.presets.map((preset) => {
@@ -24147,22 +24665,36 @@ const App: React.FC = () => {
                                     Player-facing lore, journal pages, and quest notes that can unlock from story flags.
                                   </p>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const remaining = entries.filter(
-                                      (entry) => entry.id !== selectedEntry.id,
-                                    );
-                                    pushHistory({
-                                      ...project,
-                                      loreEntries: remaining,
-                                    });
-                                    setActiveLoreEntryId(remaining[0]?.id || null);
-                                  }}
-                                  className="rounded border border-red-400/40 bg-red-500/10 px-3 py-1.5 text-xs font-bold text-red-300 hover:bg-red-500/20"
-                                >
-                                  Delete Entry
-                                </button>
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      createInterfaceTemplate("journal", {
+                                        name: "Almanac",
+                                      })
+                                    }
+                                    className="rounded border border-blue-400/50 bg-blue-500/10 px-3 py-1.5 text-xs font-bold text-blue-100 hover:bg-blue-500/20"
+                                    title="Open a Screen UI canvas with live almanac text/index regions."
+                                  >
+                                    Build Almanac GUI
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const remaining = entries.filter(
+                                        (entry) => entry.id !== selectedEntry.id,
+                                      );
+                                      pushHistory({
+                                        ...project,
+                                        loreEntries: remaining,
+                                      });
+                                      setActiveLoreEntryId(remaining[0]?.id || null);
+                                    }}
+                                    className="rounded border border-red-400/40 bg-red-500/10 px-3 py-1.5 text-xs font-bold text-red-300 hover:bg-red-500/20"
+                                  >
+                                    Delete Entry
+                                  </button>
+                                </div>
                               </div>
 
                               <div className="grid gap-3 md:grid-cols-[10rem_minmax(0,1fr)]">
@@ -24887,7 +25419,7 @@ const App: React.FC = () => {
                               {(quest.objectives || []).map((obj, objectiveIdx) => (
                                 <div
                                   key={obj.id}
-                                  className="p-4 border border-neutral-800 bg-neutral-950 rounded-lg relative group"
+                                  className="quest-step-card p-4 border border-neutral-800 bg-neutral-950 rounded-lg relative overflow-visible group"
                                 >
                                   <button
                                     onClick={() => {
@@ -24923,12 +25455,13 @@ const App: React.FC = () => {
                                       {getQuestObjectiveTargetLabel(project, obj)}
                                     </span>
                                   </div>
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="quest-objective-controls grid gap-4 md:grid-cols-2">
                                     <div>
                                       <LabelWithHelp
                                         label="Step Trigger"
                                         className="uppercase block mb-1"
                                         helpText="The condition the player must meet to complete this objective."
+                                        hideTooltip
                                       />
                                       <select
                                         value={obj.type}
@@ -24981,6 +25514,7 @@ const App: React.FC = () => {
                                         label="Linked Target"
                                         className="uppercase block mb-1"
                                         helpText="Which dialogue tree, item, scene, skill, or event completes this objective."
+                                        hideTooltip
                                       />
                                       {obj.type === "custom_flag" && (
                                         <select
@@ -25209,6 +25743,7 @@ const App: React.FC = () => {
                                         label="Required Count / Level"
                                         className="uppercase block mb-1"
                                         helpText="For talk objectives: how many conversations. For skills: minimum level."
+                                        hideTooltip
                                       />
                                       <input
                                         type="number"
@@ -25250,6 +25785,7 @@ const App: React.FC = () => {
                                       label="Journal Text"
                                       className="uppercase block mb-1"
                                       helpText="What to display to the player as their objective (e.g. 'Find the hidden key')."
+                                      hideTooltip
                                     />
                                     <input
                                       type="text"

@@ -1733,7 +1733,7 @@ export function generateExportHtml(sourceProject: Project): string {
       const scaleWrapper = document.getElementById('scale-wrapper');
       
       let currentScale = 1;
-      const baseDevicePixelRatio = window.devicePixelRatio || 1;
+      let playerZoom = 1;
       const resizeGame = () => {
         const gameW = ${layoutWidth};
         let gameH = ${layoutHeight};
@@ -1753,15 +1753,30 @@ export function generateExportHtml(sourceProject: Project): string {
             (maxGameH - viewportPadding * 2) / gameH,
           ),
         );
-        const browserZoomRatio = Math.max(
-          0.5,
-          Math.min(3, (window.devicePixelRatio || baseDevicePixelRatio) / baseDevicePixelRatio),
-        );
-        currentScale = Math.max(0.05, Math.min(3, fitScale * browserZoomRatio));
+        currentScale = Math.max(0.05, Math.min(4, fitScale * playerZoom));
         gamePositioner.style.transform =
           'translate(-50%, -50%) scale(' + currentScale + ')';
         gamePositioner.style.transformOrigin = 'center center';
       };
+      const applyPlayerZoom = (delta) => {
+        playerZoom = Math.max(0.25, Math.min(4, Number((playerZoom + delta).toFixed(2))));
+        resizeGame();
+      };
+      document.addEventListener('keydown', (event) => {
+        if (!(event.ctrlKey || event.metaKey)) return;
+        const key = event.key;
+        if (key === '+' || key === '=') {
+          event.preventDefault();
+          applyPlayerZoom(0.1);
+        } else if (key === '-' || key === '_') {
+          event.preventDefault();
+          applyPlayerZoom(-0.1);
+        } else if (key === '0') {
+          event.preventDefault();
+          playerZoom = 1;
+          resizeGame();
+        }
+      });
       window.addEventListener('resize', resizeGame);
       if (window.visualViewport) {
         window.visualViewport.addEventListener('resize', resizeGame);

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -59,59 +59,91 @@ interface ClickResponseEditorProps {
   startNumber?: number;
 }
 
-const responseChoices: Array<{
+type ResponseChoice = {
   interaction: InteractionType;
   label: string;
   icon: React.ElementType;
-}> = [
-  { interaction: "dialogue", label: "Say or Show Something", icon: MessageSquare },
-  { interaction: "sound", label: "Play Sound", icon: Music },
-  { interaction: "give-item", label: "Give Item", icon: Gift },
-  { interaction: "collect", label: "Pick Up and Remove", icon: Gift },
-  { interaction: "set_flag", label: "Remember Something", icon: Flag },
-  { interaction: "scene_change", label: "Go Somewhere Else", icon: MapPin },
-  { interaction: "start_quest", label: "Start Quest", icon: BookOpen },
-  { interaction: "complete_quest_objective", label: "Complete Quest Step", icon: BookOpen },
-  { interaction: "complete_quest", label: "Complete Quest", icon: BookOpen },
-  { interaction: "unlock_lore_entry", label: "Unlock Lore / Journal", icon: BookOpen },
-  { interaction: "show_lore_entry", label: "Show Lore Popup", icon: BookOpen },
-  { interaction: "open_ui", label: "Open Menu or HUD", icon: Wand2 },
-  { interaction: "play_cutscene", label: "Play Cutscene", icon: Video },
-  { interaction: "link", label: "Open Link", icon: Link },
-  { interaction: "toggle_inventory", label: "Open Inventory", icon: Backpack },
-];
+};
 
-const advancedResponseChoices: Array<{
-  interaction: InteractionType;
+const responseChoiceGroups: Array<{
   label: string;
-  icon: React.ElementType;
+  choices: ResponseChoice[];
 }> = [
-  { interaction: "open_crafting", label: "Open Crafting", icon: Hammer },
-  { interaction: "open_quest_log", label: "Open Quest Log", icon: BookOpen },
-  { interaction: "open_map", label: "Open Map", icon: MapPin },
-  { interaction: "open_skills", label: "Open Skills", icon: Wand2 },
-  { interaction: "open_almanac", label: "Open Almanac", icon: BookOpen },
-  { interaction: "open_relationships", label: "Open Relationships", icon: Users },
-  { interaction: "open_settings", label: "Open Settings", icon: Settings },
-  { interaction: "toggle_needs_hud", label: "Toggle Needs HUD", icon: Wand2 },
-  { interaction: "toggle_skills_hud", label: "Toggle Skills HUD", icon: Wand2 },
-  { interaction: "clear_flag", label: "Forget Flag", icon: Flag },
-  { interaction: "toggle_flag", label: "Toggle Flag", icon: Flag },
-  { interaction: "show_object", label: "Show Object", icon: Eye },
-  { interaction: "hide_object", label: "Hide Object", icon: EyeOff },
-  { interaction: "toggle_object", label: "Toggle Object", icon: Eye },
-  { interaction: "gift_item", label: "Give Gift to Character", icon: Gift },
-  { interaction: "run_script", label: "Run Script", icon: Wand2 },
-  { interaction: "save_game", label: "Save Game", icon: Save },
-  { interaction: "load_game", label: "Load Game", icon: Save },
-  { interaction: "restart_scene", label: "Restart Room", icon: RotateCw },
-  { interaction: "restart_game", label: "Restart Game", icon: RotateCw },
-  { interaction: "toggle_fullscreen", label: "Toggle Fullscreen", icon: Settings },
-  { interaction: "toggle_mute", label: "Toggle Mute", icon: Music },
-  { interaction: "advance_day", label: "Advance Day", icon: RotateCw },
+  {
+    label: "Story",
+    choices: [
+      { interaction: "dialogue", label: "Say / Talk", icon: MessageSquare },
+      { interaction: "set_flag", label: "Set Story Flag", icon: Flag },
+      { interaction: "clear_flag", label: "Clear Story Flag", icon: Flag },
+      { interaction: "toggle_flag", label: "Toggle Story Flag", icon: Flag },
+      { interaction: "skill_check", label: "Skill Check", icon: Wand2 },
+    ],
+  },
+  {
+    label: "Items",
+    choices: [
+      { interaction: "give-item", label: "Give Item", icon: Gift },
+      { interaction: "collect", label: "Pick Up + Hide", icon: Gift },
+      { interaction: "open_crafting", label: "Open Crafting", icon: Hammer },
+      { interaction: "gift_item", label: "Gift Selected Item", icon: Gift },
+    ],
+  },
+  {
+    label: "Quests / Lore",
+    choices: [
+      { interaction: "start_quest", label: "Start Quest", icon: BookOpen },
+      { interaction: "complete_quest_objective", label: "Complete Quest Step", icon: BookOpen },
+      { interaction: "complete_quest", label: "Complete Quest", icon: BookOpen },
+      { interaction: "open_quest_log", label: "Open Quest Log", icon: BookOpen },
+      { interaction: "open_almanac", label: "Open Almanac", icon: BookOpen },
+      { interaction: "unlock_lore_entry", label: "Unlock Lore / Journal", icon: BookOpen },
+      { interaction: "show_lore_entry", label: "Show Lore Popup", icon: BookOpen },
+      { interaction: "open_relationships", label: "Open Relationships", icon: Users },
+    ],
+  },
+  {
+    label: "Scene / Objects",
+    choices: [
+      { interaction: "scene_change", label: "Go to Scene", icon: MapPin },
+      { interaction: "open_map", label: "Open Map", icon: MapPin },
+      { interaction: "show_object", label: "Show Object", icon: Eye },
+      { interaction: "hide_object", label: "Hide Object", icon: EyeOff },
+      { interaction: "toggle_object", label: "Toggle Object", icon: Eye },
+      { interaction: "modify_number", label: "Change Meter / Text", icon: Wand2 },
+    ],
+  },
+  {
+    label: "Interface",
+    choices: [
+      { interaction: "open_ui", label: "Open Screen UI", icon: Wand2 },
+      { interaction: "close_ui", label: "Close Screen UI", icon: X },
+      { interaction: "toggle_inventory", label: "Open Inventory", icon: Backpack },
+      { interaction: "toggle_needs_hud", label: "Toggle Needs HUD", icon: Wand2 },
+      { interaction: "toggle_skills_hud", label: "Toggle Skills HUD", icon: Wand2 },
+      { interaction: "open_skills", label: "Open Skills", icon: Wand2 },
+      { interaction: "open_settings", label: "Open Settings", icon: Settings },
+    ],
+  },
+  {
+    label: "Media / System",
+    choices: [
+      { interaction: "sound", label: "Play Sound", icon: Music },
+      { interaction: "play_cutscene", label: "Play Cutscene", icon: Video },
+      { interaction: "run_script", label: "Run Script", icon: Wand2 },
+      { interaction: "link", label: "Open Link", icon: Link },
+      { interaction: "save_game", label: "Save Game", icon: Save },
+      { interaction: "load_game", label: "Load Game", icon: Save },
+      { interaction: "restart_scene", label: "Restart Room", icon: RotateCw },
+      { interaction: "restart_game", label: "Restart Game", icon: RotateCw },
+      { interaction: "advance_day", label: "Advance Day", icon: RotateCw },
+      { interaction: "toggle_fullscreen", label: "Fullscreen", icon: Settings },
+      { interaction: "toggle_mute", label: "Mute Audio", icon: Music },
+      { interaction: "exit_game", label: "Stop Game", icon: X },
+    ],
+  },
 ];
 
-const allResponseChoices = [...responseChoices, ...advancedResponseChoices];
+const allResponseChoices = responseChoiceGroups.flatMap((group) => group.choices);
 
 const labelForInteraction = (interaction: InteractionType) =>
   allResponseChoices.find((choice) => choice.interaction === interaction)?.label ||
@@ -119,47 +151,118 @@ const labelForInteraction = (interaction: InteractionType) =>
 
 export const ClickResponseTypePicker: React.FC<{
   value: InteractionType;
+  targetUiId?: string;
+  uiMenus?: Scene[];
   onChange: (interaction: InteractionType) => void;
-}> = ({ value, onChange }) => (
-  <div className="grid grid-cols-2 gap-1.5">
-    <button
-      type="button"
-      onClick={() => onChange("none")}
-      className={`rounded border px-2 py-2 text-left text-[10px] font-bold ${
-        value === "none"
-          ? "border-emerald-400 bg-emerald-500/15 text-white"
-          : "border-neutral-800 bg-neutral-900 text-neutral-400 hover:text-white"
-      }`}
-    >
-      Do nothing
-    </button>
-    {responseChoices.map((choice) => {
-      const Icon = choice.icon;
-      return (
-        <button
-          key={choice.interaction}
-          type="button"
-          onClick={() => onChange(choice.interaction)}
-          className={`flex items-center gap-2 rounded border px-2 py-2 text-left text-[10px] font-bold ${
-            value === choice.interaction
-              ? "border-emerald-400 bg-emerald-500/15 text-white"
-              : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-emerald-500/40 hover:text-white"
-          }`}
-        >
-          <Icon
-            size={13}
-            className={
-              value === choice.interaction
-                ? "text-emerald-300"
-                : "text-pink-400"
-            }
-          />
-          {choice.label}
-        </button>
-      );
-    })}
-  </div>
-);
+  onChooseAction?: (updates: Partial<ClickResponse>) => void;
+}> = ({ value, targetUiId, uiMenus = [], onChange, onChooseAction }) => {
+  const choose = (updates: Partial<ClickResponse>) => {
+    if (onChooseAction) onChooseAction(updates);
+    else if (updates.interaction) onChange(updates.interaction);
+  };
+
+  return (
+    <div className="space-y-2 rounded border border-neutral-800 bg-neutral-950/70 p-2">
+      <button
+        type="button"
+        onClick={() => choose({ interaction: "none", targetUiId: "" })}
+        className={`w-full rounded border px-2 py-2 text-left text-[10px] font-bold ${
+          value === "none"
+            ? "border-emerald-400 bg-emerald-500/15 text-white"
+            : "border-neutral-800 bg-neutral-900 text-neutral-400 hover:text-white"
+        }`}
+      >
+        Do nothing
+      </button>
+      <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+        {uiMenus.length > 0 && (
+          <div>
+            <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-wide text-neutral-500">
+              Your Interface Screens
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {uiMenus.map((menu) => {
+                const isActive = value === "open_ui" && targetUiId === menu.id;
+                return (
+                  <button
+                    key={menu.id}
+                    type="button"
+                    onClick={() =>
+                      choose({
+                        interaction: "open_ui",
+                        targetUiId: menu.id,
+                      })
+                    }
+                    className={`flex min-h-[38px] items-center gap-2 rounded border px-2 py-2 text-left text-[10px] font-bold ${
+                      isActive
+                        ? "border-cyan-300 bg-cyan-500/15 text-white"
+                        : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-cyan-400/50 hover:text-white"
+                    }`}
+                  >
+                    <Wand2
+                      size={13}
+                      className={isActive ? "text-cyan-200" : "text-cyan-400"}
+                    />
+                    <span className="min-w-0">
+                      <span className="block truncate">{menu.name}</span>
+                      <span className="block truncate text-[8px] text-neutral-500">
+                        open this UI canvas
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {responseChoiceGroups.map((group) => (
+          <div key={group.label}>
+            <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-wide text-neutral-500">
+              {group.label}
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {group.choices.map((choice) => {
+                const Icon = choice.icon;
+                return (
+                  <button
+                    key={choice.interaction}
+                    type="button"
+                    onClick={() =>
+                      choose({
+                        interaction: choice.interaction,
+                        targetUiId:
+                          choice.interaction === "open_ui" ||
+                          choice.interaction === "close_ui"
+                            ? targetUiId || ""
+                            : "",
+                      })
+                    }
+                    className={`flex min-h-[38px] items-center gap-2 rounded border px-2 py-2 text-left text-[10px] font-bold ${
+                      value === choice.interaction &&
+                      (choice.interaction !== "open_ui" || !targetUiId)
+                        ? "border-emerald-400 bg-emerald-500/15 text-white"
+                        : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-emerald-500/40 hover:text-white"
+                    }`}
+                  >
+                    <Icon
+                      size={13}
+                      className={
+                        value === choice.interaction
+                          ? "text-emerald-300"
+                          : "text-pink-400"
+                      }
+                    />
+                    <span className="min-w-0">{choice.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
   responses,
@@ -181,7 +284,11 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
   description = "Add as many click responses as this object needs.",
   startNumber = 2,
 }) => {
-  const [isAdding, setIsAdding] = useState(false);
+  const [isAdding, setIsAdding] = useState(responses.length === 0);
+
+  useEffect(() => {
+    if (responses.length === 0) setIsAdding(true);
+  }, [responses.length]);
 
   const updateResponse = (id: string, updates: Partial<ClickResponse>) =>
     onChange(
@@ -262,30 +369,74 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
       </div>
 
       {isAdding && (
-        <div className="grid grid-cols-2 gap-1.5 rounded border border-neutral-700 bg-neutral-950 p-2">
-          {allResponseChoices.map((choice) => {
-            const Icon = choice.icon;
-            return (
-              <button
-                key={choice.interaction}
-                type="button"
-                onClick={() => {
-                  onChange([
-                    ...responses,
-                    {
-                      id: crypto.randomUUID(),
-                      interaction: choice.interaction,
-                    },
-                  ]);
-                  setIsAdding(false);
-                }}
-                className="flex items-center gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-2 text-left text-[10px] font-bold text-neutral-300 hover:border-emerald-500/50 hover:text-white"
-              >
-                <Icon size={13} className="text-pink-400" />
-                {choice.label}
-              </button>
-            );
-          })}
+        <div className="max-h-[52vh] space-y-3 overflow-y-auto rounded border border-neutral-700 bg-neutral-950 p-2 pr-1">
+          {uiMenus.length > 0 && (
+            <div>
+              <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-wide text-neutral-500">
+                Your Interface Screens
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {uiMenus.map((menu) => (
+                  <button
+                    key={menu.id}
+                    type="button"
+                    onClick={() => {
+                      onChange([
+                        ...responses,
+                        {
+                          id: crypto.randomUUID(),
+                          interaction: "open_ui",
+                          targetUiId: menu.id,
+                        },
+                      ]);
+                      setIsAdding(false);
+                    }}
+                    className="flex min-h-[38px] items-center gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-2 text-left text-[10px] font-bold text-neutral-300 hover:border-cyan-400/50 hover:text-white"
+                  >
+                    <Wand2 size={13} className="text-cyan-400" />
+                    <span className="min-w-0">
+                      <span className="block truncate">{menu.name}</span>
+                      <span className="block truncate text-[8px] text-neutral-500">
+                        open this UI canvas
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {responseChoiceGroups.map((group) => (
+            <div key={group.label}>
+              <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-wide text-neutral-500">
+                {group.label}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {group.choices.map((choice) => {
+                  const Icon = choice.icon;
+                  return (
+                    <button
+                      key={choice.interaction}
+                      type="button"
+                      onClick={() => {
+                        onChange([
+                          ...responses,
+                          {
+                            id: crypto.randomUUID(),
+                            interaction: choice.interaction,
+                          },
+                        ]);
+                        setIsAdding(false);
+                      }}
+                      className="flex min-h-[38px] items-center gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-2 text-left text-[10px] font-bold text-neutral-300 hover:border-emerald-500/50 hover:text-white"
+                    >
+                      <Icon size={13} className="text-pink-400" />
+                      <span className="min-w-0">{choice.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -384,6 +535,19 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
                   </option>
                 ))}
             </select>
+          )}
+
+          {response.interaction === "skill_check" && (
+            <textarea
+              value={response.interactionData || ""}
+              onChange={(event) =>
+                updateResponse(response.id, {
+                  interactionData: event.target.value,
+                })
+              }
+              placeholder="Success text. Uses this object's skill and DC settings."
+              className="min-h-16 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
+            />
           )}
 
           {(response.interaction === "give-item" ||
@@ -525,7 +689,8 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
             </select>
           )}
 
-          {response.interaction === "open_ui" && (
+          {(response.interaction === "open_ui" ||
+            response.interaction === "close_ui") && (
             <select
               value={response.targetUiId || ""}
               onChange={(event) =>
@@ -535,13 +700,61 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
               }
               className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
             >
-              <option value="">Choose UI…</option>
+              <option value="">
+                {response.interaction === "open_ui"
+                  ? "Choose UI…"
+                  : "Close top open UI"}
+              </option>
               {uiMenus.map((menu) => (
                 <option key={menu.id} value={menu.id}>
                   {menu.name}
                 </option>
               ))}
             </select>
+          )}
+
+          {response.interaction === "modify_number" && (
+            <div className="grid grid-cols-[1fr_90px] gap-2">
+              <select
+                value={response.targetUiId || ""}
+                onChange={(event) =>
+                  updateResponse(response.id, {
+                    targetUiId: event.target.value,
+                  })
+                }
+                className="min-w-0 rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
+              >
+                <option value="">Choose meter or text…</option>
+                {scenes.flatMap((scene) =>
+                  scene.objects
+                    .filter((object) => object.isUiElement || object.isText)
+                    .map((object) => (
+                      <option key={object.id} value={object.id}>
+                        {scene.name}: {object.name || object.id}
+                      </option>
+                    )),
+                )}
+                {uiMenus.flatMap((menu) =>
+                  menu.objects
+                    .filter((object) => object.isUiElement || object.isText)
+                    .map((object) => (
+                      <option key={object.id} value={object.id}>
+                        {menu.name}: {object.name || object.id}
+                      </option>
+                    )),
+                )}
+              </select>
+              <input
+                type="number"
+                value={response.interactionData || 0}
+                onChange={(event) =>
+                  updateResponse(response.id, {
+                    interactionData: event.target.value,
+                  })
+                }
+                className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
+              />
+            </div>
           )}
 
           {(response.interaction === "show_object" ||
@@ -650,6 +863,7 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
             "open_almanac",
             "open_relationships",
             "open_settings",
+            "exit_game",
             "save_game",
             "load_game",
             "restart_scene",

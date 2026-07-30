@@ -3041,6 +3041,22 @@ body,
   box-shadow: 0 0 58px rgb(0 0 0 / 0.32) !important;
 }
 
+.studio-stage-frame.is-transforming {
+  will-change: transform;
+}
+
+.studio-stage-frame.is-transforming .studio-canvas-stage {
+  contain: layout paint style;
+}
+
 .studio-canvas-stage {
   background-color: #30323a !important;
+}
+
+.quest-step-card {
+  overflow: visible !important;
+}
+
+.quest-objective-controls {
+  overflow: visible;
 }
