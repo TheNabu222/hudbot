@@ -1,0 +1,403 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Folder, Image as ImageIcon, Music, Search, X, Video, Star, Info, Wand2, Upload } from 'lucide-react';
+import { Asset } from '../types';
+
+interface AssetPickerModalProps {
+  assets: Asset[];
+  onSelect: (assetId: string) => void;
+  onClose: () => void;
+  title?: string;
+  helperText?: string;
+  selectLabel?: string;
+  filterType?: 'image' | 'audio' | 'video' | 'script' | 'text' | 'ui_element' | 'hitbox';
+  recentAssetIds?: string[];
+  canvasAssetIds?: string[];
+  onToggleFavorite?: (assetId: string) => void;
+  onUpdateAsset?: (assetId: string, updates: Partial<Asset>) => void;
+  onEditImage?: (assetId: string) => void;
+  repositoryFolders?: string[];
+  onOpenRepositoryFolder?: (path: string) => void;
+  onLoadRepositoryRoot?: () => void;
+  isLoadingRepository?: boolean;
+  onUploadFiles?: (files: File[]) => void;
+}
+
+export const AssetPickerModal: React.FC<AssetPickerModalProps> = ({
+  assets,
+  onSelect,
+  onClose,
+  title = 'Choose Asset',
+  helperText = 'Click an asset or use its action button.',
+  selectLabel = 'Use this asset',
+  filterType,
+  recentAssetIds = [],
+  canvasAssetIds = [],
+  onToggleFavorite,
+  onUpdateAsset,
+  onEditImage,
+  repositoryFolders = [],
+  onOpenRepositoryFolder,
+  onLoadRepositoryRoot,
+  isLoadingRepository = false,
+  onUploadFiles,
+}) => {
+  const initialVisibleAssets = 24;
+  const [activeBin, setActiveBin] = useState<string>('all');
+  const [assetSearch, setAssetSearch] = useState('');
+  const [editingInfoId, setEditingInfoId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(initialVisibleAssets);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  useEffect(() => {
+    setVisibleCount(initialVisibleAssets);
+  }, [activeBin, assetSearch, filterType]);
+
+  const filteredAssets = useMemo(() => {
+    const search = assetSearch.trim().toLowerCase();
+    const recentIds = new Set(recentAssetIds);
+    const canvasIds = new Set(canvasAssetIds);
+    const matches = assets.filter(a => {
+      if (filterType && a.type !== filterType) return false;
+      if (search) {
+        if (a.name.toLowerCase().includes(search)) return true;
+        if (a.description && a.description.toLowerCase().includes(search)) return true;
+        if (a.tags && a.tags.some(t => t.toLowerCase().includes(search))) return true;
+        return false;
+      }
+      if (activeBin === 'all') return true;
+      if (activeBin === 'favorites') return a.isFavorite;
+      if (activeBin === 'recent') return recentIds.has(a.id);
+      if (activeBin === 'canvas') return canvasIds.has(a.id);
+      const cat = a.category === 'root' ? '' : a.category;
+      return cat === activeBin;
+    });
+
+    if (activeBin === 'recent' && !search) {
+      matches.sort((a, b) => recentAssetIds.indexOf(a.id) - recentAssetIds.indexOf(b.id));
+    }
+    return matches;
+  }, [activeBin, assetSearch, assets, canvasAssetIds, filterType, recentAssetIds]);
+
+  const visibleAssets = filteredAssets.slice(0, visibleCount);
+
+  const folders = useMemo(() => {
+    if (
+      assetSearch ||
+      activeBin === 'all' ||
+      activeBin === 'recent' ||
+      activeBin === 'favorites' ||
+      activeBin === 'canvas'
+    ) {
+      return [];
+    }
+    const subfolders = new Set<string>();
+    assets.forEach(asset => {
+      if (filterType && asset.type !== filterType) return;
+      const cat = asset.category || '';
+      if (activeBin === '') {
+        if (cat && cat !== 'root') subfolders.add(cat.split('/')[0]);
+      } else if (cat.startsWith(activeBin + '/')) {
+        const remaining = cat.substring(activeBin.length + 1);
+        if (remaining) subfolders.add(remaining.split('/')[0]);
+      }
+    });
+    repositoryFolders.forEach(path => {
+      if (activeBin === '') {
+        if (path) subfolders.add(path.split('/')[0]);
+      } else if (path.startsWith(activeBin + '/')) {
+        const remaining = path.substring(activeBin.length + 1);
+        if (remaining) subfolders.add(remaining.split('/')[0]);
+      }
+    });
+    return Array.from(subfolders).filter(Boolean).sort();
+  }, [activeBin, assetSearch, assets, filterType, repositoryFolders]);
+
+  return (
+    <div
+      className="asset-picker-backdrop fixed inset-0 z-[70000] flex items-center justify-center bg-black/80 p-2 backdrop-blur-sm sm:p-3"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) event.stopPropagation();
+      }}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
+    >
+      <div
+        className="asset-picker-dialog flex h-[calc(100vh-1rem)] w-[calc(100vw-1rem)] max-w-none flex-col overflow-hidden rounded-lg border border-neutral-600 bg-neutral-900 shadow-2xl sm:h-[calc(100vh-1.5rem)] sm:w-[calc(100vw-1.5rem)]"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+      >
+        
+        {/* Header */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 bg-neutral-950 p-4">
+          <div className="min-w-[220px] flex-1">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              {filterType === 'image' ? <ImageIcon size={20} className="text-emerald-500"/> : filterType === 'audio' ? <Music size={20} className="text-indigo-500" /> : filterType === 'video' ? <Video size={20} className="text-blue-500"/> : <Folder size={20} className="text-neutral-500" />}
+              {title}
+            </h2>
+            <p className="mt-1 text-sm leading-relaxed text-neutral-400">
+              {helperText} Cavebot asset folders load only when opened.
+            </p>
+          </div>
+          {onLoadRepositoryRoot && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveBin('');
+                onLoadRepositoryRoot();
+              }}
+              disabled={isLoadingRepository}
+              className="ml-auto rounded border border-[#00ffcc]/35 bg-[#00ffcc]/10 px-3 py-2 font-comic text-xs font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20 disabled:opacity-50"
+            >
+              {isLoadingRepository ? 'Loading folder…' : repositoryFolders.length ? 'Refresh Cavebot Assets' : 'Browse Cavebot Assets'}
+            </button>
+          )}
+          {onUploadFiles && (
+            <label className="cursor-pointer rounded border border-pink-400/45 bg-pink-500/10 px-3 py-2 font-comic text-xs font-bold text-pink-200 hover:bg-pink-500/20">
+              <Upload size={14} className="mr-1.5 inline" />
+              Add files
+              <input
+                type="file"
+                multiple
+                accept="image/*,audio/*,video/*,.gif,.svg"
+                className="hidden"
+                onChange={(event) => {
+                  const files = Array.from(event.target.files || []);
+                  if (files.length) onUploadFiles(files);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
+          )}
+          <button aria-label="Close asset picker" onClick={onClose} className="rounded p-2 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white">
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 flex overflow-hidden">
+          
+          {/* Main Area */}
+          <div className="flex-1 flex flex-col p-4 overflow-hidden">
+            {/* Search & Breadcrumbs */}
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <div className="relative min-w-[220px] flex-1">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-500" />
+                <input 
+                  type="text" 
+                  placeholder="Search assets..." 
+                  value={assetSearch}
+                  onChange={e => setAssetSearch(e.target.value)}
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:border-emerald-500 outline-none"
+                />
+              </div>
+
+              <div className="flex-1 flex items-center gap-1 text-sm text-neutral-400 overflow-x-auto pb-1 custom-scrollbar">
+                <button onClick={() => setActiveBin('recent')} className={`hover:text-white whitespace-nowrap ${activeBin === 'recent' ? 'text-emerald-400 font-medium' : ''}`}>Recent</button>
+                <span className="text-neutral-600">|</span>
+                <button onClick={() => setActiveBin('favorites')} className={`hover:text-white whitespace-nowrap ${activeBin === 'favorites' ? 'text-emerald-400 font-medium' : ''}`}>Favorites</button>
+                <span className="text-neutral-600">|</span>
+                <button onClick={() => setActiveBin('canvas')} className={`hover:text-white whitespace-nowrap ${activeBin === 'canvas' ? 'text-emerald-400 font-medium' : ''}`}>In Canvas</button>
+                <span className="text-neutral-600">|</span>
+                <button onClick={() => setActiveBin('all')} className={`hover:text-white whitespace-nowrap ${activeBin === 'all' ? 'text-emerald-400 font-medium' : ''}`}>All</button>
+                <span className="text-neutral-600">/</span>
+                <button onClick={() => setActiveBin('')} className={`hover:text-white whitespace-nowrap ${activeBin === '' ? 'text-emerald-400 font-medium' : ''}`}>Root</button>
+                {activeBin !== 'all' && activeBin !== 'recent' && activeBin !== 'favorites' && activeBin !== 'canvas' && activeBin !== '' && activeBin.split('/').filter(Boolean).map((part, i, arr) => (
+                  <React.Fragment key={i}>
+                    <span className="text-neutral-600">/</span>
+                    <button 
+                      onClick={() => setActiveBin(arr.slice(0, i + 1).join('/'))}
+                      className={`hover:text-white whitespace-nowrap ${i === arr.length - 1 ? 'text-emerald-400 font-medium' : ''}`}
+                    >
+                      {part}
+                    </button>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+              {/* Folders */}
+              {activeBin !== 'all' && activeBin !== 'recent' && activeBin !== 'canvas' && !assetSearch && folders.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
+                  {folders.map(sub => (
+                    <button 
+                      key={sub}
+                      onClick={() => {
+                        const nextPath = activeBin ? `${activeBin}/${sub}` : sub;
+                        setActiveBin(nextPath);
+                        onOpenRepositoryFolder?.(nextPath);
+                      }}
+                      className="bg-neutral-800 border border-neutral-700/50 rounded-lg p-3 flex items-center gap-3 hover:bg-neutral-700 transition-colors text-left"
+                    >
+                      <Folder size={18} className="text-emerald-400 shrink-0" />
+                      <span className="text-sm text-neutral-200 truncate">{sub}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Assets */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 pb-12">
+                {visibleAssets.map(asset => (
+                  <div 
+                    key={asset.id}
+                    className={`bg-neutral-800/50 border rounded-lg group transition-colors flex flex-col relative ${
+                      editingInfoId === asset.id
+                        ? "border-[#00ffcc]/70 shadow-[0_0_0_1px_rgba(0,255,204,0.28)]"
+                        : "border-neutral-700/50 hover:border-emerald-500"
+                    }`}
+                  >
+                    <div 
+                      onClick={() => onSelect(asset.id)}
+                      className="asset-thumbnail h-32 flex items-center justify-center p-2 relative rounded-t-lg cursor-pointer overflow-hidden bg-[linear-gradient(135deg,rgba(0,255,204,0.07),rgba(255,79,200,0.08)),#070812]"
+                    >
+                      {asset.type === 'audio' ? (
+                        <Music size={32} className="text-emerald-500 group-hover:scale-110 transition-transform" />
+                      ) : asset.type === 'video' ? (
+                        <video src={asset.src} className="h-full w-full object-contain pointer-events-none relative z-10" muted />
+                      ) : (
+                        <img src={asset.src} alt={asset.name} className="h-full w-full object-contain pointer-events-none transition-transform group-hover:scale-105 relative z-10" loading="lazy" decoding="async" />
+                      )}
+                      {onToggleFavorite && (
+                         <div 
+                           className={`absolute top-2 right-2 p-1.5 rounded-md backdrop-blur-md z-20 
+                                       ${asset.isFavorite ? 'bg-yellow-500/20 text-yellow-400 opacity-100' : 'bg-black/40 text-neutral-400 opacity-0 group-hover:opacity-100'} 
+                                       hover:bg-yellow-500/40 hover:text-yellow-300 transition-all`}
+                           onClick={(e) => { e.stopPropagation(); onToggleFavorite(asset.id); }}
+                         >
+                           <Star size={14} className={asset.isFavorite ? "fill-yellow-400" : ""} />
+                         </div>
+                      )}
+                      {onUpdateAsset && (
+                        <button
+                           type="button"
+                           aria-label={`Edit info for ${asset.name}`}
+                           className={`absolute top-2 left-2 p-1.5 rounded-md backdrop-blur-md z-20 bg-black/40 text-neutral-400 opacity-0 group-hover:opacity-100 hover:bg-neutral-700 hover:text-white transition-all`}
+                           onClick={(e) => { e.stopPropagation(); setEditingInfoId(editingInfoId === asset.id ? null : asset.id); }}
+                         >
+                           <Info size={14} />
+                         </button>
+                      )}
+                      {asset.type === 'image' && onEditImage && (
+                        <button
+                          type="button"
+                          aria-label={`Edit ${asset.name}`}
+                          title="Crop, remove background, recolor, or add filters"
+                          className="absolute bottom-2 right-2 z-20 flex items-center gap-1 rounded-md border border-[#ff4fc8]/50 bg-black/70 px-2 py-1 font-comic text-xs font-bold text-[#ff8bd8] opacity-90 shadow-lg backdrop-blur-md transition-all hover:border-[#00ffcc] hover:text-[#00ffcc] group-hover:opacity-100"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onEditImage(asset.id);
+                          }}
+                        >
+                          <Wand2 size={12} /> Edit
+                        </button>
+                      )}
+                    </div>
+                    {editingInfoId === asset.id ? (
+                      <div className="p-3 border-t border-[#00ffcc]/30 flex flex-col gap-2 bg-neutral-950/95 rounded-b-lg shadow-inner">
+                        <input 
+                           type="text" 
+                           value={asset.name} 
+                           onChange={e => onUpdateAsset!(asset.id, { name: e.target.value })} 
+                           className="w-full bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-sm text-neutral-200 outline-none focus:border-emerald-500" 
+                           placeholder="Asset Name"
+                        />
+                        <textarea 
+                           className="w-full bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-300 outline-none focus:border-emerald-500 flex-1 resize-none min-h-[4rem]" 
+                           value={asset.description || ''}
+                           onChange={e => onUpdateAsset!(asset.id, { description: e.target.value })}
+                           placeholder="Description/notes..."
+                        />
+                        <input 
+                           type="text" 
+                           value={(asset.tags || []).join(', ')} 
+                           onChange={e => onUpdateAsset!(asset.id, { tags: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                           className="w-full bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-emerald-400 font-mono outline-none focus:border-emerald-500 outline-none" 
+                           placeholder="tags, comma, separated"
+                        />
+                        {(asset.type === 'audio' || asset.type === 'video') && (
+                          <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-neutral-800">
+                             <div className="text-xs font-bold uppercase text-neutral-400">Trim / Volume Edit</div>
+                             <div className="flex gap-2">
+                               <input type="number" step="0.1" value={asset.trimStart || 0} onChange={e => onUpdateAsset!(asset.id, { trimStart: Math.max(0, parseFloat(e.target.value) || 0)})} className="w-1/2 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-200 outline-none focus:border-emerald-500" placeholder="Start (s)" title="Trim Start (seconds)" />
+                               <input type="number" step="0.1" value={asset.trimEnd || ''} onChange={e => onUpdateAsset!(asset.id, { trimEnd: e.target.value ? Math.max(0, parseFloat(e.target.value) || 0) : undefined})} className="w-1/2 bg-neutral-950 border border-neutral-800 rounded px-2 py-1 text-xs text-neutral-200 outline-none focus:border-emerald-500" placeholder="End (s)" title="Trim End (seconds)" />
+                             </div>
+                             <div className="flex items-center gap-2">
+                               <span className="text-xs text-neutral-400">Vol:</span>
+                               <input type="range" min="0" max="1" step="0.05" value={Math.min(1, asset.volume ?? 1)} onChange={e => onUpdateAsset!(asset.id, { volume: parseFloat(e.target.value) })} className="flex-1 accent-emerald-500 h-1 bg-neutral-800 rounded-full appearance-none outline-none" />
+                               <span className="text-xs text-neutral-400 w-8 text-right">{Math.round(Math.min(1, asset.volume ?? 1) * 100)}%</span>
+                             </div>
+                          </div>
+                        )}
+                        {asset.type === 'image' && onEditImage && (
+                          <button
+                            type="button"
+                            onClick={() => onEditImage(asset.id)}
+                            className="flex w-full items-center justify-center gap-1 rounded border border-[#ff4fc8]/40 bg-[#ff4fc8]/10 py-1.5 font-comic text-xs font-bold text-[#ff8bd8] hover:border-[#00ffcc]/60 hover:text-[#00ffcc]"
+                          >
+                            <Wand2 size={13} /> Crop / Remove BG / Filters
+                          </button>
+                        )}
+                        <button onClick={() => setEditingInfoId(null)} className="w-full py-1 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 text-xs font-semibold rounded mt-1">Done</button>
+                      </div>
+                    ) : (
+                      <div className="p-2 border-t border-neutral-700/50">
+                        <p className="text-xs text-neutral-300 truncate font-medium group-hover:text-emerald-400 transition-colors" title={asset.name}>{asset.name}</p>
+                        <div className="mt-1 flex items-center justify-between gap-1">
+                          <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-neutral-400">
+                            {asset.type}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onSelect(asset.id)}
+                            className="rounded border border-[#00ffcc]/40 bg-[#00ffcc]/10 px-2.5 py-1.5 font-comic text-xs font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20"
+                          >
+                            {selectLabel}
+                          </button>
+                        </div>
+                        {asset.tags && asset.tags.length > 0 && (
+                          <div className="flex gap-1 overflow-hidden mt-1 mt-1">
+                            {asset.tags.slice(0, 3).map(t => (
+                              <span key={t} className="whitespace-nowrap rounded border border-emerald-500/20 bg-neutral-900 px-1.5 py-0.5 text-[10px] text-emerald-300">{t}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {filteredAssets.length === 0 && (
+                  <div className="col-span-full py-12 text-center text-neutral-500">
+                    No matching assets found.
+                  </div>
+                )}
+              </div>
+              {visibleAssets.length < filteredAssets.length && (
+                <div className="flex justify-center pb-8">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount((count) => count + initialVisibleAssets)}
+                    className="rounded border border-neutral-700 bg-neutral-800 px-4 py-2 font-comic text-xs font-bold text-neutral-300 hover:border-[#00ffcc]/50 hover:text-[#00ffcc]"
+                  >
+                    Show {initialVisibleAssets} more ({filteredAssets.length - visibleAssets.length} remaining)
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

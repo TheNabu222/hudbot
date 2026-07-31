@@ -1,0 +1,521 @@
+1671-    ...project.assets.filter((a) => a.type === "image"),
+1672-  ].sort((a, b) => {
+1673-    const aUsed = usedAssetSrcs.has(a.src);
+1674-    const bUsed = usedAssetSrcs.has(b.src);
+1675-    if (aUsed && !bUsed) return -1;
+1676-    if (!aUsed && bUsed) return 1;
+1677-    return a.name.localeCompare(b.name);
+1678-  });
+1679-
+1680-  const uiBg = project.globalSettings.uiColorBackground || "#1a0033";
+1681:  const uiPrimary = project.globalSettings.uiColorPrimary || "#00ffff";
+1682-  const uiFont = project.globalSettings.uiFontFamily || "sans-serif";
+1683-  const uiRadius = `${project.globalSettings.uiBorderRadius ?? 8}px`;
+--
+4363-                  if (dPos === "top")
+4364-                    posClass = "top-8 left-1/2 -translate-x-1/2";
+4365-                  if (dPos === "center")
+4366-                    posClass =
+4367-                      "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2";
+4368-                  return (
+4369-                    <div
+4370-                      className={`absolute ${posClass} w-4/5 max-w-lg shadow-2xl backdrop-blur-sm pointer-events-none drop-shadow-2xl`}
+4371-                      style={{
+4372-                        backgroundColor: `${uiBg}ee`,
+4373:                        border: `2px solid ${uiPrimary}80`,
+4374-                        borderRadius: uiRadius,
+4375-                        fontFamily: uiFont,
+--
+4413-
+4414-                  const speakerAsset = node.speakerAssetId
+4415-                    ? project.assets.find((a) => a.id === node.speakerAssetId)
+4416-                    : null;
+4417-
+4418-                  return (
+4419-                    <div
+4420-                      className={`absolute ${posClass} w-11/12 max-w-2xl text-neutral-100 z-[2000] shadow-2xl flex flex-col overflow-hidden backdrop-blur-md filter drop-shadow-2xl dialogue-box`}
+4421-                      style={{
+4422-                        backgroundColor: `${uiBg}ee`,
+4423:                        border: `2px solid ${uiPrimary}80`,
+4424-                        borderRadius: uiRadius,
+4425-                        fontFamily: uiFont,
+4426:                        boxShadow: `0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px ${uiPrimary}40`,
+4427-                      }}
+4428-                    >
+4429-                      <div
+4430-                        className="px-6 py-3 border-b font-bold tracking-wide shadow-sm dialogue-title"
+4431-                        style={{
+4432-                          backgroundColor: `rgba(0,0,0,0.3)`,
+4433:                          borderBottomColor: `${uiPrimary}50`,
+4434:                          color: uiPrimary,
+4435-                        }}
+4436-                      >
+4437-                        {node.speaker || "Unknown"}
+4438-                      </div>
+4439-                      <div className="flex p-6 max-h-[40vh] overflow-y-auto custom-scrollbar dialogue-content">
+4440-                        {speakerAsset &&
+4441-                          (!node.portraitPosition ||
+4442-                            node.portraitPosition === "left") && (
+4443-                            <div
+4444-                              className="w-24 h-24 shrink-0 mr-6 rounded-lg overflow-hidden border shadow-inner p-1 flex items-center justify-center dialogue-portrait"
+4445-                              style={{
+4446:                                borderColor: `${uiPrimary}40`,
+4447-                                backgroundColor: `rgba(0,0,0,0.4)`,
+4448-                              }}
+--
+4457-                        <div className="text-lg font-medium leading-relaxed flex-1 text-white drop-shadow-sm self-center dialogue-text">
+4458-                          <TypewriterText
+4459-                            text={node.text}
+4460-                            speed={project.globalSettings.typewriterSpeed ?? 15}
+4461-                          />
+4462-                        </div>
+4463-                        {speakerAsset && node.portraitPosition === "right" && (
+4464-                          <div
+4465-                            className="w-24 h-24 shrink-0 ml-6 rounded-lg overflow-hidden border shadow-inner p-1 flex items-center justify-center dialogue-portrait"
+4466-                            style={{
+4467:                              borderColor: `${uiPrimary}40`,
+4468-                              backgroundColor: `rgba(0,0,0,0.4)`,
+4469-                            }}
+--
+4473-                              alt={node.speaker}
+4474-                              className="max-w-full max-h-full object-contain"
+4475-                            />
+4476-                          </div>
+4477-                        )}
+4478-                      </div>
+4479-                      <div
+4480-                        className="flex flex-col border-t relative dialogue-choices"
+4481-                        style={{
+4482-                          backgroundColor: "rgba(0,0,0,0.2)",
+4483:                          borderTopColor: `${uiPrimary}50`,
+4484-                        }}
+4485-                      >
+--
+4491-                                if (choice.nextNodeId) {
+4492-                                  setActiveDialogue({
+4493-                                    treeId: tree!.id,
+4494-                                    nodeId: choice.nextNodeId,
+4495-                                  });
+4496-                                } else {
+4497-                                  setActiveDialogue(null);
+4498-                                }
+4499-                              }}
+4500-                              className="px-6 py-4 text-left transition-colors border-b last:border-b-0 group dialogue-choice"
+4501:                              style={{ borderBottomColor: `${uiPrimary}30` }}
+4502-                              onMouseEnter={(e) => {
+4503:                                e.currentTarget.style.backgroundColor = `${uiPrimary}20`;
+4504:                                e.currentTarget.style.color = uiPrimary;
+4505-                              }}
+4506-                              onMouseLeave={(e) => {
+--
+4512-                              <span className="inline-block transition-transform group-hover:translate-x-2 font-medium">
+4513-                                ▸ {choice.text}
+4514-                              </span>
+4515-                            </button>
+4516-                          ))
+4517-                        ) : (
+4518-                          <button
+4519-                            onClick={() => setActiveDialogue(null)}
+4520-                            className="px-6 py-4 text-center transition-colors font-medium group dialogue-choice"
+4521-                            onMouseEnter={(e) => {
+4522:                              e.currentTarget.style.backgroundColor = `${uiPrimary}20`;
+4523-                            }}
+4524-                            onMouseLeave={(e) => {
+4525-                              e.currentTarget.style.backgroundColor =
+4526-                                "transparent";
+4527-                            }}
+4528:                            style={{ color: uiPrimary }}
+4529-                          >
+4530-                            <span className="group-hover:tracking-wider transition-all">
+--
+4540-              {/* Inventory UI for Gameplay and Theme Preview */}
+4541-              {(isPlaying ||
+4542-                !["dialogue", "items", "scenes"].includes(editorMode)) && (
+4543-                <>
+4544-                  {/* Needs Tracker */}
+4545-                  {project.globalSettings.enableNeeds && (
+4546-                    <div
+4547-                      className="absolute top-4 right-4 z-[2000] p-3 shadow-xl backdrop-blur-md flex flex-col gap-2"
+4548-                      style={{
+4549-                        backgroundColor: `${uiBg}cc`,
+4550:                        border: `1px solid ${uiPrimary}80`,
+4551-                        borderRadius: uiRadius,
+4552-                        fontFamily: uiFont,
+4553-                        width: "150px",
+4554-                      }}
+4555-                    >
+4556-                      <div
+4557-                        className="text-xs font-bold mb-1 opacity-80"
+4558:                        style={{ color: uiPrimary }}
+4559-                      >
+4560-                        NEEDS
+--
+4578-                            className="h-1.5 w-full overflow-hidden"
+4579-                            style={{
+4580-                              backgroundColor: "rgba(0,0,0,0.5)",
+4581-                              borderRadius: "2px",
+4582-                            }}
+4583-                          >
+4584-                            <div
+4585-                              className="h-full transition-all"
+4586-                              style={{
+4587-                                width: `${Math.max(0, Math.min(100, playerNeeds[need]))}%`,
+4588:                                backgroundColor: uiPrimary,
+4589-                              }}
+4590-                            />
+4591-                          </div>
+4592-                        </div>
+4593-                      ))}
+4594-                      {project.globalSettings.useDayNightCycle && (
+4595-                        <div
+4596-                          className="mt-2 pt-2 border-t flex justify-between items-center text-[10px] font-bold"
+4597-                          style={{
+4598:                            borderColor: `${uiPrimary}40`,
+4599-                            color: "#e5e5e5",
+4600-                          }}
+4601-                        >
+4602:                          <span style={{ color: uiPrimary }}>TIME</span>
+4603-                          <span>
+4604-                            {Math.floor(gameTime).toString().padStart(2, "0")}:
+--
+4611-                    </div>
+4612-                  )}
+4613-
+4614-                  {/* Backpack Toggle Button */}
+4615-                  {!project.globalSettings.hideDefaultInventoryBtn && (
+4616-                    <button
+4617-                      onClick={() => setIsInventoryOpen(!isInventoryOpen)}
+4618-                      className="absolute bottom-4 right-4 w-14 h-14 flex items-center justify-center shadow-xl backdrop-blur-sm z-[2000] transition-transform hover:scale-105 active:scale-95 border-2 hover:brightness-110"
+4619-                      style={{
+4620-                        backgroundColor: `${uiBg}ee`,
+4621:                        borderColor: uiPrimary,
+4622-                        borderRadius: uiRadius,
+4623:                        color: uiPrimary,
+4624-                      }}
+4625-                    >
+4626-                      <div className="relative">
+4627:                        <Backpack size={24} color={uiPrimary} />
+4628-                        {playerInventory.length > 0 && (
+4629-                          <div
+4630-                            className="absolute -top-2 -right-2 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2"
+4631-                            style={{
+4632:                              backgroundColor: uiPrimary,
+4633-                              borderColor: uiBg,
+4634-                            }}
+--
+4644-                  {isInventoryOpen && (
+4645-                    <div
+4646-                      className="absolute inset-0 bg-black/60 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+4647-                      onClick={() => setIsInventoryOpen(false)}
+4648-                    >
+4649-                      <div
+4650-                        className="max-w-3xl w-full max-h-[80%] flex flex-col shadow-2xl overflow-hidden border-2"
+4651-                        onClick={(e) => e.stopPropagation()}
+4652-                        style={{
+4653-                          backgroundColor: `${uiBg}ee`,
+4654:                          borderColor: `${uiPrimary}80`,
+4655-                          borderRadius: uiRadius,
+4656-                          fontFamily: uiFont,
+4657-                        }}
+4658-                      >
+4659-                        <div
+4660-                          className="flex justify-between items-center p-4 border-b"
+4661-                          style={{
+4662-                            backgroundColor: "rgba(0,0,0,0.3)",
+4663:                            borderBottomColor: `${uiPrimary}50`,
+4664-                          }}
+4665-                        >
+4666-                          <h2
+4667-                            className="text-xl font-bold flex items-center gap-2"
+4668:                            style={{ color: uiPrimary }}
+4669-                          >
+4670-                            <Backpack size={24} />
+4671-                            Inventory
+4672-                          </h2>
+4673-                          <button
+4674-                            onClick={() => setIsInventoryOpen(false)}
+4675:                            style={{ color: uiPrimary }}
+4676-                            className="opacity-70 hover:opacity-100 transition-opacity"
+4677-                          >
+4678-                            <X size={24} />
+4679-                          </button>
+4680-                        </div>
+4681-                        <div
+4682-                          className="flex-1 overflow-y-auto p-6 custom-scrollbar"
+4683-                          style={{ color: "#e5e5e5" }}
+4684-                        >
+4685-                          {playerInventory.length === 0 ? (
+4686-                            <div
+4687-                              className="text-center py-12 flex flex-col items-center gap-4"
+4688:                              style={{ color: `${uiPrimary}80` }}
+4689-                            >
+4690-                              <PackageX size={48} className="opacity-50" />
+--
+4709-
+4710-                                return (
+4711-                                  <div
+4712-                                    key={`${itemId}-${idx}`}
+4713-                                    className={`border overflow-hidden flex flex-col group transition-all cursor-pointer relative ${isSelected ? "scale-105 shadow-2xl ring-4 z-10" : ""}`}
+4714-                                    style={{
+4715-                                      backgroundColor: isSelected
+4716-                                        ? "rgba(0,0,0,0.6)"
+4717-                                        : "rgba(0,0,0,0.2)",
+4718-                                      borderColor: isSelected
+4719:                                        ? uiPrimary
+4720:                                        : `${uiPrimary}40`,
+4721-                                      borderRadius: uiRadius,
+4722-                                      boxShadow: isSelected
+4723:                                        ? `0 0 20px ${uiPrimary}80`
+4724-                                        : "none",
+4725:                                      ringColor: uiPrimary,
+4726-                                    }}
+4727-                                    onMouseEnter={(e) => {
+4728-                                      if (!isSelected) {
+4729-                                        e.currentTarget.style.borderColor =
+4730:                                          uiPrimary;
+4731-                                        e.currentTarget.style.backgroundColor =
+4732-                                          "rgba(0,0,0,0.4)";
+4733-                                      }
+4734-                                    }}
+4735-                                    onMouseLeave={(e) => {
+4736-                                      if (!isSelected) {
+4737:                                        e.currentTarget.style.borderColor = `${uiPrimary}40`;
+4738-                                        e.currentTarget.style.backgroundColor =
+4739-                                          "rgba(0,0,0,0.2)";
+--
+4842-                                      } else {
+4843-                                        // Select the item
+4844-                                        setSelectedInventoryItemId(itemId);
+4845-                                      }
+4846-                                    }}
+4847-                                  >
+4848-                                    {isSelected && (
+4849-                                      <div
+4850-                                        className="absolute top-1 left-1 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-lg backdrop-blur-md animate-pulse"
+4851-                                        style={{
+4852:                                          backgroundColor: uiPrimary,
+4853-                                          color: uiBg,
+4854-                                        }}
+--
+4873-                                      {iconAsset ? (
+4874-                                        <img
+4875-                                          src={iconAsset.src}
+4876-                                          alt={item.name}
+4877-                                          className={`w-full h-full object-contain drop-shadow-lg transition-transform ${isSelected ? "scale-110" : "group-hover:scale-110"}`}
+4878-                                          draggable="false"
+4879-                                        />
+4880-                                      ) : (
+4881-                                        <Backpack
+4882-                                          size={48}
+4883:                                          style={{ color: `${uiPrimary}40` }}
+4884-                                          className="group-hover:opacity-80 transition-opacity"
+4885-                                        />
+4886-                                      )}
+4887-                                    </div>
+4888-                                    <div
+4889-                                      className="p-3 border-t flex-1 flex flex-col"
+4890-                                      style={{
+4891:                                        borderTopColor: `${uiPrimary}20`,
+4892-                                      }}
+4893-                                    >
+4894-                                      <h3
+4895-                                        className="font-bold text-sm mb-1 leading-tight flex-1"
+4896:                                        style={{ color: uiPrimary }}
+4897-                                      >
+4898-                                        {item.name}
+--
+4901-                                        className="text-[10px] line-clamp-3 leading-snug mb-2"
+4902-                                        style={{ color: "#a1a1aa" }}
+4903-                                      >
+4904-                                        {item.description}
+4905-                                      </p>
+4906-
+4907-                                      {isSelected && item.isUsable && (
+4908-                                        <button
+4909-                                          className="w-full py-1.5 mt-auto text-xs font-bold rounded shadow-lg hover:brightness-125 transition-all active:scale-95"
+4910-                                          style={{
+4911:                                            backgroundColor: uiPrimary,
+4912-                                            color: uiBg,
+4913-                                          }}
+--
+4999-                  {isCraftingOpen && (
+5000-                    <div
+5001-                      className="absolute inset-0 bg-black/60 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+5002-                      onClick={() => setIsCraftingOpen(false)}
+5003-                    >
+5004-                      <div
+5005-                        className="max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
+5006-                        onClick={(e) => e.stopPropagation()}
+5007-                        style={{
+5008-                          backgroundColor: `${uiBg}ee`,
+5009:                          borderColor: `${uiPrimary}80`,
+5010-                          fontFamily: uiFont,
+5011-                        }}
+5012-                      >
+5013-                        <div
+5014-                          className="flex justify-between items-center p-4 border-b"
+5015-                          style={{
+5016-                            backgroundColor: "rgba(0,0,0,0.3)",
+5017:                            borderBottomColor: `${uiPrimary}50`,
+5018-                          }}
+5019-                        >
+5020-                          <h2
+5021-                            className="text-xl font-bold flex items-center gap-2"
+5022:                            style={{ color: uiPrimary }}
+5023-                          >
+5024-                            <Backpack size={24} />
+5025-                            Crafting Station
+5026-                          </h2>
+5027-                          <button
+5028-                            onClick={() => setIsCraftingOpen(false)}
+5029:                            style={{ color: uiPrimary }}
+5030-                            className="opacity-70 hover:opacity-100 transition-opacity"
+5031-                          >
+--
+5033-                          </button>
+5034-                        </div>
+5035-                        <div className="p-6">
+5036-                          <p className="text-white/70 mb-4 text-center">
+5037-                            Select two items from your inventory to forge a new
+5038-                            item.
+5039-                          </p>
+5040-                          <div className="flex justify-center items-center gap-4 mb-6">
+5041-                            <div
+5042-                              className="w-24 h-24 border-2 rounded-lg flex flex-col items-center justify-center gap-2 relative bg-black/30"
+5043:                              style={{ borderColor: `${uiPrimary}40` }}
+5044-                            >
+5045-                              {craftSlot1 ? (
+--
+5102-                              {!craftSlot1 && (
+5103-                                <div className="text-[10px] text-white/50 text-center pointer-events-none">
+5104-                                  Click to
+5105-                                  <br />
+5106-                                  Select Item
+5107-                                </div>
+5108-                              )}
+5109-                            </div>
+5110-                            <div
+5111-                              className="text-2xl opacity-50"
+5112:                              style={{ color: uiPrimary }}
+5113-                            >
+5114-                              +
+5115-                            </div>
+5116-                            <div
+5117-                              className="w-24 h-24 border-2 rounded-lg flex flex-col items-center justify-center gap-2 relative bg-black/30"
+5118:                              style={{ borderColor: `${uiPrimary}40` }}
+5119-                            >
+5120-                              {craftSlot2 ? (
+--
+5180-                                  <br />
+5181-                                  Select Item
+5182-                                </div>
+5183-                              )}
+5184-                            </div>
+5185-                          </div>
+5186-                          <div className="flex justify-center flex-col items-center gap-3">
+5187-                            <button
+5188-                              className="px-8 py-3 rounded-lg font-bold transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-lg"
+5189-                              style={{
+5190:                                backgroundColor: uiPrimary,
+5191-                                color: uiBg,
+5192-                              }}
+--
+5272-                  {isQuestLogOpen && (
+5273-                    <div
+5274-                      className="absolute inset-0 bg-black/60 z-[2001] flex items-center justify-center p-8 backdrop-blur-sm"
+5275-                      onClick={() => setIsQuestLogOpen(false)}
+5276-                    >
+5277-                      <div
+5278-                        className="max-w-3xl w-full max-h-[80%] flex flex-col shadow-2xl overflow-hidden border-2 rounded-lg"
+5279-                        onClick={(e) => e.stopPropagation()}
+5280-                        style={{
+5281-                          backgroundColor: `${uiBg}ee`,
+5282:                          borderColor: `${uiPrimary}80`,
+5283-                          fontFamily: uiFont,
+5284-                        }}
+5285-                      >
+5286-                        <div
+5287-                          className="flex justify-between items-center p-4 border-b"
+5288-                          style={{
+5289-                            backgroundColor: "rgba(0,0,0,0.3)",
+5290:                            borderBottomColor: `${uiPrimary}50`,
+5291-                          }}
+5292-                        >
+5293-                          <h2
+5294-                            className="text-xl font-bold flex items-center gap-2"
+5295:                            style={{ color: uiPrimary }}
+5296-                          >
+5297-                            <Book size={24} />
+5298-                            Quest Log
+5299-                          </h2>
+5300-                          <button
+5301-                            onClick={() => setIsQuestLogOpen(false)}
+5302:                            style={{ color: uiPrimary }}
+5303-                            className="opacity-70 hover:opacity-100 transition-opacity"
+5304-                          >
+--
+5340-                              const isCompleted =
+5341-                                totalObjs > 0 && completedObjs >= totalObjs;
+5342-
+5343-                              return (
+5344-                                <div
+5345-                                  key={quest.id}
+5346-                                  className="p-4 rounded-lg border-2 shadow-sm"
+5347-                                  style={{
+5348-                                    backgroundColor: uiBg,
+5349-                                    borderColor: isCompleted
+5350:                                      ? uiPrimary
+5351:                                      : `${uiPrimary}40`,
+5352-                                  }}
+5353-                                >
+5354-                                  <h3
+5355-                                    className="font-bold text-lg mb-1"
+5356-                                    style={{
+5357-                                      color: isCompleted
+5358:                                        ? uiPrimary
+5359-                                        : "#ffffff",
+5360-                                    }}
+--
+5364-                                  <p
+5365-                                    className="text-sm mb-4 opacity-80"
+5366-                                    style={{ color: uiSecondary }}
+5367-                                  >
+5368-                                    {quest.description}
+5369-                                  </p>
+5370-                                  {totalObjs > 0 && (
+5371-                                    <div className="space-y-2">
+5372-                                      <div
+5373-                                        className="text-xs font-bold uppercase tracking-wider mb-2"
+5374:                                        style={{ color: uiPrimary }}
+5375-                                      >
+5376-                                        Objectives
+--
+5394-                                        )
+5395-                                          isObjDone = true;
+5396-                                        return (
+5397-                                          <div
+5398-                                            key={obj.id}
+5399-                                            className="flex items-center gap-2 text-sm"
+5400-                                          >
+5401-                                            <div
+5402-                                              className="w-4 h-4 rounded-full border-2 flex items-center justify-center"
+5403-                                              style={{
+5404:                                                borderColor: uiPrimary,
+5405-                                                backgroundColor: isObjDone
+5406:                                                  ? uiPrimary
+5407-                                                  : "transparent",
+5408-                                              }}
+--
+5413-                                                  color={uiBg}
+5414-                                                />
+5415-                                              )}
+5416-                                            </div>
+5417-                                            <span
+5418-                                              style={{
+5419-                                                textDecoration: isObjDone
+5420-                                                  ? "line-through"
+5421-                                                  : "none",
+5422-                                                color: isObjDone
+5423:                                                  ? uiPrimary
+5424-                                                  : uiSecondary,
+5425-                                                opacity: isObjDone ? 0.8 : 1,

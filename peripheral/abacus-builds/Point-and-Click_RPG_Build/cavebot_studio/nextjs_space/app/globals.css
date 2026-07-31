@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+[data-hydration-error] { display: none !important; }
+
+:root {
+  --background: 240 10% 6%;
+  --foreground: 0 0% 93%;
+  --card: 240 10% 10%;
+  --card-foreground: 0 0% 93%;
+  --popover: 240 10% 10%;
+  --popover-foreground: 0 0% 93%;
+  --primary: 58 100% 50%;
+  --primary-foreground: 0 0% 5%;
+  --secondary: 280 80% 60%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 10% 16%;
+  --muted-foreground: 0 0% 60%;
+  --accent: 180 80% 50%;
+  --accent-foreground: 0 0% 5%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 10% 20%;
+  --input: 240 10% 20%;
+  --ring: 58 100% 50%;
+  --radius: 0.5rem;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.5);
+  --shadow-lg: 0 8px 30px rgba(0,0,0,0.6);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+}
+
+.dark {
+  --background: 240 10% 6%;
+  --foreground: 0 0% 93%;
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* React Flow custom styles */
+.react-flow__node {
+  border-radius: 8px !important;
+}
+.react-flow__edge-path {
+  stroke-width: 2 !important;
+}
+.react-flow__background {
+  background: transparent !important;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: hsl(240 10% 8%); }
+::-webkit-scrollbar-thumb { background: hsl(240 10% 25%); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(240 10% 35%); }

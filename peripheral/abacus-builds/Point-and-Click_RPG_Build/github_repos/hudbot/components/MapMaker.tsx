@@ -1,0 +1,683 @@
+import { useEffect, useState } from "react";
+import {
+  ChevronLeft,
+  Lock,
+  MapPin,
+  MousePointerClick,
+  Plus,
+  Route,
+  Sparkles,
+  Trash2,
+  Unlock,
+} from "lucide-react";
+import { v4 as uuidv4 } from "uuid";
+import { FastTravelMap, MapNode, Project } from "../types";
+import { AssetInspectorSlot } from "./AssetInspectorSlot";
+
+interface MapMakerProps {
+  project: Project;
+  updateProject: (updates: Partial<Project>) => void;
+  openAssetPicker: (
+    filterType: "image" | "audio" | "video",
+    onSelect: (assetId: string) => void,
+  ) => void;
+}
+
+export function MapMaker({
+  project,
+  updateProject,
+  openAssetPicker,
+}: MapMakerProps) {
+  const [activeMapId, setActiveMapId] = useState<string | null>(
+    project.maps?.[0]?.id || null,
+  );
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const maps = (project.maps || []).map((map, index) => ({
+    id: map.id || `map-${index + 1}`,
+    name: map.name || `World Map ${index + 1}`,
+    backgroundSrc: map.backgroundSrc || null,
+    ...map,
+    nodes: Array.isArray(map.nodes) ? map.nodes : [],
+  }));
+  const activeMap = maps.find((map) => map.id === activeMapId);
+  const activeMapNodes = activeMap?.nodes || [];
+  const activeMapFit = activeMap?.backgroundFit || "contain";
+  const activeMapScale = activeMap?.backgroundScale ?? 1;
+  const activeMapOffsetX = activeMap?.backgroundOffsetX ?? 0;
+  const activeMapOffsetY = activeMap?.backgroundOffsetY ?? 0;
+  const editingNode = activeMapNodes.find(
+    (node) => node.id === editingNodeId,
+  );
+  const imageAssets = project.assets.filter((asset) => asset.type === "image");
+  const backgroundAsset = imageAssets.find(
+    (asset) => asset.src === activeMap?.backgroundSrc,
+  );
+  const iconAsset = imageAssets.find(
+    (asset) => asset.src === editingNode?.iconSrc,
+  );
+
+  useEffect(() => {
+    if (!activeMapId && maps[0]) {
+      setActiveMapId(maps[0].id);
+    } else if (activeMapId && !maps.some((map) => map.id === activeMapId)) {
+      setActiveMapId(maps[0]?.id || null);
+    }
+  }, [activeMapId, maps]);
+
+  const addMap = () => {
+    const newMap: FastTravelMap = {
+      id: `map-${uuidv4().slice(0, 8)}`,
+      name: `World Map ${maps.length + 1}`,
+      backgroundSrc: null,
+      backgroundFit: "contain",
+      backgroundScale: 1,
+      backgroundOffsetX: 0,
+      backgroundOffsetY: 0,
+      nodes: [],
+    };
+    updateProject({ maps: [...maps, newMap] });
+    setActiveMapId(newMap.id);
+    setEditingNodeId(null);
+  };
+
+  const updateActiveMap = (updates: Partial<FastTravelMap>) => {
+    if (!activeMapId) return;
+    updateProject({
+      maps: maps.map((map) =>
+        map.id === activeMapId ? { ...map, ...updates } : map,
+      ),
+    });
+  };
+
+  const deleteMap = (id: string) => {
+    const remainingMaps = maps.filter((map) => map.id !== id);
+    updateProject({ maps: remainingMaps });
+    if (activeMapId === id) {
+      setActiveMapId(remainingMaps[0]?.id || null);
+      setEditingNodeId(null);
+    }
+  };
+
+  const addNode = (x: number, y: number) => {
+    if (!activeMap) return;
+    const newNode: MapNode = {
+      id: `node-${uuidv4().slice(0, 8)}`,
+      name: `Location ${activeMapNodes.length + 1}`,
+      x,
+      y,
+      targetSceneId: null,
+      unlockedByDefault: true,
+    };
+    updateActiveMap({ nodes: [...activeMapNodes, newNode] });
+    setEditingNodeId(newNode.id);
+  };
+
+  const updateNode = (id: string, updates: Partial<MapNode>) => {
+    if (!activeMap) return;
+    updateActiveMap({
+      nodes: activeMapNodes.map((node) =>
+        node.id === id ? { ...node, ...updates } : node,
+      ),
+    });
+  };
+
+  const deleteNode = (id: string) => {
+    if (!activeMap) return;
+    updateActiveMap({
+      nodes: activeMapNodes.filter((node) => node.id !== id),
+    });
+    setEditingNodeId(null);
+  };
+
+  return (
+    <div className="studio-page map-maker-page flex min-h-0 flex-1 overflow-hidden bg-[#080711] text-xs text-neutral-200">
+      <aside className="studio-rail flex w-56 shrink-0 flex-col border-r border-cyan-400/15 bg-black/40">
+        <div className="border-b border-cyan-400/15 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div>
+              <p className="font-comic text-sm font-bold text-white">
+                World Maps
+              </p>
+              <p className="text-[9px] uppercase tracking-[0.18em] text-cyan-300/60">
+                places & passages
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={addMap}
+              className="rounded border border-[#00ffcc]/40 bg-[#00ffcc]/10 p-1.5 text-[#00ffcc] hover:bg-[#00ffcc]/20"
+              aria-label="Create map"
+              title="Create map"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={addMap}
+            className="flex w-full items-center justify-center gap-1.5 rounded-[4px_10px_4px_10px] border border-pink-500/40 bg-pink-500/10 px-3 py-2 font-comic text-[11px] font-bold text-pink-200 hover:bg-pink-500/20"
+          >
+            <Plus size={13} />
+            New Map
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-1.5 overflow-y-auto p-2">
+          {maps.map((map) => {
+            const isActive = activeMapId === map.id;
+            return (
+              <button
+                type="button"
+                key={map.id}
+                onClick={() => {
+                  setActiveMapId(map.id);
+                  setEditingNodeId(null);
+                }}
+                className={`group flex w-full items-center gap-2 rounded border p-2 text-left transition ${
+                  isActive
+                    ? "border-[#00ffcc]/50 bg-[#00ffcc]/10 text-white shadow-[0_0_16px_rgba(0,255,204,0.08)]"
+                    : "border-transparent text-neutral-400 hover:border-pink-500/25 hover:bg-pink-500/5 hover:text-white"
+                }`}
+              >
+                <span
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded border ${
+                    isActive
+                      ? "border-[#00ffcc]/30 bg-black/40 text-[#00ffcc]"
+                      : "border-neutral-800 bg-neutral-950 text-pink-400"
+                  }`}
+                >
+                  <Route size={15} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-bold">{map.name}</span>
+                  <span className="block text-[9px] text-neutral-500">
+                    {map.nodes.length} location
+                    {map.nodes.length === 1 ? "" : "s"}
+                  </span>
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    deleteMap(map.id);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.stopPropagation();
+                      deleteMap(map.id);
+                    }
+                  }}
+                  className="rounded p-1 text-neutral-600 opacity-0 hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
+                  aria-label={`Delete ${map.name}`}
+                >
+                  <Trash2 size={12} />
+                </span>
+              </button>
+            );
+          })}
+
+          {maps.length === 0 && (
+            <div className="px-3 py-8 text-center text-neutral-600">
+              <Route className="mx-auto mb-2 opacity-40" size={24} />
+              No maps yet.
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {activeMap ? (
+        <section className="flex min-w-0 flex-1 flex-col">
+          <header className="studio-feature-header studio-feature-header--compact flex min-h-16 items-center gap-4 border-b border-cyan-400/15 bg-[#0d0b1a]/95 px-4 py-2">
+            <div className="min-w-0 flex-1">
+              <label className="mb-1 block text-[9px] font-bold uppercase tracking-[0.16em] text-neutral-500">
+                Map name
+              </label>
+              <input
+                type="text"
+                value={activeMap.name}
+                onChange={(event) =>
+                  updateActiveMap({ name: event.target.value })
+                }
+                className="w-full max-w-sm rounded border border-neutral-700 bg-black/40 px-2.5 py-1.5 font-comic text-sm font-bold text-white outline-none focus:border-[#00ffcc]/70"
+              />
+            </div>
+
+            <div className="min-w-72 max-w-md flex-1">
+              <AssetInspectorSlot
+                label="Map artwork"
+                asset={backgroundAsset}
+                emptyLabel="Planning grid"
+                chooseLabel="Choose artwork"
+                previewShape="wide"
+                compact
+                onChoose={() =>
+                  openAssetPicker("image", (assetId) => {
+                    const asset = imageAssets.find(
+                      (candidate) => candidate.id === assetId,
+                    );
+                    if (asset) updateActiveMap({ backgroundSrc: asset.src });
+                  })
+                }
+                onClear={() => updateActiveMap({ backgroundSrc: null })}
+              />
+            </div>
+
+            <div className="grid min-w-[260px] max-w-md flex-1 grid-cols-2 gap-2 rounded border border-neutral-800 bg-black/30 p-2">
+              <label className="col-span-2 text-[9px] font-bold uppercase tracking-[0.16em] text-neutral-500">
+                Artwork placement
+              </label>
+              <select
+                value={activeMapFit}
+                onChange={(event) =>
+                  updateActiveMap({
+                    backgroundFit: event.target.value as FastTravelMap["backgroundFit"],
+                  })
+                }
+                className="col-span-2 rounded border border-neutral-700 bg-black/50 px-2 py-1 text-[11px] text-neutral-100 outline-none focus:border-[#00ffcc]/70"
+              >
+                <option value="contain">Fit whole image</option>
+                <option value="cover">Fill screen/crop edges</option>
+                <option value="fill">Stretch to screen</option>
+              </select>
+              <label className="text-[10px] text-neutral-400">
+                Zoom
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2"
+                  step="0.01"
+                  value={activeMapScale}
+                  onChange={(event) =>
+                    updateActiveMap({
+                      backgroundScale: Number(event.target.value),
+                    })
+                  }
+                  className="mt-1 w-full accent-[#00ffcc]"
+                />
+              </label>
+              <label className="text-[10px] text-neutral-400">
+                Pan X
+                <input
+                  type="range"
+                  min="-50"
+                  max="50"
+                  step="1"
+                  value={activeMapOffsetX}
+                  onChange={(event) =>
+                    updateActiveMap({
+                      backgroundOffsetX: Number(event.target.value),
+                    })
+                  }
+                  className="mt-1 w-full accent-pink-400"
+                />
+              </label>
+              <label className="text-[10px] text-neutral-400">
+                Pan Y
+                <input
+                  type="range"
+                  min="-50"
+                  max="50"
+                  step="1"
+                  value={activeMapOffsetY}
+                  onChange={(event) =>
+                    updateActiveMap({
+                      backgroundOffsetY: Number(event.target.value),
+                    })
+                  }
+                  className="mt-1 w-full accent-pink-400"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() =>
+                  updateActiveMap({
+                    backgroundFit: "contain",
+                    backgroundScale: 1,
+                    backgroundOffsetX: 0,
+                    backgroundOffsetY: 0,
+                  })
+                }
+                className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-[10px] font-bold text-neutral-300 hover:border-[#00ffcc]/50 hover:text-[#00ffcc]"
+              >
+                Reset
+              </button>
+            </div>
+
+            <div className="hidden items-center gap-3 border-l border-neutral-800 pl-4 text-[10px] text-neutral-500 lg:flex">
+              <span>
+                <strong className="text-[#00ffcc]">
+                  {activeMapNodes.length}
+                </strong>{" "}
+                locations
+              </span>
+              <span className="flex items-center gap-1">
+                <MousePointerClick size={11} className="text-pink-400" />
+                Click map to add
+              </span>
+            </div>
+          </header>
+
+          <div className="flex min-h-0 flex-1">
+            <main className="studio-page-content relative min-w-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_top,#17152a_0%,#0a0912_60%)] p-5">
+              <div className="mx-auto flex min-h-full max-w-[1180px] items-center justify-center">
+                <div className="w-full">
+                  <div className="mb-2 flex items-end justify-between px-1">
+                    <div>
+                      <p className="font-comic text-xs font-bold text-white">
+                        Map Board
+                      </p>
+                      <p className="text-[9px] text-neutral-500">
+                        Place locations now; connect each one to a scene later.
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-neutral-800 bg-black/40 px-2 py-1 text-[9px] text-neutral-500">
+                      Coordinates are handled for you ✦
+                    </span>
+                  </div>
+
+                  <div className="studio-panel overflow-hidden rounded-[7px_18px_7px_18px] border border-[#00ffcc]/25 bg-black/30 p-2 shadow-[0_18px_70px_rgba(0,0,0,0.42)]">
+                    <div
+                      className={`relative aspect-[3/2] min-h-[420px] w-full cursor-crosshair overflow-hidden rounded border border-white/10 ${
+                        activeMap.backgroundSrc
+                          ? "bg-black"
+                          : "bg-[#121328] bg-[radial-gradient(circle,rgba(0,255,204,0.16)_1px,transparent_1px)] [background-size:24px_24px]"
+                      }`}
+                      onClick={(event) => {
+                        if (
+                          event.target !== event.currentTarget &&
+                          (event.target as HTMLElement).tagName !== "IMG"
+                        ) {
+                          return;
+                        }
+                        const rect =
+                          event.currentTarget.getBoundingClientRect();
+                        addNode(
+                          ((event.clientX - rect.left) / rect.width) * 100,
+                          ((event.clientY - rect.top) / rect.height) * 100,
+                        );
+                      }}
+                    >
+                      {activeMap.backgroundSrc && (
+                        <img
+                          src={activeMap.backgroundSrc}
+                          alt={`${activeMap.name} background`}
+                          className="pointer-events-none absolute inset-0 h-full w-full"
+                          style={{
+                            objectFit:
+                              activeMapFit === "fill" ? "fill" : activeMapFit,
+                            transform: `translate(${activeMapOffsetX}%, ${activeMapOffsetY}%) scale(${activeMapScale})`,
+                            transformOrigin: "center",
+                          }}
+                        />
+                      )}
+
+                      {!activeMap.backgroundSrc &&
+                        activeMapNodes.length === 0 && (
+                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-8">
+                            <div className="studio-empty-state max-w-sm rounded-[6px_18px_6px_18px] border border-pink-500/30 bg-[#080711]/90 p-5 text-center shadow-2xl backdrop-blur">
+                              <Sparkles
+                                size={24}
+                                className="mx-auto mb-2 text-pink-400"
+                              />
+                              <h3 className="font-comic text-base font-bold text-white">
+                                Plot your little universe
+                              </h3>
+                              <p className="mt-1 text-[11px] leading-relaxed text-neutral-400">
+                                Click anywhere to make the first location. No
+                                coordinates, graph math, or cartography degree
+                                required.
+                              </p>
+                              <div className="mt-3 flex items-center justify-center gap-2 text-[9px] font-bold uppercase tracking-wider text-[#00ffcc]">
+                                <MousePointerClick size={12} />
+                                Click to place
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                      {activeMapNodes.map((node) => {
+                        const isEditing = editingNodeId === node.id;
+                        return (
+                          <button
+                            type="button"
+                            key={node.id}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setEditingNodeId(node.id);
+                            }}
+                            className={`group absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center ${
+                              isEditing ? "z-20" : "z-10"
+                            }`}
+                            style={{ left: `${node.x}%`, top: `${node.y}%` }}
+                          >
+                            <span
+                              className={`flex h-11 w-11 items-center justify-center rounded-full border-2 shadow-xl transition ${
+                                isEditing
+                                  ? "scale-110 border-[#00ffcc] bg-[#00ffcc]/20 text-[#00ffcc] opacity-95 shadow-[0_0_24px_rgba(0,255,204,0.28)]"
+                                  : "border-pink-400/70 bg-[#120d1d]/35 text-pink-300 opacity-45 group-hover:scale-110 group-hover:border-pink-300 group-hover:opacity-95 group-focus-visible:opacity-95"
+                              }`}
+                            >
+                              {node.iconSrc ? (
+                                <img
+                                  src={node.iconSrc}
+                                  alt=""
+                                  className="h-8 w-8 object-contain opacity-80 drop-shadow"
+                                />
+                              ) : (
+                                <MapPin size={23} className="opacity-80" />
+                              )}
+                            </span>
+                            <span
+                              className={`pointer-events-none mt-1 max-w-36 truncate rounded border px-2 py-1 font-comic text-[10px] font-bold shadow-xl transition-opacity ${
+                                isEditing
+                                  ? "border-[#00ffcc]/60 bg-[#071411] text-white opacity-100"
+                                  : "border-pink-500/30 bg-[#080711]/95 text-pink-100 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+                              }`}
+                            >
+                              {node.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </main>
+
+            <aside className="studio-inspector w-72 shrink-0 overflow-y-auto border-l border-cyan-400/15 bg-black/45">
+              {editingNode ? (
+                <div className="space-y-4 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-comic text-sm font-bold text-white">
+                        Edit Location
+                      </p>
+                      <p className="text-[9px] uppercase tracking-[0.16em] text-pink-300/70">
+                        destination spell
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEditingNodeId(null)}
+                      className="rounded border border-neutral-800 p-1.5 text-neutral-500 hover:text-white"
+                      aria-label="Close location inspector"
+                    >
+                      <ChevronLeft size={14} />
+                    </button>
+                  </div>
+
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] font-bold text-neutral-400">
+                      Location name
+                    </span>
+                    <input
+                      type="text"
+                      value={editingNode.name}
+                      onChange={(event) =>
+                        updateNode(editingNode.id, {
+                          name: event.target.value,
+                        })
+                      }
+                      className="w-full rounded border border-neutral-700 bg-neutral-950 px-2.5 py-2 font-comic text-sm font-bold outline-none focus:border-[#00ffcc]/70"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] font-bold text-neutral-400">
+                      Opens which scene?
+                    </span>
+                    <select
+                      value={editingNode.targetSceneId || ""}
+                      onChange={(event) =>
+                        updateNode(editingNode.id, {
+                          targetSceneId: event.target.value || null,
+                        })
+                      }
+                      className="w-full rounded border border-neutral-700 bg-neutral-950 px-2.5 py-2 outline-none focus:border-[#00ffcc]/70"
+                    >
+                      <option value="">Choose a scene later</option>
+                      {project.scenes.map((scene) => (
+                        <option key={scene.id} value={scene.id}>
+                          {scene.name}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block text-[9px] leading-relaxed text-neutral-600">
+                      Clicking this location during play sends the player there.
+                    </span>
+                  </label>
+
+                  <AssetInspectorSlot
+                    label="Location icon"
+                    description="The picture shown on this map pin."
+                    asset={iconAsset}
+                    emptyLabel="Default map pin"
+                    chooseLabel="Choose icon"
+                    compact
+                    onChoose={() =>
+                      openAssetPicker("image", (assetId) => {
+                        const asset = imageAssets.find(
+                          (candidate) => candidate.id === assetId,
+                        );
+                        if (asset) {
+                          updateNode(editingNode.id, { iconSrc: asset.src });
+                        }
+                      })
+                    }
+                    onClear={() =>
+                      updateNode(editingNode.id, { iconSrc: null })
+                    }
+                  />
+
+                  <div className="rounded border border-neutral-800 bg-neutral-950/70 p-3">
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={editingNode.unlockedByDefault}
+                        onChange={(event) =>
+                          updateNode(editingNode.id, {
+                            unlockedByDefault: event.target.checked,
+                          })
+                        }
+                        className="rounded border-neutral-700 bg-neutral-900 text-[#00ffcc] focus:ring-[#00ffcc]"
+                      />
+                      {editingNode.unlockedByDefault ? (
+                        <Unlock size={14} className="text-[#00ffcc]" />
+                      ) : (
+                        <Lock size={14} className="text-yellow-300" />
+                      )}
+                      <span className="font-bold">
+                        Available from the start
+                      </span>
+                    </label>
+
+                    {!editingNode.unlockedByDefault && (
+                      <label className="mt-3 block border-t border-neutral-800 pt-3">
+                        <span className="mb-1 block text-[10px] text-neutral-400">
+                          Unlock after story flag
+                        </span>
+                        <select
+                          value={editingNode.requiredFlagId || ""}
+                          onChange={(event) =>
+                            updateNode(editingNode.id, {
+                              requiredFlagId:
+                                event.target.value || undefined,
+                            })
+                          }
+                          className="w-full rounded border border-neutral-700 bg-black px-2 py-1.5"
+                        >
+                          <option value="">No flag selected</option>
+                          {(project.gameFlags || []).map((flag) => (
+                            <option key={flag} value={flag}>
+                              {flag}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => deleteNode(editingNode.id)}
+                    className="flex w-full items-center justify-center gap-1.5 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 font-bold text-red-300 hover:bg-red-500/20"
+                  >
+                    <Trash2 size={13} />
+                    Delete Location
+                  </button>
+                </div>
+              ) : (
+                <div className="flex min-h-full flex-col justify-center p-5 text-center">
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-[#00ffcc]/25 bg-[#00ffcc]/5 text-[#00ffcc]">
+                    <MapPin size={22} />
+                  </div>
+                  <p className="font-comic text-sm font-bold text-white">
+                    Location Inspector
+                  </p>
+                  <p className="mt-1 text-[10px] leading-relaxed text-neutral-500">
+                    Select a pin to name it, connect it to a scene, give it an
+                    icon, or decide when the player unlocks it.
+                  </p>
+                  <div className="mt-4 rounded border border-pink-500/20 bg-pink-500/5 p-3 text-left text-[9px] leading-relaxed text-neutral-500">
+                    <strong className="block text-pink-300">
+                      Your easy workflow:
+                    </strong>
+                    1. Click the map.
+                    <br />
+                    2. Name the location.
+                    <br />
+                    3. Choose the scene it opens.
+                  </div>
+                </div>
+              )}
+            </aside>
+          </div>
+        </section>
+      ) : (
+        <main className="studio-page-content flex flex-1 items-center justify-center bg-[radial-gradient(circle_at_center,#19152b_0%,#080711_65%)] p-8">
+          <div className="studio-empty-state max-w-md rounded-[8px_24px_8px_24px] border border-pink-500/25 bg-black/45 p-8 text-center shadow-2xl">
+            <Route size={38} className="mx-auto mb-3 text-pink-400" />
+            <h2 className="font-comic text-xl font-bold text-white">
+              Make the world navigable
+            </h2>
+            <p className="mt-2 text-[11px] leading-relaxed text-neutral-400">
+              A map is a visual menu of places. Drop pins, connect them to your
+              scenes, and decide what the player can visit.
+            </p>
+            <button
+              type="button"
+              onClick={addMap}
+              className="mt-5 inline-flex items-center gap-2 rounded-[4px_12px_4px_12px] border border-[#00ffcc]/50 bg-[#00ffcc]/10 px-4 py-2 font-comic font-bold text-[#00ffcc] hover:bg-[#00ffcc]/20"
+            >
+              <Plus size={15} />
+              Create First Map
+            </button>
+          </div>
+        </main>
+      )}
+
+    </div>
+  );
+}

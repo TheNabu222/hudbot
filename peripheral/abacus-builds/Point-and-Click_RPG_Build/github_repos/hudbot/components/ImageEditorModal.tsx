@@ -1,0 +1,374 @@
+import React, { useState, useRef } from 'react';
+import ReactCrop, { Crop, PixelCrop } from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
+import { Asset } from '../types';
+
+interface ImageEditorModalProps {
+  asset: Asset;
+  onSave: (newSrc: string, isNew: boolean, dimensions: { width: number; height: number }) => void;
+  onClose: () => void;
+}
+
+export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ asset, onSave, onClose }) => {
+  const [crop, setCrop] = useState<Crop>();
+  const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  
+  const [brightness, setBrightness] = useState(100);
+  const [contrast, setContrast] = useState(100);
+  const [saturate, setSaturate] = useState(100);
+  const [sepia, setSepia] = useState(0);
+  const [hue, setHue] = useState(0);
+  const [grayscale, setGrayscale] = useState(0);
+  const [invert, setInvert] = useState(0);
+  const [blur, setBlur] = useState(0);
+  const [sharpen, setSharpen] = useState(0);
+  const [upscale, setUpscale] = useState(1);
+  const [crispPixels, setCrispPixels] = useState(false);
+
+  const [chromaKeyColor, setChromaKeyColor] = useState<string>('');
+  const [chromaTolerance, setChromaTolerance] = useState<number>(30);
+
+  const getFilterString = () => {
+    return `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturate}%) sepia(${sepia}%) hue-rotate(${hue}deg) grayscale(${grayscale}%) invert(${invert}%) blur(${blur}px)`;
+  };
+
+  const applyChromaKey = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    if (!chromaKeyColor) return;
+    
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    
+    const hexToRgb = (hex: string) => {
+      const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : {r:0,g:0,b:0};
+    };
+    
+    const target = hexToRgb(chromaKeyColor);
+    
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      
+      const distance = Math.sqrt(
+        Math.pow(r - target.r, 2) + Math.pow(g - target.g, 2) + Math.pow(b - target.b, 2)
+      );
+      
+      if (distance <= chromaTolerance) {
+        data[i + 3] = 0; // Set alpha to 0 (transparent)
+      }
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
+  };
+
+  const applySharpen = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    if (sharpen <= 0) return;
+
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const source = new Uint8ClampedArray(imageData.data);
+    const data = imageData.data;
+    const amount = sharpen / 100;
+
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = (y * width + x) * 4;
+        for (let channel = 0; channel < 3; channel += 1) {
+          const center = source[index + channel];
+          const top = source[((y - 1) * width + x) * 4 + channel];
+          const bottom = source[((y + 1) * width + x) * 4 + channel];
+          const left = source[(y * width + x - 1) * 4 + channel];
+          const right = source[(y * width + x + 1) * 4 + channel];
+          const sharpened = center + (center * 4 - top - bottom - left - right) * amount;
+          data[index + channel] = Math.max(0, Math.min(255, sharpened));
+        }
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+  };
+
+  const renderEditedImage = () => {
+    if (!imgRef.current) return;
+    const image = imgRef.current;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let cropX = 0, cropY = 0, cropWidth = image.naturalWidth, cropHeight = image.naturalHeight;
+    if (completedCrop && completedCrop.width > 0 && completedCrop.height > 0) {
+      const scaleX = image.naturalWidth / image.width;
+      const scaleY = image.naturalHeight / image.height;
+      cropX = completedCrop.x * scaleX;
+      cropY = completedCrop.y * scaleY;
+      cropWidth = completedCrop.width * scaleX;
+      cropHeight = completedCrop.height * scaleY;
+    }
+
+    const outputScale = Math.max(1, upscale);
+    const outputWidth = Math.max(1, Math.round(cropWidth * outputScale));
+    const outputHeight = Math.max(1, Math.round(cropHeight * outputScale));
+
+    canvas.width = outputWidth;
+    canvas.height = outputHeight;
+
+    ctx.filter = getFilterString();
+    ctx.imageSmoothingEnabled = !crispPixels;
+    ctx.imageSmoothingQuality = 'high';
+
+    ctx.drawImage(
+      image,
+      cropX,
+      cropY,
+      cropWidth,
+      cropHeight,
+      0,
+      0,
+      outputWidth,
+      outputHeight
+    );
+    
+    applyChromaKey(ctx, outputWidth, outputHeight);
+    applySharpen(ctx, outputWidth, outputHeight);
+
+    return canvas;
+  };
+
+  const saveEditedImage = (isNew: boolean) => {
+    const canvas = renderEditedImage();
+    if (!canvas) return;
+    try {
+      const base64Image = canvas.toDataURL('image/png');
+      onSave(base64Image, isNew, { width: canvas.width, height: canvas.height });
+    } catch (e) {
+      setErrorMsg("Error saving image. If it's an external URL, it might have CORS restrictions that prevent editing. Try re-uploading the image directly.");
+      console.error(e);
+    }
+  };
+
+  const handleSave = async () => saveEditedImage(false);
+
+  const handleSaveAsNew = async () => saveEditedImage(true);
+
+  return (
+    <div className="image-editor-modal fixed inset-0 z-[30000] flex items-center justify-center bg-black/90 p-3 md:p-4">
+      {errorMsg && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[31000] bg-red-500 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2">
+          <span>{errorMsg}</span>
+          <button onClick={() => setErrorMsg(null)} className="text-white/80 hover:text-white">&times;</button>
+        </div>
+      )}
+      <div className="flex h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 shadow-2xl md:h-[90vh] md:flex-row">
+        
+        {/* Editor Area */}
+        <div className="flex-1 bg-neutral-950 flex flex-col relative overflow-hidden">
+          <div className="flex-1 p-4 flex items-center justify-center overflow-auto custom-scrollbar">
+            <ReactCrop crop={crop} onChange={(_, percentCrop) => setCrop(percentCrop)} onComplete={(c) => setCompletedCrop(c)}>
+              <img 
+                ref={imgRef}
+                src={asset.src} 
+                alt="Edit" 
+                crossOrigin="anonymous"
+                style={{ filter: getFilterString(), maxHeight: '70vh' }}
+                className="max-w-full select-none"
+              />
+            </ReactCrop>
+          </div>
+        </div>
+
+        {/* Controls Sidebar */}
+        <div className="flex max-h-[48vh] w-full flex-col overflow-y-auto border-t border-neutral-700 bg-neutral-900 p-4 custom-scrollbar md:max-h-none md:w-80 md:border-l md:border-t-0 md:p-6">
+          <div className="mb-6">
+            <h2 className="text-xl font-bold mb-1">Edit Image</h2>
+            <p className="mt-1 text-sm leading-relaxed text-neutral-400">Click and drag on the image to crop it. You can extract individual sprites from sheets this way!</p>
+          </div>
+
+          <div className="space-y-6 flex-1">
+            <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-3">
+              <h3 className="text-sm font-bold text-emerald-200">Quality Repair</h3>
+              <p className="mt-1 text-xs leading-relaxed text-neutral-300">
+                These are baked into the saved asset. Use Save as New first if you want a safe copy.
+              </p>
+
+              <div className="mt-4">
+                <div className="flex justify-between mb-1">
+                  <label className="text-sm text-neutral-300">Upscale</label>
+                  <span className="text-xs text-neutral-400">{upscale}×</span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="4"
+                  step="1"
+                  value={upscale}
+                  onChange={e => setUpscale(Number(e.target.value))}
+                  className="w-full accent-emerald-500"
+                />
+              </div>
+
+              <div className="mt-4">
+                <div className="flex justify-between mb-1">
+                  <label className="text-sm text-neutral-300">Sharpen</label>
+                  <span className="text-xs text-neutral-400">{sharpen}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="200"
+                  value={sharpen}
+                  onChange={e => setSharpen(Number(e.target.value))}
+                  className="w-full accent-emerald-500"
+                />
+              </div>
+
+              <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs font-bold text-neutral-200">
+                <input
+                  type="checkbox"
+                  checked={crispPixels}
+                  onChange={e => setCrispPixels(e.target.checked)}
+                  className="accent-emerald-500"
+                />
+                Crisp pixels / no smoothing
+              </label>
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-sm text-neutral-400">Brightness</label>
+                <span className="text-xs text-neutral-500">{brightness}%</span>
+              </div>
+              <input type="range" min="0" max="200" value={brightness} onChange={e => setBrightness(Number(e.target.value))} className="w-full accent-emerald-500" />
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-sm text-neutral-400">Contrast</label>
+                <span className="text-xs text-neutral-500">{contrast}%</span>
+              </div>
+              <input type="range" min="0" max="200" value={contrast} onChange={e => setContrast(Number(e.target.value))} className="w-full accent-emerald-500" />
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-sm text-neutral-400">Saturation</label>
+                <span className="text-xs text-neutral-500">{saturate}%</span>
+              </div>
+              <input type="range" min="0" max="200" value={saturate} onChange={e => setSaturate(Number(e.target.value))} className="w-full accent-emerald-500" />
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-sm text-neutral-400">Sepia</label>
+                <span className="text-xs text-neutral-500">{sepia}%</span>
+              </div>
+              <input type="range" min="0" max="100" value={sepia} onChange={e => setSepia(Number(e.target.value))} className="w-full accent-emerald-500" />
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-sm text-neutral-400">Hue Rotate</label>
+                <span className="text-xs text-neutral-500">{hue}deg</span>
+              </div>
+              <input type="range" min="0" max="360" value={hue} onChange={e => setHue(Number(e.target.value))} className="w-full accent-emerald-500" />
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-sm text-neutral-400">Grayscale</label>
+                <span className="text-xs text-neutral-500">{grayscale}%</span>
+              </div>
+              <input type="range" min="0" max="100" value={grayscale} onChange={e => setGrayscale(Number(e.target.value))} className="w-full accent-emerald-500" />
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-sm text-neutral-400">Invert</label>
+                <span className="text-xs text-neutral-500">{invert}%</span>
+              </div>
+              <input type="range" min="0" max="100" value={invert} onChange={e => setInvert(Number(e.target.value))} className="w-full accent-emerald-500" />
+            </div>
+
+            <div>
+              <div className="flex justify-between mb-1">
+                <label className="text-sm text-neutral-400">Blur</label>
+                <span className="text-xs text-neutral-500">{blur}px</span>
+              </div>
+              <input type="range" min="0" max="20" value={blur} onChange={e => setBlur(Number(e.target.value))} className="w-full accent-emerald-500" />
+            </div>
+
+            <div className="pt-4 mt-4 border-t border-neutral-800">
+              <h3 className="text-sm font-bold text-neutral-300 mb-2">Remove Background Color</h3>
+              <div className="flex items-center gap-2 mb-2">
+                <input 
+                  type="color" 
+                  value={chromaKeyColor || '#000000'} 
+                  onChange={e => setChromaKeyColor(e.target.value)}
+                  className="w-8 h-8 rounded cursor-pointer bg-neutral-800 border-none"
+                />
+                <div className="flex-1">
+                  <input 
+                    type="text" 
+                    value={chromaKeyColor} 
+                    onChange={e => setChromaKeyColor(e.target.value)}
+                    placeholder="#HexColor"
+                    className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm text-white"
+                  />
+                </div>
+                {chromaKeyColor && (
+                  <button onClick={() => setChromaKeyColor('')} className="p-1 rounded bg-neutral-800 hover:bg-red-500/20 text-neutral-400 hover:text-red-400">
+                    <span className="text-xs">Clear</span>
+                  </button>
+                )}
+              </div>
+              
+              {chromaKeyColor && (
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <label className="text-xs text-neutral-400">Tolerance (Color Match)</label>
+                    <span className="text-xs text-neutral-500">{chromaTolerance}</span>
+                  </div>
+                  <input type="range" min="0" max="255" value={chromaTolerance} onChange={e => setChromaTolerance(Number(e.target.value))} className="w-full accent-emerald-500" />
+                  <p className="mt-1 text-xs leading-relaxed text-amber-400">Transparency is applied when you save, even though this preview stays opaque.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 mt-4 border-t border-neutral-800">
+              <button 
+                onClick={() => {
+                  setBrightness(100);
+                  setContrast(100);
+                  setSaturate(100);
+                  setSepia(0);
+                  setHue(0);
+                  setGrayscale(0);
+                  setInvert(0);
+                  setBlur(0);
+                  setSharpen(0);
+                  setUpscale(1);
+                  setCrispPixels(false);
+                  setCrop(undefined);
+                  setCompletedCrop(undefined);
+                  setChromaKeyColor('');
+                }} 
+                className="w-full text-xs text-neutral-400 hover:text-white"
+              >
+                Reset Adjustments
+              </button>
+            </div>
+          </div>
+
+          <div className="pt-6 mt-auto border-t border-neutral-800 flex flex-col gap-2">
+            <button onClick={handleSaveAsNew} className="w-full py-2 rounded bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 transition-colors text-sm font-bold border border-indigo-500/50">Save as New Asset</button>
+            <div className="flex gap-2">
+              <button onClick={onClose} className="flex-1 py-2 rounded bg-neutral-800 hover:bg-neutral-700 transition-colors text-sm">Cancel</button>
+              <button onClick={handleSave} className="flex-1 py-2 rounded bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition-colors text-sm">Overwrite</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

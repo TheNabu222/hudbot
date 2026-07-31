@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Asset Codex — Lore-Aware Intake</title>
+<style>
+  :root{
+    --bg:#090911;--bg2:#111120;--panel:#151529;--panel2:#1c1c34;--ink:#f2eefc;--muted:#aaa3c7;--dim:#716a8e;
+    --accent:#b66cff;--accent2:#00e0d4;--good:#6ef7a5;--warn:#ffd166;--bad:#ff6b8a;--line:#2d2947;
+    --chip:#25223f;--shadow:0 18px 60px rgba(0,0,0,.45);--radius:18px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:radial-gradient(circle at top left,rgba(182,108,255,.25),transparent 32rem),linear-gradient(135deg,#07070d,#101020 45%,#070713);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden}
+  button,input,select,textarea{font:inherit;color:inherit}
+  button{border:0;cursor:pointer}
+  .app{height:100%;display:grid;grid-template-rows:auto 1fr;min-width:0}
+  header{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);background:rgba(9,9,17,.86);backdrop-filter:blur(12px);position:relative;z-index:10;box-shadow:0 6px 30px rgba(0,0,0,.25)}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:900;letter-spacing:.02em;white-space:nowrap}
+  .sigil{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#070713;font-weight:1000;box-shadow:0 0 28px rgba(182,108,255,.42)}
+  .project-name{background:transparent;border:1px solid transparent;border-radius:10px;padding:8px 9px;min-width:140px;max-width:240px;font-weight:700;color:var(--ink)}
+  .project-name:focus{outline:none;border-color:var(--accent);background:rgba(255,255,255,.04)}
+  .toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
+  .btn{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:9px 12px;color:var(--ink);font-weight:750;font-size:13px;display:inline-flex;align-items:center;gap:7px;transition:.14s transform,.14s border-color,.14s background}
+  .btn:hover{transform:translateY(-1px);border-color:rgba(182,108,255,.65);background:#242340}
+  .btn.primary{background:linear-gradient(135deg,var(--accent),#7d5cff);color:white;border-color:transparent}
+  .btn.good{background:linear-gradient(135deg,#13b981,#39d990);color:#04130c;border-color:transparent}
+  .btn.warn{background:rgba(255,209,102,.13);border-color:rgba(255,209,102,.45);color:#ffe2a0}
+  .btn.bad{background:rgba(255,107,138,.12);border-color:rgba(255,107,138,.42);color:#ff9db2}
+  .btn.ghost{background:transparent}
+  .btn.small{padding:6px 8px;border-radius:10px;font-size:12px}
+  input[type=file]{display:none}
+  .main{min-height:0;display:grid;grid-template-columns:270px minmax(0,1fr) 365px;gap:0;height:100%}
+  aside,.right{min-height:0;background:rgba(15,15,29,.86);border-right:1px solid var(--line);overflow:auto}
+  .right{border-right:0;border-left:1px solid var(--line)}
+  .side-section{padding:14px;border-bottom:1px solid var(--line)}
+  h2,h3,h4{margin:0}
+  .side-title{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim);font-weight:900;margin-bottom:10px}
+  .search{width:100%;background:#0c0c18;border:1px solid var(--line);border-radius:13px;padding:11px 12px;outline:none}
+  .search:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(182,108,255,.15)}
+  .nav-list{display:flex;flex-direction:column;gap:6px}
+  .nav-item{width:100%;display:flex;justify-content:space-between;gap:10px;align-items:center;text-align:left;background:transparent;color:var(--muted);border:1px solid transparent;border-radius:12px;padding:9px 10px;font-weight:700}
+  .nav-item:hover,.nav-item.active{background:rgba(182,108,255,.10);border-color:rgba(182,108,255,.28);color:var(--ink)}
+  .count{color:var(--dim);font-size:12px;font-weight:800}
+  .stage{min-width:0;min-height:0;display:grid;grid-template-rows:auto auto 1fr auto;background:rgba(7,7,14,.45);overflow:hidden}
+  .filterbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);background:rgba(12,12,24,.68)}
+  .select{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 9px;outline:none;color:var(--ink);font-weight:700;font-size:13px}
+  .bulkbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);background:rgba(182,108,255,.08)}
+  .bulkbar[hidden]{display:none}
+  .grid-wrap{min-height:0;overflow:auto;padding:16px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;align-items:start}
+  .card{position:relative;background:rgba(21,21,41,.86);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:0 10px 36px rgba(0,0,0,.24);transition:.14s transform,.14s border-color,.14s box-shadow}
+  .card:hover{transform:translateY(-2px);border-color:rgba(0,224,212,.48);box-shadow:0 18px 44px rgba(0,0,0,.32)}
+  .card.selected{border-color:var(--accent);box-shadow:0 0 0 3px rgba(182,108,255,.18),0 18px 44px rgba(0,0,0,.32)}
+  .thumb{aspect-ratio:1/1;background:#080811;display:grid;place-items:center;position:relative;overflow:hidden}
+  .thumb img,.thumb video{width:100%;height:100%;object-fit:contain;display:block}
+  .thumb audio{width:90%}
+  .media-icon{font-size:40px;color:var(--dim)}
+  .card-body{padding:10px;display:flex;flex-direction:column;gap:7px}
+  .card-name{font-weight:900;font-size:13px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .tag{display:inline-flex;align-items:center;gap:4px;border-radius:999px;background:var(--chip);border:1px solid rgba(255,255,255,.05);color:var(--muted);padding:4px 7px;font-size:11px;font-weight:800;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tag.type{color:#f2e9ff;border-color:rgba(182,108,255,.35);background:rgba(182,108,255,.14)}
+  .tag.status{color:#bffdf7;border-color:rgba(0,224,212,.28);background:rgba(0,224,212,.10)}
+  .checkbox{position:absolute;top:8px;left:8px;z-index:2;width:24px;height:24px;accent-color:var(--accent)}
+  .empty{height:100%;min-height:340px;display:grid;place-items:center;color:var(--muted);text-align:center;padding:30px}
+  .empty-card{max-width:520px;background:rgba(21,21,41,.68);border:1px dashed rgba(182,108,255,.4);border-radius:24px;padding:30px;box-shadow:var(--shadow)}
+  .empty-card h2{font-size:28px;margin-bottom:8px}
+  .empty-card p{line-height:1.55;color:var(--muted)}
+  .dropzone{border:2px dashed rgba(0,224,212,.42);border-radius:18px;padding:18px;text-align:center;color:var(--muted);background:rgba(0,224,212,.05);margin-top:14px}
+  .dropzone.drag{background:rgba(0,224,212,.14);border-color:var(--accent2);color:var(--ink)}
+  .editor{padding:14px;display:flex;flex-direction:column;gap:14px}
+  .panel{background:rgba(21,21,41,.72);border:1px solid var(--line);border-radius:18px;padding:14px;box-shadow:0 8px 28px rgba(0,0,0,.18)}
+  .panel h3{font-size:14px;margin-bottom:10px;color:var(--ink);display:flex;justify-content:space-between;gap:10px;align-items:center}
+  .field{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+  label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:900;color:var(--dim)}
+  .field input,.field textarea,.field select{width:100%;background:#0c0c18;border:1px solid var(--line);border-radius:12px;padding:10px 11px;outline:none;color:var(--ink)}
+  .field textarea{min-height:86px;resize:vertical;line-height:1.4}
+  .field input:focus,.field textarea:focus,.field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(182,108,255,.13)}
+  .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .chip{border:1px solid var(--line);background:var(--chip);color:var(--muted);border-radius:999px;padding:7px 10px;font-size:12px;font-weight:850;transition:.12s background,.12s border-color,.12s color}
+  .chip:hover,.chip.active{background:rgba(182,108,255,.18);border-color:rgba(182,108,255,.58);color:var(--ink)}
+  .chip.green.active{background:rgba(110,247,165,.15);border-color:rgba(110,247,165,.5);color:#cffff0}
+  .row{display:flex;gap:8px;align-items:center}.row>*{min-width:0}.row .grow{flex:1}
+  .preview-img{width:100%;max-height:230px;object-fit:contain;background:#090911;border:1px solid var(--line);border-radius:16px}
+  .statusline{padding:8px 14px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;color:var(--dim);font-size:12px;background:rgba(9,9,17,.7)}
+  .modal-backdrop{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.72);display:grid;place-items:center;padding:18px;backdrop-filter:blur(8px)}
+  .modal-backdrop[hidden]{display:none}
+  .modal{width:min(980px,100%);max-height:92vh;overflow:hidden;background:linear-gradient(180deg,#151529,#0e0e1b);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);display:grid;grid-template-rows:auto 1fr auto}
+  .modal-head,.modal-foot{padding:14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;justify-content:space-between}.modal-foot{border-top:1px solid var(--line);border-bottom:0}
+  .modal-body{padding:14px;overflow:auto}.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.45}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.tab{padding:8px 10px;border-radius:999px;background:var(--chip);border:1px solid var(--line);color:var(--muted);font-weight:900;font-size:12px}.tab.active{background:rgba(182,108,255,.18);border-color:rgba(182,108,255,.5);color:var(--ink)}
+  .review{position:fixed;inset:0;background:#070713;z-index:80;display:grid;grid-template-rows:auto 1fr auto}.review[hidden]{display:none}
+  .review-head,.review-foot{padding:12px 14px;display:flex;align-items:center;gap:10px;justify-content:space-between;border-bottom:1px solid var(--line);background:rgba(9,9,17,.9)}.review-foot{border-top:1px solid var(--line);border-bottom:0;flex-wrap:wrap}
+  .review-main{min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 390px;gap:0}.review-image{display:grid;place-items:center;min-height:0;padding:16px;overflow:auto;background:radial-gradient(circle,rgba(182,108,255,.11),transparent 30rem)}.review-image img,.review-image video{max-width:100%;max-height:78vh;object-fit:contain;border-radius:18px;box-shadow:var(--shadow);background:#000}.review-panel{border-left:1px solid var(--line);overflow:auto;background:rgba(15,15,29,.88);padding:14px}
+  .toast{position:fixed;left:50%;bottom:18px;z-index:100;transform:translateX(-50%);background:#101020;border:1px solid rgba(0,224,212,.45);box-shadow:var(--shadow);padding:11px 14px;border-radius:999px;color:var(--ink);font-weight:800;opacity:0;pointer-events:none;transition:.18s opacity,.18s transform}.toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:12px}.hint{font-size:12px;color:var(--muted);line-height:1.45}.danger-zone{border-color:rgba(255,107,138,.4);background:rgba(255,107,138,.07)}
+  @media(max-width:1100px){.main{grid-template-columns:230px minmax(0,1fr)}.right{position:fixed;right:0;top:62px;bottom:0;width:min(390px,92vw);transform:translateX(102%);transition:.18s transform;z-index:30;box-shadow:var(--shadow)}.right.open{transform:translateX(0)}.mobile-editor-toggle{display:inline-flex!important}.review-main{grid-template-columns:1fr}.review-panel{border-left:0;border-top:1px solid var(--line)}}
+  @media(max-width:760px){body{overflow:auto}.app{height:auto;min-height:100vh}.main{display:block;height:auto}.stage{min-height:calc(100vh - 64px)}aside{display:none}header{position:sticky;top:0}.toolbar .hide-sm{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.grid-wrap{padding:10px}.card-body{padding:8px}.right{top:58px}.brand span:last-child{display:none}.project-name{max-width:145px}.review-foot .btn{flex:1;justify-content:center}.review-panel{padding-bottom:90px}}
+  .mobile-editor-toggle{display:none}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header>
+    <div class="brand"><div class="sigil">∇</div><span>Asset Codex</span></div>
+    <input id="projectName" class="project-name" value="Cavebot Asset Codex" title="Project name" />
+    <div class="toolbar">
+      <label class="btn primary" for="assetInput">＋ Assets</label><input id="assetInput" type="file" multiple accept="image/*,audio/*,video/*" />
+      <label class="btn" for="jsonInput">Import JSON</label><input id="jsonInput" type="file" accept="application/json,.json" />
+      <button class="btn hide-sm" id="saveBtn">Save</button>
+      <button class="btn good" id="exportBtn">Export JSON</button>
+      <button class="btn warn hide-sm" id="aiPacketBtn">AI Packet</button>
+      <button class="btn hide-sm" id="loreBtn">Lore Bible</button>
+      <button class="btn" id="reviewBtn">Review</button>
+      <button class="btn mobile-editor-toggle" id="openEditorBtn">Editor</button>
+    </div>
+  </header>
+  <div class="main">
+    <aside>
+      <div class="side-section">
+        <input class="search" id="searchBox" placeholder="Search name, tags, notes..." />
+        <div id="dropZone" class="dropzone">Drop assets here</div>
+      </div>
+      <div class="side-section">
+        <div class="side-title">Status</div>
+        <div class="nav-list" id="statusList"></div>
+      </div>
+      <div class="side-section">
+        <div class="side-title">Types</div>
+        <div class="nav-list" id="typeList"></div>
+      </div>
+      <div class="side-section">
+        <div class="row"><div class="side-title grow">Collections</div><button class="btn small" id="addCollectionBtn">＋</button></div>
+        <div class="nav-list" id="collectionList"></div>
+      </div>
+      <div class="side-section">
+        <div class="side-title">Common Tags</div>
+        <div class="chips" id="tagCloud"></div>
+      </div>
+    </aside>
+    <main class="stage">
+      <div class="filterbar">
+        <select class="select" id="sortSelect"><option value="newest">Newest</option><option value="name">Name</option><option value="type">Type</option><option value="status">Status</option></select>
+        <select class="select" id="viewSelect"><option value="all">All assets</option><option value="selected">Selected only</option><option value="needsAi">Needs AI</option><option value="hasSuggestion">Has AI suggestion</option></select>
+        <button class="btn small" id="selectAllVisibleBtn">Select visible</button>
+        <button class="btn small" id="clearSelectionBtn">Clear selection</button>
+      </div>
+      <div class="bulkbar" id="bulkBar" hidden>
+        <strong id="bulkCount">0 selected</strong>
+        <select class="select" id="bulkType"><option value="">Set type...</option></select>
+        <select class="select" id="bulkStatus"><option value="">Set status...</option></select>
+        <input class="search" style="width:170px" id="bulkTag" placeholder="Add tag" />
+        <button class="btn small" id="bulkApplyBtn">Apply</button>
+        <button class="btn small warn" id="bulkAiPacketBtn">Packet for selected</button>
+      </div>
+      <div class="grid-wrap"><div class="grid" id="assetGrid"></div><div class="empty" id="emptyState" hidden></div></div>
+      <div class="statusline"><span id="statusText">Ready.</span><span id="storageText"></span></div>
+    </main>
+    <section class="right" id="rightPanel">
+      <div class="editor" id="editor"></div>
+    </section>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="loreModal" hidden>
+  <div class="modal">
+    <div class="modal-head"><h3>📜 Lore Bible</h3><button class="btn small" data-close-modal="loreModal">Close</button></div>
+    <div class="modal-body">
+      <p class="hint">This canon packet is what AI helpers should use to interpret lazy notes. Keep it rough if you need to. The app can search it locally and include relevant snippets in AI packets.</p>
+      <div class="split" id="loreFields"></div>
+    </div>
+    <div class="modal-foot"><button class="btn good" id="saveLoreBtn">Save Lore</button><button class="btn" id="exportLoreBtn">Export Lore JSON</button></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="packetModal" hidden>
+  <div class="modal">
+    <div class="modal-head"><h3>🤖 AI Organizing Packet</h3><button class="btn small" data-close-modal="packetModal">Close</button></div>
+    <div class="modal-body">
+      <p class="hint">Copy this into ChatGPT, Claude, Gemini, or Codex. Then paste the returned JSON into “Import AI Results.” This avoids automatic API calls.</p>
+      <textarea id="packetOutput" class="mono" style="width:100%;min-height:420px;background:#080811;border:1px solid var(--line);border-radius:14px;padding:12px"></textarea>
+    </div>
+    <div class="modal-foot"><button class="btn good" id="copyPacketBtn">Copy</button><button class="btn" id="downloadPacketBtn">Download Packet</button><label class="btn warn" for="aiResultsInput">Import AI Results</label><input id="aiResultsInput" type="file" accept="application/json,.json" /></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="suggestionModal" hidden>
+  <div class="modal">
+    <div class="modal-head"><h3>✨ AI Suggestion</h3><button class="btn small" data-close-modal="suggestionModal">Close</button></div>
+    <div class="modal-body"><div id="suggestionBody"></div></div>
+    <div class="modal-foot"><button class="btn good" id="acceptSuggestionBtn">Accept Suggestion</button><button class="btn bad" id="rejectSuggestionBtn">Reject</button></div>
+  </div>
+</div>
+
+<div class="review" id="reviewMode" hidden>
+  <div class="review-head"><strong id="reviewTitle">Review Mode</strong><div class="row"><button class="btn small" id="reviewCloseBtn">Exit</button></div></div>
+  <div class="review-main">
+    <div class="review-image" id="reviewMedia"></div>
+    <div class="review-panel" id="reviewEditor"></div>
+  </div>
+  <div class="review-foot">
+    <button class="btn" id="prevReviewBtn">← Previous</button>
+    <button class="btn primary" id="nextReviewBtn">Next →</button>
+    <button class="btn warn" id="reviewNeedsAiBtn">Mark Needs AI</button>
+    <button class="btn good" id="reviewPacketBtn">Packet This</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+'use strict';
+const TYPES=['NPC','Flora','Fauna','Item','Environment','Background','UI/HUD','Sound','Music','Cutscene','Gag','Quest','Logic','Dialogue','Lore','Web Asset','Later','Trash'];
+const STATUSES=['inbox','rough','needs_ai','ai_suggested','needs_review','ready_game','ready_web','imported','archived'];
+const QUICK_TAGS=['funny','creepy','sacred','cute','gross','vendor','enemy','collectible','door','key','quest','recipe','dialogue','ambient','clickable','background','icon','portrait','hud','flora','fauna','npc','item','cutscene','sound','web','logic','gag'];
+const LORE_KEYS=['tone','worldRules','biomes','factions','npcArchetypes','itemSystems','questPatterns','recurringGags','tagTaxonomy','logicSchema','doNotUse','openQuestions'];
+const DEFAULT_LORE={
+  tone:'weird, funny, occult, cave, mythic, tender, grotesque, playful',
+  worldRules:'Write rough rules here: what magic/tech exists, what cannot happen, what the player usually does.',
+  biomes:'Examples: wet shrine cave, fungal tunnels, bone market, under-river, machine grotto.',
+  factions:'Examples: undercave vendors, newt witnesses, moss guild, shrine keepers.',
+  npcArchetypes:'Examples: vendor, questgiver, companion, judge animal, unreliable guide, hostile clown.',
+  itemSystems:'Examples: keys, recipes, crafting ingredients, relics, cursed soup, collectible flora.',
+  questPatterns:'Examples: fetch weird object, unlock scene, trade item, solve gag chain, be judged by animal.',
+  recurringGags:'Examples: animals witnessed that, soup is suspicious, doors are hungry, keys are not always keys.',
+  tagTaxonomy:'npc, flora, fauna, item, ui, hud, background, ambient, cave, vendor, gag, quest, clickable, lore',
+  logicSchema:'canTalk, givesQuest, opensShop, givesItem, requiresItem, setsFlag, opensScene, playsSound, triggersGag',
+  doNotUse:'Anything that does not belong in this game world.',
+  openQuestions:'Loose questions, unresolved canon, things AI should ask before deciding.'
+};
+let state={projectName:'Cavebot Asset Codex',assets:[],collections:[],loreBible:{...DEFAULT_LORE},selectedId:null,selectedIds:[],filters:{search:'',type:'all',status:'all',collection:'all',tag:'all',view:'all',sort:'newest'},suggestionTarget:null,reviewIndex:0};
+const $=sel=>document.querySelector(sel);const $$=sel=>Array.from(document.querySelectorAll(sel));
+function uid(prefix='asset'){return prefix+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8)}
+function now(){return new Date().toISOString()}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._timer);t._timer=setTimeout(()=>t.classList.remove('show'),2200)}
+function saveLocal(){try{localStorage.setItem('asset_codex_state_v1',JSON.stringify(state));updateStorageText();toast('Saved locally.')}catch(e){alert('Local save failed. Images may be too large for browser storage. Export JSON as a backup.');console.error(e)}}
+function loadLocal(){try{const raw=localStorage.getItem('asset_codex_state_v1');if(raw){const loaded=JSON.parse(raw);state={...state,...loaded,loreBible:{...DEFAULT_LORE,...(loaded.loreBible||{})},filters:{...state.filters,...(loaded.filters||{})}}}catch(e){console.warn('Load failed',e)}}
+function updateStorageText(){let size=0;try{size=(localStorage.getItem('asset_codex_state_v1')||'').length}catch(e){}$('#storageText').textContent=size?`Local draft: ${(size/1024/1024).toFixed(2)} MB`:''}
+function download(name,mime,text){const blob=new Blob([text],{type:mime});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function splitCSV(s){return String(s||'').split(',').map(x=>x.trim()).filter(Boolean)}
+function unique(arr){return Array.from(new Set(arr.filter(Boolean)))}
+function inferType(file){if(file.type.startsWith('audio/'))return 'Sound';if(file.type.startsWith('video/'))return 'Cutscene';const n=file.name.toLowerCase();if(/npc|character|portrait/.test(n))return 'NPC';if(/flora|plant|mush|flower|tree|leaf/.test(n))return 'Flora';if(/fauna|animal|bird|newt|beast|creature/.test(n))return 'Fauna';if(/hud|ui|button|panel|frame|icon/.test(n))return 'UI/HUD';if(/bg|background|scene|cave|room/.test(n))return 'Background';if(/item|key|potion|relic|tool/.test(n))return 'Item';return 'Later'}
+function baseAsset(file,dataUrl){const clean=file.name.replace(/\.[^/.]+$/,'').replace(/[_-]+/g,' ');const type=inferType(file);return {id:uid('asset'),originalFilename:file.name,name:clean,type,mediaType:file.type||'application/octet-stream',dataUrl,sourcePath:file.name,tags:unique([type.toLowerCase().replace(/\/.*$/,''),'inbox']),collections:[],rawNote:'',description:'',logic:{},status:'inbox',aiSuggestion:null,aiHistory:[],createdAt:now(),updatedAt:now()}}
+function currentAsset(){return state.assets.find(a=>a.id===state.selectedId)||null}
+function selectedAssets(){return state.assets.filter(a=>state.selectedIds.includes(a.id))}
+function visibleAssets(){let arr=[...state.assets];const f=state.filters;const q=f.search.toLowerCase().trim();if(q)arr=arr.filter(a=>[a.name,a.originalFilename,a.type,a.status,a.description,a.rawNote,(a.tags||[]).join(' '),(a.collections||[]).join(' ')].join(' ').toLowerCase().includes(q));if(f.type!=='all')arr=arr.filter(a=>a.type===f.type);if(f.status!=='all')arr=arr.filter(a=>a.status===f.status);if(f.collection!=='all')arr=arr.filter(a=>(a.collections||[]).includes(f.collection));if(f.tag!=='all')arr=arr.filter(a=>(a.tags||[]).includes(f.tag));if(f.view==='selected')arr=arr.filter(a=>state.selectedIds.includes(a.id));if(f.view==='needsAi')arr=arr.filter(a=>a.status==='needs_ai'||!a.aiSuggestion);if(f.view==='hasSuggestion')arr=arr.filter(a=>!!a.aiSuggestion);arr.sort((a,b)=>{if(f.sort==='name')return a.name.localeCompare(b.name);if(f.sort==='type')return a.type.localeCompare(b.type)||a.name.localeCompare(b.name);if(f.sort==='status')return a.status.localeCompare(b.status)||a.name.localeCompare(b.name);return new Date(b.createdAt)-new Date(a.createdAt)});return arr}
+function renderAll(){ $('#projectName').value=state.projectName; renderSide(); renderGrid(); renderBulk(); renderEditor(); updateStorageText(); }
+function renderSide(){
+  const byStatus=Object.fromEntries(STATUSES.map(s=>[s,state.assets.filter(a=>a.status===s).length]));
+  $('#statusList').innerHTML=`<button class="nav-item ${state.filters.status==='all'?'active':''}" data-status="all"><span>All</span><span class="count">${state.assets.length}</span></button>`+STATUSES.map(s=>`<button class="nav-item ${state.filters.status===s?'active':''}" data-status="${s}"><span>${s.replaceAll('_',' ')}</span><span class="count">${byStatus[s]||0}</span></button>`).join('');
+  const typeCounts=Object.fromEntries(TYPES.map(t=>[t,state.assets.filter(a=>a.type===t).length]));
+  $('#typeList').innerHTML=`<button class="nav-item ${state.filters.type==='all'?'active':''}" data-type="all"><span>All types</span><span class="count">${state.assets.length}</span></button>`+TYPES.map(t=>`<button class="nav-item ${state.filters.type===t?'active':''}" data-type="${esc(t)}"><span>${esc(t)}</span><span class="count">${typeCounts[t]||0}</span></button>`).join('');
+  const cols=state.collections;
+  $('#collectionList').innerHTML=`<button class="nav-item ${state.filters.collection==='all'?'active':''}" data-collection="all"><span>All collections</span><span class="count">${state.assets.length}</span></button>`+cols.map(c=>`<button class="nav-item ${state.filters.collection===c.id?'active':''}" data-collection="${c.id}"><span>${esc(c.name)}</span><span class="count">${state.assets.filter(a=>(a.collections||[]).includes(c.id)).length}</span></button>`).join('');
+  const allTags=unique(state.assets.flatMap(a=>a.tags||[])).slice(0,60);
+  $('#tagCloud').innerHTML=QUICK_TAGS.concat(allTags.filter(t=>!QUICK_TAGS.includes(t))).slice(0,42).map(t=>`<button class="chip ${state.filters.tag===t?'active':''}" data-tag="${esc(t)}">${esc(t)}</button>`).join('');
+  $$('#statusList [data-status]').forEach(b=>b.onclick=()=>{state.filters.status=b.dataset.status;renderAll()});
+  $$('#typeList [data-type]').forEach(b=>b.onclick=()=>{state.filters.type=b.dataset.type;renderAll()});
+  $$('#collectionList [data-collection]').forEach(b=>b.onclick=()=>{state.filters.collection=b.dataset.collection;renderAll()});
+  $$('#tagCloud [data-tag]').forEach(b=>b.onclick=()=>{state.filters.tag=state.filters.tag===b.dataset.tag?'all':b.dataset.tag;renderAll()});
+}
+function mediaHTML(a){if((a.mediaType||'').startsWith('image/'))return `<img src="${a.dataUrl}" alt="${esc(a.name)}">`;if((a.mediaType||'').startsWith('video/'))return `<video src="${a.dataUrl}" muted></video>`;if((a.mediaType||'').startsWith('audio/'))return `<audio src="${a.dataUrl}" controls></audio>`;return `<div class="media-icon">◇</div>`}
+function renderGrid(){const arr=visibleAssets();$('#statusText').textContent=`${arr.length} visible · ${state.assets.length} total`;$('#emptyState').hidden=arr.length>0;$('#assetGrid').style.display=arr.length?'grid':'none';if(!arr.length){$('#emptyState').innerHTML=`<div class="empty-card"><h2>Gather the hoard.</h2><p>Import images, sounds, cutscenes, UI bits, gags, NPC portraits, flora, fauna — then attach lazy notes and export AI packets.</p><label class="btn primary" for="assetInput">＋ Import Assets</label></div>`;return} $('#assetGrid').innerHTML=arr.map(a=>`<article class="card ${state.selectedId===a.id?'selected':''}" data-id="${a.id}"><input class="checkbox" type="checkbox" ${state.selectedIds.includes(a.id)?'checked':''} data-check="${a.id}"><div class="thumb">${mediaHTML(a)}</div><div class="card-body"><div class="card-name" title="${esc(a.name)}">${esc(a.name||a.originalFilename)}</div><div class="card-meta"><span class="tag type">${esc(a.type)}</span><span class="tag status">${esc(a.status.replaceAll('_',' '))}</span></div><div class="card-meta">${(a.tags||[]).slice(0,4).map(t=>`<span class="tag">#${esc(t)}</span>`).join('')}</div></div></article>`).join('');
+  $$('#assetGrid .card').forEach(card=>card.onclick=e=>{if(e.target.matches('input[type=checkbox]'))return;state.selectedId=card.dataset.id;renderAll(); if(innerWidth<1100)$('#rightPanel').classList.add('open')});
+  $$('[data-check]').forEach(cb=>cb.onchange=()=>{const id=cb.dataset.check;if(cb.checked&&!state.selectedIds.includes(id))state.selectedIds.push(id);if(!cb.checked)state.selectedIds=state.selectedIds.filter(x=>x!==id);renderBulk();});
+}
+function renderBulk(){const n=state.selectedIds.length;$('#bulkBar').hidden=n===0;$('#bulkCount').textContent=`${n} selected`;$('#bulkType').innerHTML='<option value="">Set type...</option>'+TYPES.map(t=>`<option>${esc(t)}</option>`).join('');$('#bulkStatus').innerHTML='<option value="">Set status...</option>'+STATUSES.map(s=>`<option value="${s}">${s.replaceAll('_',' ')}</option>`).join('')}
+function logicString(a){try{return JSON.stringify(a.logic||{},null,2)}catch(e){return '{}'}}
+function renderEditor(){const a=currentAsset();const ed=$('#editor');if(!a){ed.innerHTML=`<div class="panel"><h3>No asset selected</h3><p class="hint">Select a card to name it, tag it, attach lore notes, and prepare it for AI curation.</p></div><div class="panel"><h3>Project Flow</h3><p class="hint">1. Import assets.<br>2. Dictate lazy notes.<br>3. Mark Needs AI.<br>4. Export AI packet.<br>5. Import/accept AI suggestions.<br>6. Export final manifest for Cavebot.</p></div>`;return}
+  ed.innerHTML=`<div class="panel"><h3>Selected Asset <button class="btn small" id="closeEditorMobile">Close</button></h3>${mediaHTML(a).replace('<img','<img class="preview-img"').replace('<video','<video class="preview-img" controls')}<div class="field"><label>Name</label><input id="edName" value="${esc(a.name)}"></div><div class="field"><label>Type</label><div class="chips">${TYPES.map(t=>`<button class="chip ${a.type===t?'active':''}" data-set-type="${esc(t)}">${esc(t)}</button>`).join('')}</div></div><div class="row"><div class="field grow"><label>Status</label><select id="edStatus">${STATUSES.map(s=>`<option value="${s}" ${a.status===s?'selected':''}>${s.replaceAll('_',' ')}</option>`).join('')}</select></div><div class="field grow"><label>Source / path</label><input id="edSource" value="${esc(a.sourcePath||'')}"></div></div><div class="field"><label>Tags, comma-separated</label><input id="edTags" value="${esc((a.tags||[]).join(', '))}"></div><div class="field"><label>Quick tags</label><div class="chips">${QUICK_TAGS.map(t=>`<button class="chip green ${(a.tags||[]).includes(t)?'active':''}" data-toggle-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div></div></div>
+  <div class="panel"><h3>Lazy Note <button class="btn small" id="micBtn">🎙️ Dictate</button></h3><p class="hint">Use your phone keyboard mic or this browser mic button if supported. Ramble. The raw spark is preserved.</p><div class="field"><label>Speak or type messy note</label><textarea id="edRawNote" placeholder="weird mushroom grandma, soup vendor, spoon key, funny but ominous...">${esc(a.rawNote||'')}</textarea></div><div class="field"><label>Description</label><textarea id="edDesc">${esc(a.description||'')}</textarea></div></div>
+  <div class="panel"><h3>Collections</h3><div class="chips">${state.collections.map(c=>`<button class="chip ${(a.collections||[]).includes(c.id)?'active':''}" data-toggle-collection="${c.id}">${esc(c.name)}</button>`).join('')||'<span class="hint">No collections yet.</span>'}</div><div class="row" style="margin-top:10px"><input class="search grow" id="newCollectionFromAsset" placeholder="New collection name"><button class="btn small" id="addColFromAsset">Add</button></div></div>
+  <div class="panel"><h3>Logic JSON</h3><p class="hint">Rough or exact. AI suggestions can fill this later.</p><div class="field"><label>logic</label><textarea id="edLogic" class="mono">${esc(logicString(a))}</textarea></div></div>
+  <div class="panel"><h3>Relevant Lore Preview</h3><div id="relevantLoreBox" class="hint mono">${esc(findRelevantLore(a).map(x=>`[${x.key}] ${x.snippet}`).join('\n\n')||'No matching lore snippets yet. Add lore or a richer note.')}</div></div>
+  <div class="panel"><h3>AI Suggestion</h3>${a.aiSuggestion?`<p class="hint">Suggestion available.</p><button class="btn good" id="viewSuggestionBtn">View / Accept</button>`:`<p class="hint">No suggestion yet.</p>`}<div class="row" style="margin-top:10px"><button class="btn warn grow" id="markNeedsAiBtn">Mark Needs AI</button><button class="btn grow" id="packetOneBtn">Packet This</button></div></div>
+  <div class="panel danger-zone"><h3>Danger</h3><button class="btn bad" id="deleteAssetBtn">Delete Asset</button></div>`;
+  bindEditor(a);
+}
+function touch(a){a.updatedAt=now();}
+function bindEditor(a){
+  const bind=(id,key)=>{$('#'+id).oninput=e=>{a[key]=e.target.value;touch(a); if(['edName','edTags'].includes(id))renderGrid();}};
+  $('#closeEditorMobile').onclick=()=>$('#rightPanel').classList.remove('open');bind('edName','name');bind('edSource','sourcePath');bind('edRawNote','rawNote');bind('edDesc','description');
+  $('#edStatus').onchange=e=>{a.status=e.target.value;touch(a);renderAll()};
+  $('#edTags').onchange=e=>{a.tags=unique(splitCSV(e.target.value));touch(a);renderAll()};
+  $('#edLogic').onchange=e=>{try{a.logic=JSON.parse(e.target.value||'{}');touch(a);toast('Logic JSON saved.')}catch(err){alert('Logic JSON is invalid.')}};
+  $$('[data-set-type]').forEach(b=>b.onclick=()=>{a.type=b.dataset.setType;touch(a);renderAll()});
+  $$('[data-toggle-tag]').forEach(b=>b.onclick=()=>{const t=b.dataset.toggleTag;const has=(a.tags||[]).includes(t);a.tags=has?a.tags.filter(x=>x!==t):unique([...(a.tags||[]),t]);touch(a);renderAll()});
+  $$('[data-toggle-collection]').forEach(b=>b.onclick=()=>{const id=b.dataset.toggleCollection;const has=(a.collections||[]).includes(id);a.collections=has?a.collections.filter(x=>x!==id):unique([...(a.collections||[]),id]);touch(a);renderAll()});
+  $('#addColFromAsset').onclick=()=>{const name=$('#newCollectionFromAsset').value.trim();if(!name)return;const c={id:uid('collection'),name,description:''};state.collections.push(c);a.collections=unique([...(a.collections||[]),c.id]);renderAll();saveLocal()};
+  $('#markNeedsAiBtn').onclick=()=>{a.status='needs_ai';touch(a);renderAll();toast('Marked Needs AI.')};
+  $('#packetOneBtn').onclick=()=>showPacket([a]);
+  $('#deleteAssetBtn').onclick=()=>{if(confirm('Delete this asset?')){state.assets=state.assets.filter(x=>x.id!==a.id);state.selectedIds=state.selectedIds.filter(x=>x!==a.id);state.selectedId=null;renderAll();saveLocal()}};
+  if($('#viewSuggestionBtn'))$('#viewSuggestionBtn').onclick=()=>showSuggestion(a.id);
+  $('#micBtn').onclick=()=>startDictation(text=>{a.rawNote=(a.rawNote? a.rawNote+' ':'')+text;touch(a);renderAll()});
+}
+function startDictation(cb){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){alert('Browser speech recognition is not available here. Use your phone keyboard microphone inside the note box.');return}const r=new SR();r.lang='en-US';r.interimResults=false;r.maxAlternatives=1;r.onresult=e=>cb(e.results[0][0].transcript);r.onerror=e=>alert('Dictation error: '+e.error);r.start();toast('Listening...')}
+function addCollection(){const name=prompt('Collection name?');if(!name)return;state.collections.push({id:uid('collection'),name:name.trim(),description:''});renderAll();saveLocal()}
+async function importFiles(files){const list=Array.from(files||[]);if(!list.length)return;let count=0;for(const file of list){const dataUrl=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=rej;fr.readAsDataURL(file)});state.assets.push(baseAsset(file,dataUrl));count++;}if(!state.selectedId&&state.assets[0])state.selectedId=state.assets[0].id;renderAll();saveLocal();toast(`Imported ${count} asset${count===1?'':'s'}.`)}
+function exportManifest(){const out={project:{name:state.projectName,version:'0.1',exportedAt:now(),generator:'Asset Codex single HTML'},collections:state.collections,loreBible:state.loreBible,assets:state.assets.map(a=>({...a})),mcpReady:{description:'Canonical asset/lore manifest for AI clients and MCP tools.',suggestedTools:['list_assets','get_asset','update_asset_metadata','read_lore_bible','find_relevant_lore','apply_ai_suggestion','export_manifest','commit_manifest_to_github']}};download(slug(state.projectName||'asset-codex')+'-manifest.json','application/json',JSON.stringify(out,null,2))}
+function slug(s){return String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'asset-codex'}
+function importManifest(file){const fr=new FileReader();fr.onload=()=>{try{const data=JSON.parse(fr.result);state.projectName=data.project?.name||data.projectName||state.projectName;state.assets=data.assets||[];state.collections=data.collections||[];state.loreBible={...DEFAULT_LORE,...(data.loreBible||{})};state.selectedId=state.assets[0]?.id||null;state.selectedIds=[];renderAll();saveLocal();toast('Imported JSON manifest.')}catch(e){alert('Could not import JSON.')}};fr.readAsText(file)}
+function tokens(s){return unique(String(s||'').toLowerCase().replace(/[^a-z0-9_ -]/g,' ').split(/\s+/).filter(w=>w.length>2))}
+function findRelevantLore(asset){const q=tokens([asset.name,asset.type,(asset.tags||[]).join(' '),asset.rawNote,asset.description].join(' '));if(!q.length)return [];return LORE_KEYS.map(key=>{const text=state.loreBible[key]||'';const words=tokens(text);const score=q.reduce((n,w)=>n+(words.includes(w)?1:0),0);return {key,score,snippet:text.slice(0,700)}}).filter(x=>x.score>0||/tagTaxonomy|logicSchema|tone/.test(x.key)).sort((a,b)=>b.score-a.score).slice(0,6)}
+function buildPacket(assets){const chosen=assets&&assets.length?assets:selectedAssets().length?selectedAssets():visibleAssets();const packet={instruction:`You are a lore-aware game asset curator. Given each asset's filename, type, tags, quick raw note, and relevant lore snippets, return reviewable structured JSON suggestions. Do not overwrite canon. Prefer existing lore terms. Return JSON only with {"assets":[...]}. Each suggestion should include assetId, suggestedType, name, category, tags, description, loreConnections, gameUses, logic, questHooks, dialogueHooks, gagHooks, webUses, confidence, reviewQuestions.`,projectName:state.projectName,loreBibleSummary:state.loreBible,assets:chosen.map(a=>({assetId:a.id,originalFilename:a.originalFilename,name:a.name,currentType:a.type,currentTags:a.tags,status:a.status,rawNote:a.rawNote,description:a.description,existingLogic:a.logic,relevantLore:findRelevantLore(a)})),outputSchema:{assets:[{assetId:'string',suggestedType:'string',name:'string',category:'string',tags:['string'],description:'string',loreConnections:['string'],gameUses:['string'],logic:{},questHooks:['string'],dialogueHooks:['string'],gagHooks:['string'],webUses:['string'],confidence:0.0,reviewQuestions:['string']}]}};return packet}
+function showPacket(assets){const packet=buildPacket(assets);$('#packetOutput').value=JSON.stringify(packet,null,2);$('#packetModal').hidden=false}
+function importAIResults(file){const fr=new FileReader();fr.onload=()=>{try{const data=JSON.parse(fr.result);const suggestions=Array.isArray(data)?data:(data.assets||data.suggestions||[]);let n=0;for(const s of suggestions){const id=s.assetId||s.id;const a=state.assets.find(x=>x.id===id);if(!a)continue;a.aiSuggestion=s;a.status='ai_suggested';a.aiHistory=a.aiHistory||[];a.aiHistory.push({at:now(),suggestion:s});n++;}renderAll();saveLocal();toast(`Imported ${n} AI suggestion${n===1?'':'s'}.`)}catch(e){alert('Could not import AI results JSON.')}};fr.readAsText(file)}
+function showSuggestion(assetId){const a=state.assets.find(x=>x.id===assetId);if(!a||!a.aiSuggestion)return;state.suggestionTarget=assetId;const s=a.aiSuggestion;$('#suggestionBody').innerHTML=`<div class="panel"><h3>${esc(s.name||a.name)}</h3><p class="hint">Confidence: ${esc(s.confidence??'unknown')}</p><pre class="mono" style="white-space:pre-wrap;background:#080811;border:1px solid var(--line);border-radius:14px;padding:12px">${esc(JSON.stringify(s,null,2))}</pre></div>`;$('#suggestionModal').hidden=false}
+function acceptSuggestion(){const a=state.assets.find(x=>x.id===state.suggestionTarget);if(!a||!a.aiSuggestion)return;const s=a.aiSuggestion;if(s.name)a.name=s.name;if(s.suggestedType)a.type=s.suggestedType;if(s.type)a.type=s.type;if(s.tags)a.tags=unique([...(a.tags||[]),...s.tags]);if(s.description)a.description=s.description;if(s.logic)a.logic={...(a.logic||{}),...s.logic};a.status='needs_review';touch(a);$('#suggestionModal').hidden=true;renderAll();saveLocal();toast('Suggestion accepted for review.')}
+function rejectSuggestion(){const a=state.assets.find(x=>x.id===state.suggestionTarget);if(a){a.aiSuggestion=null;a.status='needs_ai';touch(a)}$('#suggestionModal').hidden=true;renderAll();saveLocal();toast('Suggestion rejected.')}
+function renderLoreFields(){const wrap=$('#loreFields');wrap.innerHTML=LORE_KEYS.map(k=>`<div class="field"><label>${esc(k)}</label><textarea data-lore-key="${k}" rows="7">${esc(state.loreBible[k]||'')}</textarea></div>`).join('')}
+function saveLore(){ $$('[data-lore-key]').forEach(t=>state.loreBible[t.dataset.loreKey]=t.value);saveLocal();toast('Lore saved.')}
+function reviewAssets(){return visibleAssets().filter(a=>a.status!=='archived')}
+function openReview(){const arr=reviewAssets();if(!arr.length){toast('No visible assets to review.');return}state.reviewIndex=Math.max(0,arr.findIndex(a=>a.id===state.selectedId));if(state.reviewIndex<0)state.reviewIndex=0;$('#reviewMode').hidden=false;renderReview()}
+function renderReview(){const arr=reviewAssets();const a=arr[state.reviewIndex];if(!a){$('#reviewMode').hidden=true;return}state.selectedId=a.id;$('#reviewTitle').textContent=`${state.reviewIndex+1}/${arr.length} · ${a.name||a.originalFilename}`;$('#reviewMedia').innerHTML=mediaHTML(a);$('#reviewEditor').innerHTML=`<div class="panel"><h3>${esc(a.name||a.originalFilename)}</h3><div class="field"><label>Name</label><input id="rvName" value="${esc(a.name||'')}"></div><div class="field"><label>Type</label><div class="chips">${TYPES.map(t=>`<button class="chip ${a.type===t?'active':''}" data-rv-type="${esc(t)}">${esc(t)}</button>`).join('')}</div></div><div class="field"><label>Quick tags</label><div class="chips">${QUICK_TAGS.map(t=>`<button class="chip ${(a.tags||[]).includes(t)?'active':''}" data-rv-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div></div><div class="field"><label>Speak or type messy note</label><textarea id="rvNote" rows="8">${esc(a.rawNote||'')}</textarea></div><div class="row"><button class="btn small" id="rvMic">🎙️ Dictate</button><select class="select grow" id="rvStatus">${STATUSES.map(s=>`<option value="${s}" ${a.status===s?'selected':''}>${s.replaceAll('_',' ')}</option>`).join('')}</select></div></div>`;
+  $('#rvName').oninput=e=>{a.name=e.target.value;touch(a)};$('#rvNote').oninput=e=>{a.rawNote=e.target.value;touch(a)};$('#rvStatus').onchange=e=>{a.status=e.target.value;touch(a)};$('#rvMic').onclick=()=>startDictation(text=>{a.rawNote=(a.rawNote? a.rawNote+' ':'')+text;renderReview()});$$('[data-rv-type]').forEach(b=>b.onclick=()=>{a.type=b.dataset.rvType;touch(a);renderReview()});$$('[data-rv-tag]').forEach(b=>b.onclick=()=>{const t=b.dataset.rvTag;const has=(a.tags||[]).includes(t);a.tags=has?a.tags.filter(x=>x!==t):unique([...(a.tags||[]),t]);touch(a);renderReview()});
+}
+function moveReview(delta){const arr=reviewAssets();if(!arr.length)return;state.reviewIndex=(state.reviewIndex+delta+arr.length)%arr.length;renderReview();renderAll()}
+function localHeuristicDraft(a){const text=[a.name,a.originalFilename,a.rawNote,(a.tags||[]).join(' ')].join(' ').toLowerCase();let type=a.type;if(/vendor|talk|dialogue|npc|grandma|witch|person|portrait/.test(text))type='NPC';else if(/flower|plant|mushroom|moss|flora/.test(text))type='Flora';else if(/animal|bird|newt|beast|fauna/.test(text))type='Fauna';else if(/hud|ui|button|panel|icon|frame/.test(text))type='UI/HUD';else if(/quest|objective/.test(text))type='Quest';else if(/sound|sfx|audio|drip|music/.test(text))type='Sound';else if(/cutscene|video|intro|ending/.test(text))type='Cutscene';else if(/key|item|relic|potion|tool/.test(text))type='Item';const tags=unique([...(a.tags||[]),...tokens(text).filter(w=>QUICK_TAGS.includes(w)||['mushroom','soup','spoon','cave','vendor','newt','ritual','door'].includes(w)).slice(0,12)]);return {assetId:a.id,suggestedType:type,name:a.name,category:type.toLowerCase().replace('/','_'),tags,description:a.rawNote?`Rough concept: ${a.rawNote}`:a.description,loreConnections:findRelevantLore(a).map(x=>x.key),gameUses:[],logic:{},questHooks:[],dialogueHooks:[],gagHooks:[],webUses:[],confidence:.35,reviewQuestions:['Local heuristic only. Run a real AI packet for lore-aware curation.']}}
+function bindGlobal(){
+  $('#assetInput').onchange=e=>importFiles(e.target.files);$('#jsonInput').onchange=e=>e.target.files[0]&&importManifest(e.target.files[0]);$('#saveBtn').onclick=saveLocal;$('#exportBtn').onclick=exportManifest;$('#aiPacketBtn').onclick=()=>showPacket();$('#bulkAiPacketBtn').onclick=()=>showPacket(selectedAssets());$('#loreBtn').onclick=()=>{renderLoreFields();$('#loreModal').hidden=false};$('#saveLoreBtn').onclick=saveLore;$('#exportLoreBtn').onclick=()=>download(slug(state.projectName)+'-lore-bible.json','application/json',JSON.stringify(state.loreBible,null,2));$('#addCollectionBtn').onclick=addCollection;$('#reviewBtn').onclick=openReview;$('#openEditorBtn').onclick=()=>$('#rightPanel').classList.toggle('open');
+  $('#projectName').oninput=e=>{state.projectName=e.target.value};$('#searchBox').oninput=e=>{state.filters.search=e.target.value;renderAll()};$('#sortSelect').onchange=e=>{state.filters.sort=e.target.value;renderAll()};$('#viewSelect').onchange=e=>{state.filters.view=e.target.value;renderAll()};
+  $('#selectAllVisibleBtn').onclick=()=>{state.selectedIds=unique([...state.selectedIds,...visibleAssets().map(a=>a.id)]);renderAll()};$('#clearSelectionBtn').onclick=()=>{state.selectedIds=[];renderAll()};$('#bulkApplyBtn').onclick=()=>{const typ=$('#bulkType').value,st=$('#bulkStatus').value,tag=$('#bulkTag').value.trim();for(const a of selectedAssets()){if(typ)a.type=typ;if(st)a.status=st;if(tag)a.tags=unique([...(a.tags||[]),tag]);touch(a)}$('#bulkTag').value='';renderAll();saveLocal()};
+  $$('[data-close-modal]').forEach(b=>b.onclick=()=>$('#'+b.dataset.closeModal).hidden=true);$('#copyPacketBtn').onclick=async()=>{await navigator.clipboard.writeText($('#packetOutput').value);toast('Packet copied.')};$('#downloadPacketBtn').onclick=()=>download(slug(state.projectName)+'-ai-packet.json','application/json',$('#packetOutput').value);$('#aiResultsInput').onchange=e=>e.target.files[0]&&importAIResults(e.target.files[0]);$('#acceptSuggestionBtn').onclick=acceptSuggestion;$('#rejectSuggestionBtn').onclick=rejectSuggestion;
+  $('#reviewCloseBtn').onclick=()=>{$('#reviewMode').hidden=true;renderAll();saveLocal()};$('#prevReviewBtn').onclick=()=>moveReview(-1);$('#nextReviewBtn').onclick=()=>moveReview(1);$('#reviewNeedsAiBtn').onclick=()=>{const a=currentAsset();if(a){a.status='needs_ai';touch(a);renderReview();toast('Marked Needs AI.')}};$('#reviewPacketBtn').onclick=()=>{const a=currentAsset();if(a)showPacket([a])};
+  const dz=$('#dropZone');['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag')}));['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag')}));dz.addEventListener('drop',e=>importFiles(e.dataTransfer.files));
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'){$$('.modal-backdrop').forEach(m=>m.hidden=true);$('#rightPanel').classList.remove('open')}});
+  // double click empty status text to create local heuristic suggestions for selected/visible as a free no-API helper
+  $('#statusText').ondblclick=()=>{const arr=selectedAssets().length?selectedAssets():visibleAssets();for(const a of arr){a.aiSuggestion=localHeuristicDraft(a);a.status='ai_suggested';touch(a)}renderAll();saveLocal();toast(`Made ${arr.length} local rough suggestion${arr.length===1?'':'s'}.`)};
+}
+loadLocal();bindGlobal();renderAll();
+})();
+</script>
+</body>
+</html>

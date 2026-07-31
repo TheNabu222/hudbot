@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#08060d">
+    <title>Cavebot Studio</title>
+    <script>
+      if (
+        window.location.protocol === "file:" &&
+        !window.location.pathname.endsWith("/dist/index.html")
+      ) {
+        window.location.replace(new URL("./dist/index.html", window.location.href).href);
+      }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              neutral: {
+                50: '#fff9ff',
+                100: '#f8ecff',
+                200: '#eadcff',
+                300: '#cfbde8',
+                350: '#baa7d1',
+                400: '#a08caf',
+                450: '#8a7598',
+                500: '#73627f',
+                600: '#564a66',
+                700: '#34364d',
+                800: '#171d31',
+                850: '#111628',
+                900: '#0c1020',
+                950: '#08060d',
+              },
+              emerald: {
+                50: '#eafffa',
+                100: '#baffed',
+                200: '#76ffdf',
+                300: '#2effd1',
+                400: '#00ffcc',
+                500: '#00d9ad',
+                600: '#00ae8c',
+                700: '#087e6a',
+                800: '#0b594d',
+                900: '#0b3d35',
+                950: '#03231f',
+              },
+              indigo: {
+                50: '#fff0fc',
+                100: '#ffe0f8',
+                200: '#ffc0ef',
+                300: '#ff8de2',
+                400: '#ff53d6',
+                450: '#ff38d0',
+                500: '#ff1fc8',
+                600: '#df009f',
+                700: '#ad057d',
+                800: '#780b59',
+                900: '#4b0b39',
+                950: '#2c041f',
+              }
+            },
+            fontFamily: {
+              sans: ['Tahoma', '"Trebuchet MS"', 'sans-serif'],
+              mono: ['"Courier New"', 'Courier', 'monospace'],
+              pixel: ['VT323', '"Courier New"', 'monospace'],
+              comic: ['"Comic Sans MS"', '"Comic Sans"', 'cursive'],
+              myth: ['Papyrus', 'Herculanum', 'fantasy'],
+              divine: ['Cinzel', 'Georgia', 'serif']
+            },
+            fontSize: {
+              'xs': ['13.5px', '1.25rem'],
+              'sm': ['15px', '1.25rem'],
+              'base': ['16.5px', '1.5rem'],
+              'lg': ['19px', '1.75rem'],
+            }
+          }
+        }
+      }
+    </script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

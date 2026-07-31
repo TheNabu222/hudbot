@@ -1,0 +1,5 @@
+341:  const [assetPickerCb, setAssetPickerCb] = useState<{
+15483:      {assetPickerCb && (
+15486:            assetPickerCb.onlyOnCanvas
+15502:            assetPickerCb.onSelect(id);
+15505:          filterType={assetPickerCb.filterType}
