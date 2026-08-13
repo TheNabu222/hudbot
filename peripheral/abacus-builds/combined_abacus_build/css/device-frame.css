@@ -1,0 +1,198 @@
+/* Hudbot device-frame architecture inside the pure-HTML editor/runtime. */
+.device-frame-editor-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.device-frame-editor-shell,
+.preview-device-frame {
+  position: relative;
+  overflow: hidden;
+  background: #050507;
+}
+
+.device-frame-editor-shell {
+  position: absolute;
+  transform-origin: top left;
+}
+
+.device-frame-image {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  image-rendering: auto;
+}
+
+.device-frame-editor-screen {
+  position: absolute;
+  z-index: 3;
+  border: 1px dashed rgba(255,255,255,0.34);
+  background: rgba(0,0,0,0.08);
+}
+
+.device-frame-editor-control {
+  position: absolute;
+  z-index: 5;
+  border: 1px dashed rgba(255,255,255,0.42);
+  background: rgba(255,255,255,0.04);
+}
+
+.preview-device-frame-screen {
+  position: absolute;
+  z-index: 1;
+  overflow: hidden;
+  background: #000;
+}
+
+.preview-device-frame-screen > .preview-canvas {
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+}
+
+.device-frame-runtime-control {
+  position: absolute;
+  z-index: 6;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+}
+
+.device-frame-runtime-control:hover,
+.device-frame-runtime-control:focus-visible {
+  outline: 2px solid rgba(255,255,255,0.72);
+  outline-offset: 1px;
+  background: rgba(255,255,255,0.08);
+}
+
+.device-frame-hud-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.device-shell-panel {
+  position: absolute;
+  inset: 28px;
+  z-index: 9800;
+  overflow: auto;
+  padding: 14px;
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(10, 10, 18, 0.96);
+  color: #f7f4ff;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+}
+
+.device-shell-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.18);
+}
+
+.device-shell-panel-header h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.device-shell-panel-close {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255,255,255,0.32);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.device-shell-list {
+  display: grid;
+  gap: 7px;
+}
+
+.device-shell-row,
+.device-shell-link {
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.05);
+  color: #f7f4ff;
+  font-size: 13px;
+}
+
+.device-shell-link {
+  text-align: left;
+  cursor: pointer;
+}
+
+.device-shell-link:hover,
+.device-shell-link:focus-visible {
+  border-color: var(--accent);
+  background: rgba(255,255,255,0.1);
+}
+
+.device-ui-menu-stage {
+  position: relative;
+  width: 100%;
+  min-height: 420px;
+  overflow: hidden;
+}
+
+.device-ui-object {
+  position: absolute;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.15);
+  color: #fff;
+}
+
+.device-ui-object img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.device-ui-object.is-text,
+.device-ui-object.is-button,
+.device-ui-object.is-panel,
+.device-ui-object.is-grid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  text-align: center;
+}
+
+.device-ui-object.is-button {
+  background: var(--accent);
+}
+
+.device-ui-object.is-panel,
+.device-ui-object.is-grid {
+  background: rgba(255,255,255,0.07);
+}
+
+@media (max-width: 700px) {
+  .preview-device-frame {
+    transform: scale(0.72);
+  }
+}

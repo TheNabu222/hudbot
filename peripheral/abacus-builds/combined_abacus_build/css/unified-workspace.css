@@ -1,0 +1,255 @@
+/* Point-and-Click/Cavebot features grafted into the existing Anzu shell. */
+#world-workspace {
+  position: absolute;
+  inset: 0 0 24px;
+  overflow: auto;
+  padding: 16px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  z-index: 4;
+}
+
+#world-workspace[hidden] {
+  display: none;
+}
+
+#canvas-wrapper[hidden],
+#canvas-status-bar[hidden] {
+  display: none !important;
+}
+
+.world-mode-hidden {
+  display: none !important;
+}
+
+.world-header,
+.world-section-header,
+.world-card-header,
+.world-card-actions,
+.world-route-row {
+  display: flex;
+  align-items: center;
+}
+
+.world-header,
+.world-section-header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.world-header {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.world-header h2,
+.world-section-header h3,
+.world-card h4 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.world-header h2 {
+  font-size: 18px;
+}
+
+.world-header p,
+.world-section-header p,
+.world-card p,
+.world-route-row,
+.world-empty {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.world-format-badge {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.world-summary,
+.world-tools,
+.world-scene-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.world-summary {
+  grid-template-columns: repeat(6, minmax(86px, 1fr));
+  margin-bottom: 14px;
+}
+
+.world-stat {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+}
+
+.world-stat strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 18px;
+}
+
+.world-stat span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.world-tools {
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  margin: 8px 0 18px;
+}
+
+.world-tool-btn {
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.world-tool-btn:hover,
+.world-tool-btn:focus-visible {
+  border-color: var(--accent);
+  background: var(--bg-tertiary);
+}
+
+.world-tool-btn strong,
+.world-tool-btn span {
+  display: block;
+}
+
+.world-tool-btn strong {
+  font-size: 12px;
+}
+
+.world-tool-btn span {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.world-section-header {
+  margin: 0 0 8px;
+}
+
+.world-scene-grid {
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  align-items: start;
+}
+
+.world-card {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+}
+
+.world-card.is-start {
+  border-color: var(--accent);
+}
+
+.world-card.has-broken-link {
+  border-color: var(--danger, #ef4444);
+}
+
+.world-card-header {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.world-card h4 {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-card-meta {
+  margin: 4px 0 8px !important;
+  font-size: 10px !important;
+}
+
+.world-start-label,
+.world-broken-label {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.world-start-label {
+  color: var(--accent);
+}
+
+.world-broken-label {
+  color: var(--danger, #ef4444);
+}
+
+.world-routes {
+  min-height: 26px;
+  margin-bottom: 8px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+}
+
+.world-route-row {
+  gap: 5px;
+  padding: 2px 0;
+}
+
+.world-route-row.is-broken {
+  color: var(--danger, #ef4444);
+}
+
+.world-card-actions {
+  gap: 5px;
+}
+
+.world-card-actions button {
+  min-height: 28px;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.world-card-actions button:hover,
+.world-card-actions button:focus-visible {
+  border-color: var(--accent);
+}
+
+.world-nav-copy {
+  padding: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+@media (max-width: 900px) {
+  .world-summary {
+    grid-template-columns: repeat(3, minmax(76px, 1fr));
+  }
+
+  .world-tools {
+    grid-template-columns: repeat(2, minmax(110px, 1fr));
+  }
+}

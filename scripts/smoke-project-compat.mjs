@@ -4,7 +4,7 @@ import vm from "node:vm";
 
 const stateSource = fs.readFileSync(
   new URL(
-    "../peripheral/alt_version(abacus_pure_html)/js/state.js",
+    "../peripheral/abacus-builds/combined_abacus_build/js/state.js",
     import.meta.url,
   ),
   "utf8",

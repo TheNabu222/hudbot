@@ -108,6 +108,21 @@ import {
   stripDuplicatedAssetSources,
 } from "./utils/projectPersistence";
 import {
+  AutosaveMetrics,
+  createAutosaveAssetLibrarySnapshot,
+  createAutosaveShellProject,
+  createCoalescedAutosaveQueue,
+  getAutosaveAssetLibraryFingerprint,
+  restoreAutosaveAssetLibrary,
+} from "./utils/projectAutosave";
+import {
+  findObjectsAtPoint,
+  getInteractionSummary,
+  getNextObjectPlacement,
+  getObscuredInteractiveWarnings,
+  selectSceneObjectById,
+} from "./utils/sceneObjectReliability";
+import {
   createRuntimeGameState,
   evaluateRuleConditions,
 } from "./utils/runtimeRules";
@@ -1032,6 +1047,11 @@ const App: React.FC = () => {
     characters: [],
   });
   const lastAutosavedAssetsRef = useRef<Asset[] | null>(null);
+  const lastAutosavedAssetFingerprintRef = useRef("");
+  const hasAutosavedAssetLibraryRef = useRef(false);
+  const autosaveQueueRef = useRef<ReturnType<
+    typeof createCoalescedAutosaveQueue<Project>
+  > | null>(null);
   const [hasLoadedStoredProject, setHasLoadedStoredProject] = useState(false);
 
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
@@ -1070,6 +1090,11 @@ const App: React.FC = () => {
     x: number;
     y: number;
     objectId: string | null;
+  } | null>(null);
+  const [overlapChooser, setOverlapChooser] = useState<{
+    x: number;
+    y: number;
+    objectIds: string[];
   } | null>(null);
   const [editingClickSequenceObjectId, setEditingClickSequenceObjectId] =
     useState<string | null>(null);
@@ -1730,24 +1755,81 @@ const App: React.FC = () => {
     };
   };
 
-  const persistRestoredProject = async (restoredProject: Project) => {
-    const strippedProject = stripDuplicatedAssetSources(restoredProject);
-    const autosaveProject = stripAssetLibraryForAutosave(strippedProject);
-    await set(PROJECT_STORAGE_KEY, autosaveProject);
-    await set(PROJECT_ASSET_LIBRARY_STORAGE_KEY, autosaveProject.assets || []);
-    lastAutosavedAssetsRef.current = autosaveProject.assets || [];
+  const persistAutosaveProject = async (
+    projectToPersist: Project,
+    options: { forceAssetLibrary?: boolean } = {},
+  ): Promise<AutosaveMetrics> => {
+    const startedAt =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    const assetFingerprint = getAutosaveAssetLibraryFingerprint(
+      projectToPersist.assets || [],
+    );
+    const shouldWriteAssetLibrary =
+      options.forceAssetLibrary ||
+      !hasAutosavedAssetLibraryRef.current ||
+      lastAutosavedAssetsRef.current !== projectToPersist.assets ||
+      lastAutosavedAssetFingerprintRef.current !== assetFingerprint;
+    const shellProject = createAutosaveShellProject(
+      projectToPersist,
+      PROJECT_ASSET_LIBRARY_STORAGE_KEY,
+      assetFingerprint,
+    );
+    const shellJson = JSON.stringify(shellProject);
+
+    await set(PROJECT_STORAGE_KEY, shellProject);
+
+    let assetLibraryBytes: number | undefined;
+    if (shouldWriteAssetLibrary) {
+      const assetLibrary = createAutosaveAssetLibrarySnapshot(projectToPersist);
+      await set(PROJECT_ASSET_LIBRARY_STORAGE_KEY, assetLibrary);
+      assetLibraryBytes = JSON.stringify(assetLibrary).length;
+      lastAutosavedAssetsRef.current = projectToPersist.assets || [];
+      lastAutosavedAssetFingerprintRef.current = assetFingerprint;
+      hasAutosavedAssetLibraryRef.current = true;
+      try {
+        localStorage.removeItem(PROJECT_ASSET_LIBRARY_STORAGE_KEY);
+      } catch (storageErr) {
+        console.warn("Could not clear localStorage asset mirror", storageErr);
+      }
+    }
+
     try {
-      const serializedProject = JSON.stringify(autosaveProject);
-      if (serializedProject.length < 4_500_000) {
-        localStorage.setItem(PROJECT_STORAGE_KEY, serializedProject);
+      if (shellJson.length < 4_500_000) {
+        localStorage.setItem(PROJECT_STORAGE_KEY, shellJson);
       } else {
         localStorage.removeItem(PROJECT_STORAGE_KEY);
       }
-      localStorage.removeItem(PROJECT_ASSET_LIBRARY_STORAGE_KEY);
     } catch (storageErr) {
-      console.warn("Could not mirror restored project to localStorage", storageErr);
+      console.warn("Could not mirror autosave shell to localStorage", storageErr);
     }
+
+    const metrics: AutosaveMetrics = {
+      shellBytes: shellJson.length,
+      assetLibraryBytes,
+      shellAssetCount: shellProject.assets.length,
+      assetLibraryCount: projectToPersist.assets?.length || 0,
+      wroteAssetLibrary: shouldWriteAssetLibrary,
+      durationMs:
+        (typeof performance !== "undefined" ? performance.now() : Date.now()) -
+        startedAt,
+    };
+    (window as any).__CAVEBOT_LAST_AUTOSAVE__ = metrics;
+    if (shouldWriteAssetLibrary || metrics.shellBytes > 1_000_000) {
+      console.info(
+        `[Cavebot autosave] shell ${(metrics.shellBytes / 1024 / 1024).toFixed(
+          2,
+        )} MB; asset library ${
+          shouldWriteAssetLibrary
+            ? `${((assetLibraryBytes || 0) / 1024 / 1024).toFixed(2)} MB written`
+            : "unchanged"
+        }; ${Math.round(metrics.durationMs || 0)} ms`,
+      );
+    }
+    return metrics;
   };
+
+  const persistRestoredProject = (restoredProject: Project) =>
+    persistAutosaveProject(restoredProject, { forceAssetLibrary: true });
 
   const restoreProjectSnapshot = (snapshot: any) => {
     setSaveStatus("saving");
@@ -1852,6 +1934,16 @@ const App: React.FC = () => {
           }
         }
         if (saved) {
+          let savedAssetLibrary = await get(PROJECT_ASSET_LIBRARY_STORAGE_KEY);
+          if (!savedAssetLibrary) {
+            const localAssetLibrary = localStorage.getItem(
+              PROJECT_ASSET_LIBRARY_STORAGE_KEY,
+            );
+            if (localAssetLibrary) {
+              savedAssetLibrary = JSON.parse(localAssetLibrary);
+            }
+          }
+          saved = restoreAutosaveAssetLibrary(saved, savedAssetLibrary as Asset[]);
           const restoredShellAssets = Array.isArray(saved.assets)
             ? saved.assets.map((asset: Asset) => normalizeAssetForRuntime(asset))
             : [];
@@ -1865,6 +1957,10 @@ const App: React.FC = () => {
             ),
           );
           lastAutosavedAssetsRef.current = restoredShellAssets;
+          lastAutosavedAssetFingerprintRef.current =
+            getAutosaveAssetLibraryFingerprint(restoredShellAssets);
+          hasAutosavedAssetLibraryRef.current =
+            Array.isArray(savedAssetLibrary) && savedAssetLibrary.length > 0;
           setHasLoadedStoredProject(true);
         } else {
           setHasLoadedStoredProject(true);
@@ -1934,31 +2030,29 @@ const App: React.FC = () => {
     project.globalSettings.hudOverlay?.assetId,
   ]);
 
-  // Save to IndexedDB on change
+  // Save to IndexedDB on change. The queue keeps only the newest project and
+  // writes large asset payloads only when the asset library actually changes.
+  useEffect(() => {
+    if (!autosaveQueueRef.current) {
+      autosaveQueueRef.current = createCoalescedAutosaveQueue<Project>({
+        debounceMs: 2000,
+        persist: (projectToPersist) => persistAutosaveProject(projectToPersist),
+        onStatus: setSaveStatus,
+        onError: (error) => {
+          console.error("Failed to save project to IndexedDB", error);
+          showError("Failed to save project. Storage quota may be exceeded.");
+        },
+      });
+    }
+    return () => {
+      autosaveQueueRef.current?.dispose();
+      autosaveQueueRef.current = null;
+    };
+  }, []);
+
   useEffect(() => {
     if (!hasLoadedStoredProject) return;
-    const saveProject = async () => {
-      setSaveStatus("saving");
-      try {
-        const strippedProject = stripDuplicatedAssetSources(project);
-        const autosaveProject = stripAssetLibraryForAutosave(strippedProject);
-        await set(PROJECT_STORAGE_KEY, autosaveProject);
-        if (lastAutosavedAssetsRef.current !== autosaveProject.assets) {
-          await set(PROJECT_ASSET_LIBRARY_STORAGE_KEY, autosaveProject.assets || []);
-          localStorage.removeItem(PROJECT_ASSET_LIBRARY_STORAGE_KEY);
-          lastAutosavedAssetsRef.current = autosaveProject.assets || [];
-        }
-        setSaveStatus("saved");
-      } catch (e) {
-        console.error("Failed to save project to IndexedDB", e);
-        setSaveStatus("error");
-        showError("Failed to save project. Storage quota may be exceeded.");
-      }
-    };
-
-    // Debounce save slightly to avoid thrashing
-    const timeoutId = setTimeout(saveProject, 2000);
-    return () => clearTimeout(timeoutId);
+    autosaveQueueRef.current?.enqueue(project);
   }, [hasLoadedStoredProject, project]);
 
   const handleExportProject = (
@@ -2559,6 +2653,27 @@ const App: React.FC = () => {
     () => [...currentScene.objects].sort((a, b) => a.zIndex - b.zIndex),
     [currentScene.objects],
   );
+  const selectedObjectInteractionSummary = selectedObject
+    ? getInteractionSummary(selectedObject, {
+        dialogueName: (id) =>
+          project.dialogueTrees.find((tree) => tree.id === id)?.name || "",
+        sceneName: (id) => project.scenes.find((scene) => scene.id === id)?.name || "",
+        uiName: (id) => project.uiMenus?.find((menu) => menu.id === id)?.name || "",
+        itemName: (id) =>
+          project.inventoryItems.find((item) => item.id === id)?.name || "",
+        loreName: (id) =>
+          project.loreEntries.find((entry) => entry.id === id)?.title || "",
+      })
+    : "";
+  const obscuredInteractiveWarnings = useMemo(
+    () => getObscuredInteractiveWarnings(currentScene),
+    [currentScene],
+  );
+  const selectedObscuredWarning = selectedObject
+    ? obscuredInteractiveWarnings.find(
+        (warning) => warning.objectId === selectedObject.id,
+      )
+    : undefined;
   const hasPlayableCursorAsset = (assetId?: string | null) =>
     Boolean(
       assetId &&
@@ -2901,6 +3016,16 @@ const App: React.FC = () => {
     pushHistory(newProject);
   };
 
+  const selectObjectExactly = (objectId: string) => {
+    const selection = selectSceneObjectById(currentScene, objectId);
+    setSelectedObjectId(selection.selectedObjectId);
+    setSelectedMultiIds(selection.selectedMultiIds);
+    setSelectedHudWidget(null);
+    if (selection.selectedObjectId && rightSidebarWidth === 0) {
+      setRightSidebarWidth(320);
+    }
+  };
+
   const updateObject = (id: string, updates: Partial<SceneObject>) => {
     if (!currentScene) return;
     const isUI = editorMode === "ui_stage" && !isPlaying;
@@ -2998,7 +3123,21 @@ const App: React.FC = () => {
 
     let objDefaults: Partial<SceneObject> = {};
     if (asset.type === "custom_prefab") {
-       const newObj = { ...asset.prefabData, id: uuidv4(), x: 0, y: 0 };
+       const prefabWidth = Number(asset.prefabData?.width) || 100;
+       const prefabHeight = Number(asset.prefabData?.height) || 100;
+       const placement = getNextObjectPlacement({
+         existingObjects: targetScene.objects || [],
+         width: prefabWidth,
+         height: prefabHeight,
+         sceneWidth: targetScene.width || project.globalSettings.stageWidth || 800,
+         sceneHeight: targetScene.height || project.globalSettings.stageHeight || 600,
+       });
+       const newObj = {
+         ...asset.prefabData,
+         id: uuidv4(),
+         x: placement.x,
+         y: placement.y,
+       };
        const newProject = {
           ...project,
           [targetCollection]: (project[targetCollection] || []).map((s) =>
@@ -3057,6 +3196,57 @@ const App: React.FC = () => {
     const targetSceneHeight =
       targetScene.height || project.globalSettings.stageHeight || 600;
     const imagePlacement = getAssetPlacementSize(asset);
+    const objectWidth = shouldUseImageAsUiPageBacking
+      ? targetSceneWidth
+      : asset.type === "ui_element"
+      ? asset.uiElementType === "panel"
+        ? 200
+        : asset.uiElementType === "progress"
+          ? 150
+          : 50
+      : asset.type === "hitbox"
+        ? 100
+        : asset.type === "audio"
+          ? 160
+          : asset.type === "video"
+            ? 180
+        : asset.type === "script"
+          ? 64
+          : asset.type === "text"
+            ? 200
+            : asset.type === "image"
+              ? imagePlacement.width
+            : 100;
+    const objectHeight = shouldUseImageAsUiPageBacking
+      ? targetSceneHeight
+      : asset.type === "ui_element"
+      ? asset.uiElementType === "panel"
+        ? 200
+        : asset.uiElementType === "progress"
+          ? 20
+          : 50
+      : asset.type === "hitbox"
+        ? 100
+        : asset.type === "audio"
+          ? 56
+          : asset.type === "video"
+            ? 100
+        : asset.type === "script"
+          ? 64
+          : asset.type === "text"
+            ? 50
+            : asset.type === "image"
+              ? imagePlacement.height
+              : 100;
+    const placement = shouldUseImageAsUiPageBacking
+      ? { x: 0, y: 0 }
+      : getNextObjectPlacement({
+          existingObjects: currentArr,
+          width: objectWidth,
+          height: objectHeight,
+          sceneWidth: targetSceneWidth,
+          sceneHeight: targetSceneHeight,
+        });
 
     const newObj: SceneObject = {
       id: uuidv4(),
@@ -3072,52 +3262,10 @@ const App: React.FC = () => {
               : asset.name,
       src: actualSrc,
       _assetId: asset.id,
-      x: shouldUseImageAsUiPageBacking ? 0 : targetSceneWidth / 2 - 50,
-      y: shouldUseImageAsUiPageBacking ? 0 : targetSceneHeight / 2 - 50,
-      width:
-        shouldUseImageAsUiPageBacking
-          ? targetSceneWidth
-          : asset.type === "ui_element"
-          ? asset.uiElementType === "panel"
-            ? 200
-            : asset.uiElementType === "progress"
-              ? 150
-              : 50
-          : asset.type === "hitbox"
-            ? 100
-            : asset.type === "audio"
-              ? 160
-              : asset.type === "video"
-                ? 180
-            : asset.type === "script"
-              ? 64
-              : asset.type === "text"
-                ? 200
-                : asset.type === "image"
-                  ? imagePlacement.width
-                : 100,
-      height:
-        shouldUseImageAsUiPageBacking
-          ? targetSceneHeight
-          : asset.type === "ui_element"
-          ? asset.uiElementType === "panel"
-            ? 200
-            : asset.uiElementType === "progress"
-              ? 20
-              : 50
-          : asset.type === "hitbox"
-            ? 100
-            : asset.type === "audio"
-              ? 56
-              : asset.type === "video"
-                ? 100
-            : asset.type === "script"
-              ? 64
-              : asset.type === "text"
-                ? 50
-                : asset.type === "image"
-                  ? imagePlacement.height
-                : 100,
+      x: placement.x,
+      y: placement.y,
+      width: objectWidth,
+      height: objectHeight,
       rotation: 0,
       zIndex:
         shouldUseImageAsUiPageBacking
@@ -3369,45 +3517,58 @@ const App: React.FC = () => {
             ? Math.max(...targetScene.objects.map((object) => object.zIndex)) +
               1
             : 0;
-        const newObjects: SceneObject[] = imported.map(
-          ({ asset, width, height }, index) => ({
-            id: uuidv4(),
-            name: asset.name,
-            src: getAssetDisplaySrc(asset),
-            _assetId: asset.id,
-            x: Math.max(0, x - width / 2 + index * 22),
-            y: Math.max(0, y - height / 2 + index * 22),
-            width,
-            height,
-            rotation: 0,
-            zIndex: initialZ + index,
-            opacity: 1,
-            locked: false,
-            cursor: asset.type === "audio" ? "pointer" : "default",
-            animation: "none",
-            interaction:
-              asset.type === "audio"
-                ? "sound"
-                : asset.type === "video"
-                  ? "play_cutscene"
-                  : "none",
-            interactionData:
-              asset.type === "audio" || asset.type === "video"
-                ? asset.id
-                : undefined,
-            isVideo: asset.type === "video",
-            isHitbox: false,
-            isScript: false,
-            isText: asset.type === "audio",
-            isUiElement: false,
-            textContent: asset.type === "audio" ? "🎵" : undefined,
-            textColor: "#ffffff",
-            textFontSize: 32,
-            textFontFamily: "sans-serif",
-            blendMode: "normal",
-            parallaxSpeed: 1,
-            hasPhysics: false,
-          }),
+        const newObjects: SceneObject[] = imported.reduce<SceneObject[]>(
+          (createdObjects, { asset, width, height }, index) => {
+            const placement = getNextObjectPlacement({
+              existingObjects: [...targetScene.objects, ...createdObjects],
+              width,
+              height,
+              sceneWidth: targetScene.width || stageWidth,
+              sceneHeight: targetScene.height || stageHeight,
+              preferredX: x - width / 2,
+              preferredY: y - height / 2,
+            });
+            createdObjects.push({
+              id: uuidv4(),
+              name: asset.name,
+              src: getAssetDisplaySrc(asset),
+              _assetId: asset.id,
+              x: placement.x,
+              y: placement.y,
+              width,
+              height,
+              rotation: 0,
+              zIndex: initialZ + index,
+              opacity: 1,
+              locked: false,
+              cursor: asset.type === "audio" ? "pointer" : "default",
+              animation: "none",
+              interaction:
+                asset.type === "audio"
+                  ? "sound"
+                  : asset.type === "video"
+                    ? "play_cutscene"
+                    : "none",
+              interactionData:
+                asset.type === "audio" || asset.type === "video"
+                  ? asset.id
+                  : undefined,
+              isVideo: asset.type === "video",
+              isHitbox: false,
+              isScript: false,
+              isText: asset.type === "audio",
+              isUiElement: false,
+              textContent: asset.type === "audio" ? "♪" : undefined,
+              textColor: "#ffffff",
+              textFontSize: 32,
+              textFontFamily: "sans-serif",
+              blendMode: "normal",
+              parallaxSpeed: 1,
+              hasPhysics: false,
+            });
+            return createdObjects;
+          },
+          [],
         );
 
         const newProject = {
@@ -3433,13 +3594,28 @@ const App: React.FC = () => {
 
         let objDefaults: Partial<SceneObject> = {};
         if (asset.type === "custom_prefab") {
-           const newObj = { ...asset.prefabData, id: uuidv4(), x, y };
+           const prefabWidth = Number(asset.prefabData?.width) || 100;
+           const prefabHeight = Number(asset.prefabData?.height) || 100;
+           const placement = getNextObjectPlacement({
+             existingObjects: currentScene.objects,
+             width: prefabWidth,
+             height: prefabHeight,
+             sceneWidth: currentScene.width || stageWidth,
+             sceneHeight: currentScene.height || stageHeight,
+             preferredX: x - prefabWidth / 2,
+             preferredY: y - prefabHeight / 2,
+           });
+           const newObj = {
+             ...asset.prefabData,
+             id: uuidv4(),
+             x: placement.x,
+             y: placement.y,
+           };
            const isUI = editorMode === "ui_stage";
            const newProject = {
               ...project,
               [isUI ? "uiMenus" : "scenes"]: (project[isUI ? "uiMenus" : "scenes"] || []).map((s) => s.id === currentScene.id ? { ...s, objects: [...s.objects, newObj] } : s)
            };
-           setProject(newProject);
            pushHistory(newProject);
            setSelectedObjectId(newObj.id);
            return;
@@ -3491,6 +3667,52 @@ const App: React.FC = () => {
           if (matchedAsset) actualSrc = getAssetDisplaySrc(matchedAsset);
         }
 
+        const objectWidth =
+          asset.type === "ui_element"
+            ? asset.uiElementType === "panel"
+              ? 200
+              : asset.uiElementType === "progress"
+                ? 150
+                : 50
+            : asset.type === "hitbox"
+              ? 100
+              : asset.type === "audio"
+                ? 160
+                : asset.type === "video"
+                  ? 180
+              : asset.type === "script"
+                ? 64
+                : asset.type === "text"
+                  ? 200
+                  : 100;
+        const objectHeight =
+          asset.type === "ui_element"
+            ? asset.uiElementType === "panel"
+              ? 200
+              : asset.uiElementType === "progress"
+                ? 20
+                : 50
+            : asset.type === "hitbox"
+              ? 100
+              : asset.type === "audio"
+                ? 56
+                : asset.type === "video"
+                  ? 100
+              : asset.type === "script"
+                ? 64
+                : asset.type === "text"
+                  ? 50
+                  : 100;
+        const placement = getNextObjectPlacement({
+          existingObjects: currentScene.objects,
+          width: objectWidth,
+          height: objectHeight,
+          sceneWidth: currentScene.width || stageWidth,
+          sceneHeight: currentScene.height || stageHeight,
+          preferredX: x - objectWidth / 2,
+          preferredY: y - objectHeight / 2,
+        });
+
         const newObj: SceneObject = {
           id: uuidv4(),
           name:
@@ -3503,44 +3725,10 @@ const App: React.FC = () => {
                   : asset.name,
           src: actualSrc,
           _assetId: asset.id,
-          x: x - 50, // Center roughly
-          y: y - 50,
-          width:
-            asset.type === "ui_element"
-              ? asset.uiElementType === "panel"
-                ? 200
-                : asset.uiElementType === "progress"
-                  ? 150
-                  : 50
-              : asset.type === "hitbox"
-                ? 100
-                : asset.type === "audio"
-                  ? 160
-                  : asset.type === "video"
-                    ? 180
-                : asset.type === "script"
-                  ? 64
-                  : asset.type === "text"
-                    ? 200
-                    : 100,
-          height:
-            asset.type === "ui_element"
-              ? asset.uiElementType === "panel"
-                ? 200
-                : asset.uiElementType === "progress"
-                  ? 20
-                  : 50
-              : asset.type === "hitbox"
-                ? 100
-                : asset.type === "audio"
-                  ? 56
-                  : asset.type === "video"
-                    ? 100
-                : asset.type === "script"
-                  ? 64
-                  : asset.type === "text"
-                    ? 50
-                    : 100,
+          x: placement.x,
+          y: placement.y,
+          width: objectWidth,
+          height: objectHeight,
           rotation: 0,
           zIndex:
             (currentScene?.objects.length ?? 0) > 0
@@ -3655,6 +3843,32 @@ const App: React.FC = () => {
     e.stopPropagation();
     if (rightSidebarWidth === 0) setRightSidebarWidth(320);
     setSelectedHudWidget(null);
+    setContextMenu(null);
+
+    if (!e.shiftKey && stageRef.current) {
+      const rect = stageRef.current.getBoundingClientRect();
+      const stageWidth =
+        currentScene.width || project.globalSettings.stageWidth || 800;
+      const stageHeight =
+        currentScene.height || project.globalSettings.stageHeight || 600;
+      const pointerX = ((e.clientX - rect.left) / rect.width) * stageWidth;
+      const pointerY = ((e.clientY - rect.top) / rect.height) * stageHeight;
+      const candidates = findObjectsAtPoint(
+        currentScene.objects,
+        pointerX,
+        pointerY,
+      );
+      if (candidates.length > 1) {
+        setOverlapChooser({
+          x: e.clientX,
+          y: e.clientY,
+          objectIds: candidates.map((candidate) => candidate.id),
+        });
+        didDragRef.current = false;
+        return;
+      }
+    }
+    setOverlapChooser(null);
 
     if (e.shiftKey) {
       if (selectedMultiIds.includes(obj.id)) {
@@ -4678,10 +4892,11 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleClick = () => {
       if (contextMenu) setContextMenu(null);
+      if (overlapChooser) setOverlapChooser(null);
     };
     window.addEventListener("pointerdown", handleClick);
     return () => window.removeEventListener("pointerdown", handleClick);
-  }, [contextMenu]);
+  }, [contextMenu, overlapChooser]);
 
   const moveZIndex = (id: string, dir: 1 | -1) => {
     const obj = currentScene.objects.find((o) => o.id === id);
@@ -14277,8 +14492,10 @@ const App: React.FC = () => {
                           <div
                             key={obj.id}
                             onClick={() =>
-                              !isPlaying && setSelectedObjectId(obj.id)
+                              !isPlaying && selectObjectExactly(obj.id)
                             }
+                            data-testid={`layer-row-${obj.id}`}
+                            aria-label={`Select layer ${obj.name || obj.id}, ID ${obj.id}, z-index ${obj.zIndex}`}
                             draggable
                             onDragStart={(e) => {
                               e.dataTransfer.setData("layerId", obj.id);
@@ -14382,11 +14599,27 @@ const App: React.FC = () => {
                                     isOpen: true,
                                     message: "Delete this object?",
                                     onConfirm: () => {
-                                      setProject(p => ({
+                                      const isUI =
+                                        editorMode === "ui_stage" && !isPlaying;
+                                      setProject((p) => ({
                                         ...p,
-                                        scenes: p.scenes.map(s => s.id === currentScene.id ? { ...s, objects: s.objects.filter(o => o.id !== obj.id) } : s)
+                                        [isUI ? "uiMenus" : "scenes"]: (
+                                          p[isUI ? "uiMenus" : "scenes"] || []
+                                        ).map((s) =>
+                                          s.id === currentScene.id
+                                            ? {
+                                                ...s,
+                                                objects: s.objects.filter(
+                                                  (o) => o.id !== obj.id,
+                                                ),
+                                              }
+                                            : s,
+                                        ),
                                       }));
-                                      if(selectedObjectId === obj.id) setSelectedObjectId(null);
+                                      if (selectedObjectId === obj.id) {
+                                        setSelectedObjectId(null);
+                                        setSelectedMultiIds([]);
+                                      }
                                     }
                                   });
                                 }}
@@ -16374,6 +16607,51 @@ const App: React.FC = () => {
                                   : "asset"}
                           </span>
                         </div>
+                        <dl className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
+                          <div className="rounded border border-neutral-800 bg-neutral-950/70 p-2">
+                            <dt className="font-bold uppercase tracking-wide text-neutral-500">
+                              ID
+                            </dt>
+                            <dd
+                              className="mt-1 truncate font-mono text-neutral-200"
+                              title={selectedObject.id}
+                            >
+                              {selectedObject.id}
+                            </dd>
+                          </div>
+                          <div className="rounded border border-neutral-800 bg-neutral-950/70 p-2">
+                            <dt className="font-bold uppercase tracking-wide text-neutral-500">
+                              z-index
+                            </dt>
+                            <dd className="mt-1 font-mono text-neutral-200">
+                              {selectedObject.zIndex}
+                            </dd>
+                          </div>
+                          <div className="col-span-2 rounded border border-cyan-300/25 bg-cyan-400/10 p-2">
+                            <dt className="font-bold uppercase tracking-wide text-cyan-200">
+                              Effective click
+                            </dt>
+                            <dd className="mt-1 break-words font-comic text-[11px] font-bold text-white">
+                              {selectedObjectInteractionSummary}
+                            </dd>
+                          </div>
+                        </dl>
+                        {selectedObscuredWarning && (
+                          <div
+                            className="mt-3 rounded border border-yellow-300/45 bg-yellow-400/10 p-2 text-[10px] leading-snug text-yellow-100"
+                            data-testid={`obscured-warning-${selectedObject.id}`}
+                          >
+                            This interactive object is completely covered by
+                            clickable{" "}
+                            <span className="font-bold">
+                              {selectedObscuredWarning.coveringObjectName ||
+                                selectedObscuredWarning.coveringObjectId}
+                            </span>
+                            . It may not receive clicks in Play. Move it
+                            forward, hide the cover, or enable Let Clicks Pass
+                            Through.
+                          </div>
+                        )}
                       </div>
                       <Accordion title="Identity & Setup" defaultOpen={true}>
                         <div className="space-y-4">
@@ -27552,6 +27830,64 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Overlap Chooser */}
+      {overlapChooser &&
+        (() => {
+          const candidates = overlapChooser.objectIds
+            .map((id) => currentScene.objects.find((object) => object.id === id))
+            .filter((object): object is SceneObject => Boolean(object));
+          if (!candidates.length) return null;
+          return (
+            <div
+              className="fixed z-[9999] max-h-[320px] w-[300px] overflow-y-auto rounded-lg border border-cyan-400/50 bg-neutral-950 py-1 text-sm shadow-2xl"
+              style={{ left: overlapChooser.x, top: overlapChooser.y }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <div className="border-b border-neutral-800 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-cyan-200">
+                Choose Overlapping Object
+              </div>
+              {candidates.map((candidate) => (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  onClick={() => {
+                    selectObjectExactly(candidate.id);
+                    setOverlapChooser(null);
+                  }}
+                  className="block w-full border-b border-neutral-900 px-3 py-2 text-left hover:bg-cyan-400/10"
+                  data-testid={`overlap-choice-${candidate.id}`}
+                >
+                  <span className="block truncate font-bold text-white">
+                    {candidate.name || "Unnamed object"}
+                  </span>
+                  <span className="mt-0.5 block truncate font-mono text-[10px] text-neutral-500">
+                    ID {candidate.id} | z {candidate.zIndex}
+                  </span>
+                  <span className="mt-1 block truncate text-[11px] text-cyan-100">
+                    {getInteractionSummary(candidate, {
+                      dialogueName: (id) =>
+                        project.dialogueTrees.find((tree) => tree.id === id)
+                          ?.name || "",
+                      sceneName: (id) =>
+                        project.scenes.find((scene) => scene.id === id)?.name ||
+                        "",
+                      uiName: (id) =>
+                        project.uiMenus?.find((menu) => menu.id === id)?.name ||
+                        "",
+                      itemName: (id) =>
+                        project.inventoryItems.find((item) => item.id === id)
+                          ?.name || "",
+                      loreName: (id) =>
+                        project.loreEntries.find((entry) => entry.id === id)
+                          ?.title || "",
+                    })}
+                  </span>
+                </button>
+              ))}
+            </div>
+          );
+        })()}
 
       {/* Object Context Menu */}
       {contextMenu &&
