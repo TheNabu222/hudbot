@@ -5,7 +5,7 @@ import { importV1Project } from '@/lib/importer';
 import { exportStandaloneHTML } from '@/lib/html-exporter';
 import type { EditorTab } from '@/lib/types';
 import {
-  Map, Edit3, MessageSquare, Users, Target, Package, Activity, Settings, Play, Save, Upload, Download, FileDown, Sparkles,
+  Map, Edit3, MessageSquare, Users, Target, Package, Activity, Settings, Play, Save, Upload, Download, FileDown, Sparkles, SplitSquareHorizontal,
 } from 'lucide-react';
 import SceneGraphPanel from './panels/scene-graph-panel';
 import SceneEditorPanel from './panels/scene-editor-panel';
@@ -16,6 +16,7 @@ import ItemPanel from './panels/item-panel';
 import NeedsPanel from './panels/needs-panel';
 import SettingsPanel from './panels/settings-panel';
 import PreviewPanel from './panels/preview-panel';
+import HudbotBridgePanel from './panels/hudbot-bridge-panel';
 import { toast } from 'sonner';
 
 const TABS: { key: EditorTab; label: string; icon: React.ReactNode }[] = [
@@ -28,6 +29,7 @@ const TABS: { key: EditorTab; label: string; icon: React.ReactNode }[] = [
   { key: 'needs', label: 'Needs/Stats', icon: <Activity size={16} /> },
   { key: 'settings', label: 'Settings', icon: <Settings size={16} /> },
   { key: 'preview', label: 'Preview', icon: <Play size={16} /> },
+  { key: 'hudbot-bridge', label: 'HUDbot 3009', icon: <SplitSquareHorizontal size={16} /> },
 ];
 
 export default function StudioApp() {
@@ -181,6 +183,7 @@ export default function StudioApp() {
         {activeTab === 'needs' && <NeedsPanel />}
         {activeTab === 'settings' && <SettingsPanel />}
         {activeTab === 'preview' && <PreviewPanel />}
+        {activeTab === 'hudbot-bridge' && <HudbotBridgePanel />}
       </main>
     </div>
   );

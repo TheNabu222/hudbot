@@ -22,6 +22,10 @@ const ProjectCompatibility = {
       dialogue: 'start-dialogue',
       give_item: 'give-item',
       'give-item': 'give-item',
+      open_ui: 'open-ui',
+      'open-ui': 'open-ui',
+      close_ui: 'close-ui',
+      'close-ui': 'close-ui',
       custom_script: 'custom',
     };
     return actions[interaction] || (interaction === 'none' ? 'none' : null);
@@ -108,6 +112,8 @@ const ProjectCompatibility = {
         clickAction: object.clickAction || mappedClickAction || 'none',
         dialogueTreeId: object.dialogueTreeId || '',
         targetSceneId: object.targetSceneId || '',
+        targetUiId: object.targetUiId || object.targetMenuId || object.uiMenuId || '',
+        clickResponses: Array.isArray(object.clickResponses) ? object.clickResponses : [],
       };
     };
 

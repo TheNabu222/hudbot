@@ -22,6 +22,10 @@ const ProjectCompatibility = {
       dialogue: 'start-dialogue',
       give_item: 'give-item',
       'give-item': 'give-item',
+      open_ui: 'open-ui',
+      'open-ui': 'open-ui',
+      close_ui: 'close-ui',
+      'close-ui': 'close-ui',
       custom_script: 'custom',
     };
     return actions[interaction] || (interaction === 'none' ? 'none' : null);
@@ -104,19 +108,26 @@ const ProjectCompatibility = {
         clickAction: object.clickAction || mappedClickAction || 'none',
         dialogueTreeId: object.dialogueTreeId || '',
         targetSceneId: object.targetSceneId || '',
+        targetUiId: object.targetUiId || object.targetMenuId || object.uiMenuId || '',
+        clickResponses: Array.isArray(object.clickResponses) ? object.clickResponses : [],
       };
     };
 
-    const scenes = rawScenes.map((scene, sceneIndex) => ({
+    const normalizeSceneRecord = (scene, sceneIndex, isUiMenu = false) => ({
       ...scene,
-      id: scene.id || `imported-scene-${sceneIndex + 1}`,
-      name: scene.name || `Scene ${sceneIndex + 1}`,
+      id: scene.id || `imported-${isUiMenu ? 'ui' : 'scene'}-${sceneIndex + 1}`,
+      name: scene.name || `${isUiMenu ? 'Interface' : 'Scene'} ${sceneIndex + 1}`,
       bgColor: scene.bgColor || scene.backgroundColor || 'transparent',
       objects: (Array.isArray(scene.objects) ? scene.objects : []).map((object, objectIndex) =>
         normalizeObject(object, sceneIndex, objectIndex)
       ),
       hitboxes: Array.isArray(scene.hitboxes) ? scene.hitboxes : [],
-    }));
+      isUiMenu,
+    });
+    const scenes = rawScenes.map((scene, sceneIndex) => normalizeSceneRecord(scene, sceneIndex));
+    const uiMenus = (Array.isArray(project.uiMenus) ? project.uiMenus : []).map((menu, menuIndex) =>
+      normalizeSceneRecord(menu, menuIndex, true)
+    );
     const requestedSceneId = project.activeSceneId || project.currentSceneId;
     const activeSceneId = scenes.some(scene => scene.id === requestedSceneId)
       ? requestedSceneId
@@ -128,6 +139,7 @@ const ProjectCompatibility = {
       canvasWidth: stageWidth,
       canvasHeight: stageHeight,
       scenes,
+      uiMenus,
       assets,
       activeSceneId,
     };

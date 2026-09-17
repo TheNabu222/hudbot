@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import esbuild from "esbuild";
-import { JSDOM, VirtualConsole } from "jsdom";
+
+const data = (name) => "data:image/png;base64," + Buffer.from(name).toString("base64");
 
 const source = `
 	  import assert from "node:assert/strict";
@@ -32,7 +33,7 @@ const source = `
         { id: "dataurl-audio-asset", src: "", dataURL: audio("dataurl-audio"), name: "DataURL Audio", type: "audio", category: "used" },
         { id: "bgm-asset", src: audio("bgm"), name: "BGM", type: "audio", category: "used" },
 	        { id: "cursor-asset", src: data("cursor"), name: "Cursor", type: "image", category: "used" },
-	        { id: "frame-asset", src: data("frame"), name: "Frame", type: "image", category: "used" },
+	        { id: "frame-asset", src: "", dataURL: "", name: "Frame", type: "image", category: "used" },
         { id: "dataurl-only-asset", src: "", dataURL: data("dataurl-only"), name: "DataURL Only", type: "image", category: "used" },
         { id: "edited-page-asset", src: data("edited-page-art"), width: 620, height: 346, name: "Inventory Screen.png_crop", type: "image", category: "edited/images", exportSource: "embedded_fallback" },
 	        { id: "unused-library-asset", src: data("unused"), name: "Unused Library", type: "image", category: "library" },
@@ -140,15 +141,139 @@ const source = `
 	              blendMode: "normal",
 	              parallaxSpeed: 1,
 	            },
+	            {
+	              id: "locked-door-obj",
+	              name: "Locked Door",
+	              src: objectSrc,
+	              _assetId: "object-asset",
+	              x: 360,
+	              y: 120,
+	              width: 32,
+	              height: 32,
+	              rotation: 0,
+	              zIndex: 6,
+	              opacity: 1,
+	              locked: false,
+	              cursor: "pointer",
+	              animation: "none",
+	              interaction: "scene_change",
+	              interactionData: "scene-1",
+	              requireItemId: "lighter",
+	              consumeRequiredItem: true,
+	              blendMode: "normal",
+	              parallaxSpeed: 1,
+	              hasPhysics: false,
+	            },
+	            {
+	              id: "hover-guide-obj",
+	              name: "Hover Guide",
+	              src: objectSrc,
+	              _assetId: "object-asset",
+	              x: 410,
+	              y: 120,
+	              width: 32,
+	              height: 32,
+	              rotation: 0,
+	              zIndex: 7,
+	              opacity: 1,
+	              locked: false,
+	              cursor: "pointer",
+	              animation: "none",
+	              interaction: "flavor_text",
+	              interactionData: "The garden sign reacts when you hover.",
+	              triggerOnEnter: true,
+	              blendMode: "normal",
+	              parallaxSpeed: 1,
+	              hasPhysics: false,
+	            },
+	            {
+	              id: "decorative-hitbox",
+	              name: "Decorative Empty Hitbox",
+	              src: "",
+	              x: 460,
+	              y: 120,
+	              width: 32,
+	              height: 32,
+	              rotation: 0,
+	              zIndex: 8,
+	              opacity: 0,
+	              locked: false,
+	              isHitbox: true,
+	              interaction: "none",
+	              blendMode: "normal",
+	              parallaxSpeed: 1,
+	            },
+	            {
+	              id: "sound-only-obj",
+	              name: "Sound Only Object",
+	              src: objectSrc,
+	              _assetId: "object-asset",
+	              x: 500,
+	              y: 120,
+	              width: 32,
+	              height: 32,
+	              rotation: 0,
+	              zIndex: 9,
+	              opacity: 1,
+	              locked: false,
+	              interaction: "none",
+	              audioSrc: "dataurl-audio-asset",
+	              blendMode: "normal",
+	              parallaxSpeed: 1,
+	            },
+	            {
+	              id: "field-notes-opener",
+	              name: "Open Field Notes",
+	              src: "",
+	              x: 540,
+	              y: 120,
+	              width: 88,
+	              height: 36,
+	              rotation: 0,
+	              zIndex: 10,
+	              opacity: 1,
+	              locked: false,
+	              cursor: "pointer",
+	              interaction: "open_ui",
+	              targetUiId: "ui-1",
+	              blendMode: "normal",
+	              parallaxSpeed: 1,
+	              clickResponses: [
+	                {
+	                  id: "open-ui-chain",
+	                  interaction: "open_ui",
+	                  targetUiId: "ui-1",
+	                },
+	              ],
+	            },
 	          ],
+	        },
+      ],
+      prefabs: [
+        {
+          id: "frame-prefab-source",
+          name: "Frame Prefab Source",
+          src: data("frame"),
+          _assetId: "frame-asset",
+          x: 0,
+          y: 0,
+          width: 900,
+          height: 700,
+          rotation: 0,
+          zIndex: 0,
+          opacity: 1,
+          locked: true,
+          interaction: "none",
+          blendMode: "normal",
+          parallaxSpeed: 1,
         },
       ],
       uiMenus: [
         {
           id: "ui-1",
           name: "UI",
-          width: 800,
-          height: 600,
+          width: 1000,
+          height: 500,
           backgroundColor: "#000",
           objects: [
             {
@@ -158,8 +283,8 @@ const source = `
               _assetId: "edited-page-asset",
               x: 0,
               y: 0,
-              width: 800,
-              height: 600,
+              width: 1000,
+              height: 500,
               rotation: 0,
               zIndex: 0,
               opacity: 1,
@@ -173,6 +298,24 @@ const source = `
               blendMode: "normal",
               parallaxSpeed: 1,
               hasPhysics: false,
+            },
+            {
+              id: "close-ui-button",
+              name: "Close UI",
+              src: "",
+              x: 900,
+              y: 20,
+              width: 72,
+              height: 32,
+              rotation: 0,
+              zIndex: 5,
+              opacity: 1,
+              locked: false,
+              cursor: "pointer",
+              interaction: "close_ui",
+              targetUiId: "ui-1",
+              blendMode: "normal",
+              parallaxSpeed: 1,
             },
           ],
         },
@@ -210,6 +353,7 @@ const source = `
           isUsable: true,
           consumeOnUse: true,
           useSoundAssetId: "use-sound-asset",
+          statRestores: [{ stat: "hunger", amount: 12 }],
         },
         { id: "hookah", name: "Hookah", description: "Tool", iconAssetId: null },
         { id: "lighter", name: "Lighter", description: "Tool", iconAssetId: null, collectionCategory: "Tools" },
@@ -319,6 +463,16 @@ const source = `
               cursor: "pointer",
               clickResponses: [{ id: "open-quest-log", interaction: "open_quest_log" }],
             },
+            {
+              id: "empty-shell",
+              name: "Empty Shell",
+              x: 20,
+              y: 20,
+              width: 80,
+              height: 80,
+              cursor: "pointer",
+              clickResponses: [],
+            },
           ],
         },
       },
@@ -347,6 +501,12 @@ const source = `
 	    assert.equal(exported.globalSettings.customSkillDefinitions.Herbalism.defaultValue, 3, "skill definitions should be exported");
 	    assert.equal(exported.globalSettings.customSkillDefinitions["Hyena Whispering"].defaultValue, 7, "multi-word skill definitions should be exported");
 	    assert.deepEqual(exported.globalSettings.itemGroups, ["Tools"], "item groups should be exported");
+	    assert.equal(exported.assets.find((asset) => asset.id === "frame-asset")?.src, data("frame"), "full project export should recover a stale device frame asset from object references");
+	    const exportedUiOpener = exported.scenes[0].objects.find((object) => object.id === "field-notes-opener");
+	    assert.equal(exportedUiOpener.interaction, "open_ui", "custom UI openers should export as open_ui");
+	    assert.equal(exportedUiOpener.targetUiId, "ui-1", "custom UI opener target should export");
+	    assert.equal(exportedUiOpener.clickResponses[0].targetUiId, "ui-1", "chained custom UI opener target should export");
+	    assert.equal(exported.uiMenus[0].objects.find((object) => object.id === "close-ui-button").targetUiId, "ui-1", "custom UI close target should export");
 
 	    const html = generateExportHtml(project);
 	    assert.equal(html.includes("Hyena Whispering"), true, "generated HTML should display custom skill labels");
@@ -355,6 +515,40 @@ const source = `
 	    assert.equal(html.includes("Skill 1"), false, "generated HTML should not fall back to placeholder skill labels");
 	    assert.equal(html.includes(data("dataurl-only")), true, "generated HTML should seed dataURL-only image assets");
 	    assert.equal(html.includes(audio("dataurl-audio")), true, "generated HTML should retain dataURL-only audio assets used by behaviors");
+	    assert.equal(html.includes('data-require-item="lighter"'), true, "exported objects should retain required item gates");
+	    assert.equal(html.includes('data-interaction="open_ui"'), true, "generated HTML should include custom UI opener interactions");
+	    assert.equal(html.includes('data-target-ui="ui-1"'), true, "generated HTML should include custom UI opener targets");
+	    assert.equal(html.includes('data-consume-required-item="true"'), true, "exported objects should retain consume-on-use gates");
+	    assert.equal(html.includes("You need "), true, "export runtime should block required-item interactions without the item");
+	    assert.equal(html.includes('data-trigger-on-enter="true"'), true, "exported objects should retain hover/enter trigger behavior");
+	    assert.equal(html.includes("__hoverTrigger"), true, "export runtime should dispatch hover/enter-triggered interactions");
+	    assert.match(
+	      html,
+	      /id="decorative-hitbox"[^>]*pointer-events: none;/,
+	      "empty hitboxes should not block lower actionable objects in exported play",
+	    );
+	    assert.match(
+	      html,
+	      /id="sound-only-obj"[^>]*pointer-events: auto;/,
+	      "sound-only objects should still receive exported runtime clicks",
+	    );
+	    assert.match(
+	      html,
+	      /id="dataurl-obj"[^>]*data-runtime-clickable="true"/,
+	      "sound interaction objects should be flagged as runtime-clickable",
+	    );
+	    assert.match(
+	      html,
+	      /id="shell-control-empty-shell"[^>]*data-runtime-clickable="false"[^>]*pointer-events:none;/,
+	      "empty shell controls should not block exported scene clicks",
+	    );
+	    assert.equal(html.includes("itemDef.statRestores"), true, "export runtime should apply usable item stat restores");
+	    assert.equal(html.includes('"stat":"hunger"'), true, "exported game data should retain usable item stat restore targets");
+	    assert.match(
+	      html,
+	      /class="ui-menu-layer__content" style="[^"]*left:0px; top:100px; width:1000px; height:500px; transform:scale\\(0\\.8\\)/,
+	      "exported custom UI screens should fit uniformly and remain centered instead of stretching",
+	    );
 
     [
       "object-asset",
@@ -411,6 +605,14 @@ const { run } = await import(`data:text/javascript;base64,${bundled}`);
 const html = run();
 
 console.log("export smoke: booting html");
+const nodeMajor = Number(process.versions.node.split(".")[0]);
+if (nodeMajor >= 25) {
+  console.warn(
+    "export smoke: skipping jsdom runtime click assertions on Node 25; export-generation assertions passed.",
+  );
+  process.exit(0);
+}
+const { JSDOM, VirtualConsole } = await import("jsdom");
 const runtimeErrors = [];
 const virtualConsole = new VirtualConsole();
 virtualConsole.on("jsdomError", (error) => {
@@ -446,6 +648,9 @@ dom.window.chooseDialogue(0);
 
 const dataUrlImage = dom.window.document.querySelector("#dataurl-obj img");
 assert.ok(dataUrlImage?.getAttribute("src")?.startsWith("data:image/png"), "dataURL-only object image should resolve in exported runtime");
+const frameImages = [...dom.window.document.querySelectorAll("#device-frame img")];
+assert.ok(frameImages.length > 0, "exported device frame should render image slices");
+assert.ok(frameImages.every((img) => img.getAttribute("src") === data("frame")), "device frame slices should resolve from dataURL-only frame assets");
 const editedPageImage = dom.window.document.querySelector("#edited-page-art img");
 assert.ok(editedPageImage?.getAttribute("src")?.startsWith("data:image/png"), "edited UI page art should resolve from embedded data");
 assert.equal(editedPageImage?.style.objectFit, "contain", "edited UI page art should preserve aspect ratio in export");

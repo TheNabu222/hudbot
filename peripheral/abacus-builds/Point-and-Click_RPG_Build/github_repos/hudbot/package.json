@@ -8,7 +8,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "smoke:export": "node scripts/smoke-export.mjs",
-    "smoke:compat": "node scripts/smoke-project-compat.mjs"
+    "smoke:compat": "node scripts/smoke-project-compat.mjs",
+    "smoke:autosave": "node scripts/smoke-autosave.mjs",
+    "smoke:builder": "node scripts/smoke-builder-reliability.mjs",
+    "smoke:ui-wiring": "node scripts/smoke-ui-wiring.mjs"
   },
   "dependencies": {
     "fdir": "^6.5.0",

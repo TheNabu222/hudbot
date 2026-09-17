@@ -93,7 +93,56 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const isRuntimeOnlyAssetUrl = (src?: string) =>
+  Boolean(src && /^(blob:|filesystem:)/i.test(src));
+
+const resolveExportAssetSrc = (
+  asset: { id?: string; src?: string; dataURL?: string } | undefined,
+  fallback = "",
+) => {
+  if (!asset) return fallback || "";
+  if (asset.dataURL) return asset.dataURL;
+  if (asset.src && !isRuntimeOnlyAssetUrl(asset.src)) return asset.src;
+  return inferGitHubAssetIdSrc(asset.id) || fallback || "";
+};
+
+const findReferencedAssetSrc = (project: Project, assetId?: string | null) => {
+  if (!assetId) return "";
+  const direct = resolveExportAssetSrc(
+    (project.assets || []).find((asset) => asset.id === assetId),
+  );
+  if (direct) return direct;
+
+  const scenes = [...(project.scenes || []), ...(project.uiMenus || [])];
+  for (const scene of scenes) {
+    for (const object of scene.objects || []) {
+      if (
+        (object._assetId === assetId || (object as any).assetId === assetId) &&
+        object.src &&
+        !isRuntimeOnlyAssetUrl(object.src)
+      ) {
+        return object.src;
+      }
+    }
+  }
+  for (const object of project.prefabs || []) {
+    if (
+      (object._assetId === assetId || (object as any).assetId === assetId) &&
+      object.src &&
+      !isRuntimeOnlyAssetUrl(object.src)
+    ) {
+      return object.src;
+    }
+  }
+  return "";
+};
+
 export function generateExportHtml(sourceProject: Project): string {
+  const sourceDeviceFrameAssetId = sourceProject.globalSettings?.deviceFrame?.assetId;
+  const sourceDeviceFrameAssetSrc = findReferencedAssetSrc(
+    sourceProject,
+    sourceDeviceFrameAssetId,
+  );
   const project = prepareProjectForExport(sourceProject, {
     assetScope: "used",
     includeEmbeddedAssetData: "fallback",
@@ -169,9 +218,18 @@ export function generateExportHtml(sourceProject: Project): string {
   const offsetY = -boundMinY;
   const deviceFrame = project.globalSettings?.deviceFrame;
   const deviceFrameAsset = deviceFrame
-    ? project.assets.find((asset) => asset.id === deviceFrame.assetId)
+    ? project.assets.find((asset) => asset.id === deviceFrame.assetId) ||
+      (sourceDeviceFrameAssetSrc
+        ? { id: deviceFrame.assetId, src: sourceDeviceFrameAssetSrc }
+        : undefined)
     : undefined;
-  const hasDeviceFrame = !!(deviceFrame && deviceFrameAsset);
+  const deviceFrameAssetSrc = resolveExportAssetSrc(
+    deviceFrameAsset,
+    sourceDeviceFrameAssetId === deviceFrame?.assetId
+      ? sourceDeviceFrameAssetSrc
+      : "",
+  );
+  const hasDeviceFrame = !!(deviceFrame && deviceFrameAssetSrc);
   const layoutWidth = hasDeviceFrame ? deviceFrame.outerWidth : boundW;
   const layoutHeight = hasDeviceFrame ? deviceFrame.outerHeight : boundH;
   const deviceFrameScreenInset = 0;
@@ -183,17 +241,21 @@ export function generateExportHtml(sourceProject: Project): string {
         height: Math.max(1, deviceFrame.screen.height - deviceFrameScreenInset * 2),
       }
     : null;
-  const deviceScreenScaleX = hasDeviceFrame
-    ? deviceFrameAperture!.width / exportWidth
+  const deviceScreenScale = hasDeviceFrame
+    ? Math.min(
+        deviceFrameAperture!.width / exportWidth,
+        deviceFrameAperture!.height / exportHeight,
+      )
     : 1;
-  const deviceScreenScaleY = hasDeviceFrame
-    ? deviceFrameAperture!.height / exportHeight
-    : 1;
+  const deviceScreenScaleX = deviceScreenScale;
+  const deviceScreenScaleY = deviceScreenScale;
   const deviceScreenLeft = hasDeviceFrame
-    ? deviceFrameAperture!.x
+    ? deviceFrameAperture!.x +
+      (deviceFrameAperture!.width - exportWidth * deviceScreenScale) / 2
     : offsetX;
   const deviceScreenTop = hasDeviceFrame
-    ? deviceFrameAperture!.y
+    ? deviceFrameAperture!.y +
+      (deviceFrameAperture!.height - exportHeight * deviceScreenScale) / 2
     : offsetY;
 
   const css = `
@@ -941,12 +1003,10 @@ export function generateExportHtml(sourceProject: Project): string {
     );
 
   const resolveAssetSrc = (
-    asset: { src?: string; dataURL?: string } | undefined,
+    asset: { id?: string; src?: string; dataURL?: string } | undefined,
     fallback = "",
   ) => {
-    if (!asset) return fallback || "";
-    if (asset.src && !asset.src.startsWith("data:")) return asset.src;
-    return asset.dataURL || asset.src || fallback || "";
+    return resolveExportAssetSrc(asset, fallback);
   };
 
   const getObjectHtml = (obj: any) => {
@@ -964,16 +1024,24 @@ export function generateExportHtml(sourceProject: Project): string {
     const hasPrimaryInteraction =
       Boolean(obj.interaction) && obj.interaction !== "none";
     const hasClickResponses =
-      Array.isArray(obj.clickResponses) && obj.clickResponses.length > 0;
+      Array.isArray(obj.clickResponses) &&
+      obj.clickResponses.some((response) => response?.interaction && response.interaction !== "none");
+    const hasSoundOnlyBehavior = Boolean(obj.audioSrc);
+    const hasHoverBehavior = obj.triggerOnEnter === true;
+    const hasDragBehavior = obj.isDraggable === true;
     const hasInteractiveUiRole =
       obj.isUiElement &&
       (obj.uiElementType === "button" ||
         obj.uiElementType === "toggle" ||
         obj.uiElementType === "inventory_grid");
     const shouldReceiveClicks =
-      hasInteractiveUiRole ||
-      (!obj.ignoreClicks &&
-        (obj.isHitbox || hasPrimaryInteraction || hasClickResponses));
+      !obj.ignoreClicks &&
+      (hasInteractiveUiRole ||
+        hasPrimaryInteraction ||
+        hasClickResponses ||
+        hasSoundOnlyBehavior ||
+        hasHoverBehavior ||
+        hasDragBehavior);
     const peStr = shouldReceiveClicks
       ? "pointer-events: auto; touch-action: manipulation;"
       : "pointer-events: none;";
@@ -1007,6 +1075,8 @@ export function generateExportHtml(sourceProject: Project): string {
       data-interaction-data="${(obj.interactionData || "").replace(/"/g, "&quot;")}"
       data-audio-src="${obj.audioSrc || ""}"
       data-give-item="${obj.giveItemId || ""}"
+      data-require-item="${obj.requireItemId || ""}"
+      data-consume-required-item="${!!obj.consumeRequiredItem}"
       data-target-ui="${obj.targetUiId || ""}"
       data-dialogue-tree="${obj.dialogueTreeId || ""}"
       data-flavor="${(obj.flavorText || "").replace(/"/g, "&quot;")}"
@@ -1038,6 +1108,8 @@ export function generateExportHtml(sourceProject: Project): string {
       data-rule-conditions="${encodeURIComponent(JSON.stringify(obj.conditions || []))}"
       data-rule-condition-mode="${obj.conditionMode || "all"}"
       data-rule-once="${!!obj.triggerOnce}"
+      data-trigger-on-enter="${!!obj.triggerOnEnter}"
+      data-runtime-clickable="${shouldReceiveClicks ? "true" : "false"}"
       data-click-responses="${encodeURIComponent(JSON.stringify(obj.clickResponses || []))}"
       data-cursor-asset="${obj.cursorAssetId || ""}"
     `;
@@ -1228,13 +1300,17 @@ export function generateExportHtml(sourceProject: Project): string {
 
         const w = menu.width || project.globalSettings?.stageWidth || 800;
         const h = menu.height || project.globalSettings?.stageHeight || 600;
-        const fitScaleX = exportWidth / Math.max(1, w);
-        const fitScaleY = exportHeight / Math.max(1, h);
+        const fitScale = Math.min(
+          exportWidth / Math.max(1, w),
+          exportHeight / Math.max(1, h),
+        );
+        const fitLeft = (exportWidth - w * fitScale) / 2;
+        const fitTop = (exportHeight - h * fitScale) / 2;
         const pe = menu.blocksClicks ? "auto" : "none";
         const clickOutsideAttr = menu.closeOnClickOutside ? `data-close-on-outside="true"` : "";
         return `
         <div id="ui-menu-${menu.id}" class="ui-menu-layer" ${clickOutsideAttr} style="display: ${menu.isOpenByDefault ? "block" : "none"}; position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: ${pe}; overflow: hidden; z-index: ${10000 + idx}; background-color: ${menu.backgroundColor || "transparent"}">
-          <div class="ui-menu-layer__content" style="position:absolute; left:0; top:0; width:${w}px; height:${h}px; transform:scale(${fitScaleX}, ${fitScaleY}); transform-origin:top left; pointer-events:none;">
+          <div class="ui-menu-layer__content" style="position:absolute; left:${fitLeft}px; top:${fitTop}px; width:${w}px; height:${h}px; transform:scale(${fitScale}); transform-origin:top left; pointer-events:none;">
             ${uiObjectsHtml}
           </div>
         </div>
@@ -1496,7 +1572,10 @@ export function generateExportHtml(sourceProject: Project): string {
 
     const playAudioAsset = (asset) => {
       const src = buildAudioSrc(asset);
-      if (!src || (typeof state !== 'undefined' && state.isMuted)) return null;
+      if (!src || (typeof state !== 'undefined' && state.isMuted)) {
+        if (!src && asset) showSimpleDialogue('Sound could not play: ' + escapeForHtml(asset.name || asset.id || 'missing source'), 'Audio');
+        return null;
+      }
       const audio = applyAssetVolume(new Audio(src), asset);
       activeRuntimeAudio.splice(
         0,
@@ -1504,7 +1583,10 @@ export function generateExportHtml(sourceProject: Project): string {
         ...activeRuntimeAudio.filter(candidate => !candidate.paused)
       );
       activeRuntimeAudio.push(audio);
-      audio.play().catch(e => console.warn("Audio play failed", e));
+      audio.play().catch(e => {
+        console.warn("Audio play failed", e);
+        showSimpleDialogue('Sound could not play: ' + escapeForHtml(asset?.name || asset?.id || 'unsupported audio source'), 'Audio');
+      });
       return audio;
     };
 
@@ -2375,6 +2457,8 @@ export function generateExportHtml(sourceProject: Project): string {
           const interaction = obj.getAttribute('data-interaction');
           const data = obj.getAttribute('data-interaction-data');
           const giveItemId = obj.getAttribute('data-give-item');
+          const requireItemId = obj.getAttribute('data-require-item');
+          const consumeRequiredItem = obj.getAttribute('data-consume-required-item') === 'true';
           const audioSrc = obj.getAttribute('data-audio-src');
           
           if (audioSrc && audioSrc !== '') {
@@ -2382,6 +2466,25 @@ export function generateExportHtml(sourceProject: Project): string {
             if (soundAsset) {
               playAudioAsset(soundAsset);
             }
+          }
+
+          if (requireItemId && !state.inventory.includes(requireItemId)) {
+            const requiredItem = inventoryItems.find(candidate => candidate.id === requireItemId);
+            showSimpleDialogue('You need ' + (requiredItem ? requiredItem.name : 'a specific item') + ' to interact with this.', 'System');
+            return;
+          }
+
+          if (requireItemId && consumeRequiredItem && state.inventory.includes(requireItemId)) {
+            const itemIndex = state.inventory.indexOf(requireItemId);
+            if (itemIndex !== -1) {
+              state.inventory.splice(itemIndex, 1);
+            }
+            const requiredItem = inventoryItems.find(candidate => candidate.id === requireItemId);
+            if (requiredItem) {
+              showSimpleDialogue('You used up: ' + requiredItem.name, 'System');
+            }
+            updateInventoryUI();
+            saveGame();
           }
           
           if (interaction === 'give-item' || interaction === 'collect') {
@@ -2758,6 +2861,14 @@ export function generateExportHtml(sourceProject: Project): string {
             showSimpleDialogue("Error: " + err.message, "System");
           }
         };
+        if (obj.getAttribute('data-trigger-on-enter') === 'true') {
+          obj.addEventListener('mouseenter', () => {
+            handleClick({
+              __hoverTrigger: true,
+              currentTarget: obj,
+            });
+          });
+        }
         obj.addEventListener('click', handleClick);
       });
       
@@ -3144,6 +3255,16 @@ export function generateExportHtml(sourceProject: Project): string {
                playAudioAsset(sound);
            }
         }
+
+        if (Array.isArray(itemDef.statRestores)) {
+           itemDef.statRestores.forEach((restore) => {
+             if (!restore || !restore.stat) return;
+             const amount = Number(restore.amount) || 0;
+             state.needs[restore.stat] = Math.max(0, Math.min(100, (state.needs[restore.stat] || 0) + amount));
+           });
+           updateNeedsUI();
+           updateSmartUiRegions();
+        }
         
         clearInventorySelection();
         toggleInventory();
@@ -3319,8 +3440,8 @@ export function generateExportHtml(sourceProject: Project): string {
 
   let deviceFrameHtml = "";
   let deviceControlsHtml = "";
-  if (hasDeviceFrame && deviceFrame && deviceFrameAsset) {
-    const frameSrc = resolveAssetSrc(deviceFrameAsset);
+  if (hasDeviceFrame && deviceFrame) {
+    const frameSrc = deviceFrameAssetSrc;
     const aperture = deviceFrameAperture!;
     const slices = [
       { x: 0, y: 0, width: deviceFrame.outerWidth, height: aperture.y },
@@ -3363,6 +3484,9 @@ export function generateExportHtml(sourceProject: Project): string {
     `;
     deviceControlsHtml = (deviceFrame.controls || [])
       .map((control) => {
+        const controlReceivesClicks = (control.clickResponses || []).some(
+          (response) => response?.interaction && response.interaction !== "none",
+        );
         return `
         <button
           id="shell-control-${control.id}"
@@ -3379,7 +3503,8 @@ export function generateExportHtml(sourceProject: Project): string {
           data-script-src=""
           data-click-responses="${encodeURIComponent(JSON.stringify(control.clickResponses || []))}"
           data-cursor-asset="${control.cursorAssetId || ""}"
-          style="position:absolute; left:${control.x}px; top:${control.y}px; width:${control.width}px; height:${control.height}px; z-index:4500; border:0; padding:0; background:transparent; cursor:${hasCursorAsset(control.cursorAssetId) ? "none" : control.cursor || "pointer"};"
+          data-runtime-clickable="${controlReceivesClicks ? "true" : "false"}"
+          style="position:absolute; left:${control.x}px; top:${control.y}px; width:${control.width}px; height:${control.height}px; z-index:4500; border:0; padding:0; background:transparent; cursor:${hasCursorAsset(control.cursorAssetId) ? "none" : control.cursor || "pointer"}; pointer-events:${controlReceivesClicks ? "auto" : "none"};"
         ></button>`;
       })
       .join("");

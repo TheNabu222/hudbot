@@ -17,6 +17,10 @@ const UnifiedProject = {
       collect: 'give-item',
       give_item: 'give-item',
       'give-item': 'give-item',
+      open_ui: 'open-ui',
+      'open-ui': 'open-ui',
+      close_ui: 'close-ui',
+      'close-ui': 'close-ui',
       run_script: 'custom',
       custom_script: 'custom',
     };
@@ -60,6 +64,8 @@ const UnifiedProject = {
       targetSceneId: object?.targetSceneId || (interaction === 'scene_change' ? object?.interactionData : '') || '',
       dialogueTreeId: object?.dialogueTreeId || (interaction === 'dialogue' ? object?.interactionData : '') || '',
       giveItemId: object?.giveItemId || (interaction === 'give_item' ? object?.interactionData : '') || '',
+      targetUiId: object?.targetUiId || object?.targetMenuId || object?.uiMenuId || (interaction === 'open_ui' || interaction === 'close_ui' ? object?.interactionData : '') || '',
+      clickResponses: Array.isArray(object?.clickResponses) ? object.clickResponses : [],
     };
   },
 

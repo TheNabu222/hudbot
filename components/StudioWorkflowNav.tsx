@@ -31,6 +31,8 @@ export type EditorMode =
 
 type WorkspacePhase = "collect" | "compose" | "behaviors" | "connect";
 
+const testIdPart = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
 interface StudioWorkflowNavProps {
   editorMode: EditorMode;
   rpgTab?: RpgSubtool;
@@ -211,6 +213,8 @@ export const StudioWorkflowNav: React.FC<StudioWorkflowNavProps> = ({
                 type="button"
                 role="tab"
                 aria-selected={isActive}
+                aria-label={`${phase.label} workspace`}
+                data-testid={`workflow-${phase.id}`}
                 onClick={() => onModeChange(phase.defaultMode)}
                 className={`studio-step ${isActive ? "is-active" : ""}`}
               >
@@ -223,6 +227,8 @@ export const StudioWorkflowNav: React.FC<StudioWorkflowNavProps> = ({
           <button
             type="button"
             onClick={onTogglePlay}
+            aria-label={isPlaying ? "Stop play test" : "Start play test"}
+            data-testid={isPlaying ? "workflow-stop-test" : "workflow-play"}
             className={`studio-step studio-step--play ${isPlaying ? "is-active" : ""}`}
           >
             <span className="studio-step__number">05</span>
@@ -235,6 +241,8 @@ export const StudioWorkflowNav: React.FC<StudioWorkflowNavProps> = ({
           <button
             type="button"
             onClick={onExport}
+            aria-label="Publish or export game"
+            data-testid="workflow-publish"
             className="studio-step studio-step--publish"
           >
             <span className="studio-step__number">06</span>
@@ -269,6 +277,8 @@ export const StudioWorkflowNav: React.FC<StudioWorkflowNavProps> = ({
                 <button
                   key={`${tool.mode}-${tool.rpgTab || tool.label}`}
                   type="button"
+                  aria-label={`${tool.label} tool`}
+                  data-testid={`subtool-${testIdPart(tool.rpgTab || tool.label)}`}
                   onClick={() => {
                     if (tool.rpgTab) onRpgTabChange?.(tool.rpgTab);
                     onModeChange(tool.mode);

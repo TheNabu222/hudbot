@@ -8,6 +8,12 @@ const REPOSITORY_FILE_EXTENSIONS =
 
 export const isEmbeddedSource = (src?: string) => Boolean(src?.startsWith("data:"));
 
+const isRuntimeOnlySource = (src?: string) =>
+  Boolean(src && /^(blob:|filesystem:)/i.test(src));
+
+const isPortableLinkedSource = (src?: string) =>
+  Boolean(src && !isEmbeddedSource(src) && !isRuntimeOnlySource(src));
+
 const getOriginalEmbeddedSources = (asset: Asset) =>
   [asset.src, asset.dataURL].filter(
     (value): value is string => Boolean(value && isEmbeddedSource(value)),
@@ -35,7 +41,7 @@ const restoreRepositoryFileName = (name: string) => {
 export const inferGitHubAssetSrc = (asset: Asset): string => {
   const idSrc = inferGitHubAssetIdSrc(asset.id);
   if (idSrc) return idSrc;
-  if (asset.src && !isEmbeddedSource(asset.src)) return asset.src;
+  if (isPortableLinkedSource(asset.src)) return asset.src;
 
   const category = cleanPathPart(asset.category || "");
   const name = restoreRepositoryFileName(asset.name || "");
@@ -233,43 +239,74 @@ const isAssetReferenced = (
   );
 };
 
+const collectAssetSourceFallbacks = (project: Project): Map<string, string> => {
+  const fallbackByAssetId = new Map<string, string>();
+  const collectObject = (object: SceneObject) => {
+    const assetId = object._assetId || (object as any).assetId;
+    if (
+      assetId &&
+      object.src &&
+      isEmbeddedSource(object.src) &&
+      !fallbackByAssetId.has(assetId)
+    ) {
+      fallbackByAssetId.set(assetId, object.src);
+    }
+  };
+  (project.scenes || []).forEach((scene) =>
+    (scene.objects || []).forEach(collectObject),
+  );
+  (project.uiMenus || []).forEach((menu) =>
+    (menu.objects || []).forEach(collectObject),
+  );
+  (project.prefabs || []).forEach(collectObject);
+  return fallbackByAssetId;
+};
+
 export const prepareProjectForExport = (
   project: Project,
   options: PrepareProjectOptions = {},
 ): Project => {
+  const assetSourceFallbacks = collectAssetSourceFallbacks(project);
   const strippedProject = stripDuplicatedAssetSources(project);
   const referencedValues = collectReferencedAssetValues(strippedProject);
   const assetScope = options.assetScope ?? "used";
   const includeEmbeddedAssetData = options.includeEmbeddedAssetData ?? true;
   const keepFavoriteAssets = options.keepFavoriteAssets ?? false;
   const prepareAsset = (asset: Asset): Asset => {
+    const sourceFallback = assetSourceFallbacks.get(asset.id);
+    const assetForExport =
+      sourceFallback && !asset.src && !asset.dataURL
+        ? { ...asset, src: sourceFallback }
+        : asset;
     const hasEmbeddedSource =
-      isEmbeddedSource(asset.src) || isEmbeddedSource(asset.dataURL);
-    const normalizedCategory = cleanPathPart(asset.category || "").toLowerCase();
+      isEmbeddedSource(assetForExport.src) || isEmbeddedSource(assetForExport.dataURL);
+    const normalizedCategory = cleanPathPart(assetForExport.category || "").toLowerCase();
     const looksLikeEditedAsset =
-      asset.exportSource === "embedded_fallback" ||
+      assetForExport.exportSource === "embedded_fallback" ||
       normalizedCategory.startsWith("edited/") ||
-      /(?:^|[_\s.-])(crop|cropped|edited|cutout)(?:[_\s.-]|$)/i.test(asset.name || "") ||
-      /(?:^|[_\s.-])(crop|cropped|edited|cutout)(?:[_\s.-]|$)/i.test(asset.id || "");
+      /(?:^|[_\s.-])(crop|cropped|edited|cutout)(?:[_\s.-]|$)/i.test(assetForExport.name || "") ||
+      /(?:^|[_\s.-])(crop|cropped|edited|cutout)(?:[_\s.-]|$)/i.test(assetForExport.id || "");
     const isEditedEmbeddedAsset = hasEmbeddedSource && looksLikeEditedAsset;
-    const inferredSrc = isEditedEmbeddedAsset ? "" : inferGitHubAssetSrc(asset);
+    const inferredSrc = isEditedEmbeddedAsset ? "" : inferGitHubAssetSrc(assetForExport);
     const hasLinkedSrc = Boolean(inferredSrc);
     if (includeEmbeddedAssetData === "fallback") {
       if (isEditedEmbeddedAsset) {
-        const embeddedSrc = isEmbeddedSource(asset.src) ? asset.src : asset.dataURL;
+        const embeddedSrc = isEmbeddedSource(assetForExport.src)
+          ? assetForExport.src
+          : assetForExport.dataURL;
         return {
-          ...asset,
-          src: embeddedSrc || asset.src,
+          ...assetForExport,
+          src: embeddedSrc || assetForExport.src,
           dataURL: undefined,
           exportSource: "embedded_fallback",
           exportReason:
-            asset.exportReason ||
+            assetForExport.exportReason ||
             "Used asset is marked as an embedded fallback, so export keeps its data for reliability.",
         };
       }
       return hasLinkedSrc
         ? {
-            ...asset,
+            ...assetForExport,
             src: inferredSrc,
             dataURL: undefined,
             exportSource: hasEmbeddedSource ? "github_inferred" : "linked",
@@ -278,10 +315,10 @@ export const prepareProjectForExport = (
               : "Existing non-embedded asset URL preserved.",
           }
         : {
-            ...asset,
+            ...assetForExport,
             src:
-              (isEmbeddedSource(asset.src) ? asset.src : asset.dataURL) ||
-              asset.src,
+              (isEmbeddedSource(assetForExport.src) ? assetForExport.src : assetForExport.dataURL) ||
+              assetForExport.src,
             dataURL: undefined,
             exportSource: hasEmbeddedSource ? "embedded_fallback" : undefined,
             exportReason: hasEmbeddedSource
@@ -291,7 +328,7 @@ export const prepareProjectForExport = (
     }
     if (includeEmbeddedAssetData) {
       return {
-        ...asset,
+        ...assetForExport,
         exportSource: hasEmbeddedSource ? "embedded_fallback" : "linked",
         exportReason: hasEmbeddedSource
           ? "Full-library backup keeps embedded asset data by request."
@@ -299,11 +336,11 @@ export const prepareProjectForExport = (
       };
     }
     const strippedAsset: Asset = {
-      ...asset,
+      ...assetForExport,
       dataURL: undefined,
       src:
         isEditedEmbeddedAsset && hasEmbeddedSource
-          ? (isEmbeddedSource(asset.src) ? asset.src : asset.dataURL) || ""
+          ? (isEmbeddedSource(assetForExport.src) ? assetForExport.src : assetForExport.dataURL) || ""
           : inferredSrc,
       exportSource:
         isEditedEmbeddedAsset && hasEmbeddedSource

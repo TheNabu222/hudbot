@@ -1,0 +1,19 @@
+{
+  "polyfillFiles": [
+    "static/chunks/polyfills.js"
+  ],
+  "devFiles": [],
+  "ampDevFiles": [],
+  "lowPriorityFiles": [
+    "static/development/_buildManifest.js",
+    "static/development/_ssgManifest.js"
+  ],
+  "rootMainFiles": [
+    "static/chunks/webpack-1c5ba591.js",
+    "static/chunks/main-app-2017faa8.js"
+  ],
+  "pages": {
+    "/_app": []
+  },
+  "ampFirstPages": []
+}

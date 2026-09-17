@@ -2,24 +2,8 @@ import React, { useEffect, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
-  Backpack,
-  BookOpen,
-  Eye,
-  EyeOff,
-  Flag,
-  Gift,
-  Hammer,
-  Link,
-  MapPin,
-  MessageSquare,
-  Music,
   Plus,
-  RotateCw,
-  Save,
-  Settings,
   Trash2,
-  Users,
-  Video,
   Wand2,
   X,
 } from "lucide-react";
@@ -37,6 +21,14 @@ import {
   Scene,
   SceneObject,
 } from "../types";
+import {
+  buildUiScreenActions,
+  labelForResponse,
+  quickInterfaceChoices,
+  responseChoiceGroups,
+} from "../utils/pointClickActions";
+
+const testIdPart = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
 interface ClickResponseEditorProps {
   responses: ClickResponse[];
@@ -59,96 +51,6 @@ interface ClickResponseEditorProps {
   startNumber?: number;
 }
 
-type ResponseChoice = {
-  interaction: InteractionType;
-  label: string;
-  icon: React.ElementType;
-};
-
-const responseChoiceGroups: Array<{
-  label: string;
-  choices: ResponseChoice[];
-}> = [
-  {
-    label: "Story",
-    choices: [
-      { interaction: "dialogue", label: "Say / Talk", icon: MessageSquare },
-      { interaction: "set_flag", label: "Set Story Flag", icon: Flag },
-      { interaction: "clear_flag", label: "Clear Story Flag", icon: Flag },
-      { interaction: "toggle_flag", label: "Toggle Story Flag", icon: Flag },
-      { interaction: "skill_check", label: "Skill Check", icon: Wand2 },
-    ],
-  },
-  {
-    label: "Items",
-    choices: [
-      { interaction: "give-item", label: "Give Item", icon: Gift },
-      { interaction: "collect", label: "Pick Up + Hide", icon: Gift },
-      { interaction: "open_crafting", label: "Open Crafting", icon: Hammer },
-      { interaction: "gift_item", label: "Gift Selected Item", icon: Gift },
-    ],
-  },
-  {
-    label: "Quests / Lore",
-    choices: [
-      { interaction: "start_quest", label: "Start Quest", icon: BookOpen },
-      { interaction: "complete_quest_objective", label: "Complete Quest Step", icon: BookOpen },
-      { interaction: "complete_quest", label: "Complete Quest", icon: BookOpen },
-      { interaction: "open_quest_log", label: "Open Quest Log", icon: BookOpen },
-      { interaction: "open_almanac", label: "Open Almanac", icon: BookOpen },
-      { interaction: "unlock_lore_entry", label: "Unlock Lore / Journal", icon: BookOpen },
-      { interaction: "show_lore_entry", label: "Show Lore Popup", icon: BookOpen },
-      { interaction: "open_relationships", label: "Open Relationships", icon: Users },
-    ],
-  },
-  {
-    label: "Scene / Objects",
-    choices: [
-      { interaction: "scene_change", label: "Go to Scene", icon: MapPin },
-      { interaction: "open_map", label: "Open Map", icon: MapPin },
-      { interaction: "show_object", label: "Show Object", icon: Eye },
-      { interaction: "hide_object", label: "Hide Object", icon: EyeOff },
-      { interaction: "toggle_object", label: "Toggle Object", icon: Eye },
-      { interaction: "modify_number", label: "Change Meter / Text", icon: Wand2 },
-    ],
-  },
-  {
-    label: "Interface",
-    choices: [
-      { interaction: "open_ui", label: "Open Screen UI", icon: Wand2 },
-      { interaction: "close_ui", label: "Close Screen UI", icon: X },
-      { interaction: "toggle_inventory", label: "Open Inventory", icon: Backpack },
-      { interaction: "toggle_needs_hud", label: "Toggle Needs HUD", icon: Wand2 },
-      { interaction: "toggle_skills_hud", label: "Toggle Skills HUD", icon: Wand2 },
-      { interaction: "open_skills", label: "Open Skills", icon: Wand2 },
-      { interaction: "open_settings", label: "Open Settings", icon: Settings },
-    ],
-  },
-  {
-    label: "Media / System",
-    choices: [
-      { interaction: "sound", label: "Play Sound", icon: Music },
-      { interaction: "play_cutscene", label: "Play Cutscene", icon: Video },
-      { interaction: "run_script", label: "Run Script", icon: Wand2 },
-      { interaction: "link", label: "Open Link", icon: Link },
-      { interaction: "save_game", label: "Save Game", icon: Save },
-      { interaction: "load_game", label: "Load Game", icon: Save },
-      { interaction: "restart_scene", label: "Restart Room", icon: RotateCw },
-      { interaction: "restart_game", label: "Restart Game", icon: RotateCw },
-      { interaction: "advance_day", label: "Advance Day", icon: RotateCw },
-      { interaction: "toggle_fullscreen", label: "Fullscreen", icon: Settings },
-      { interaction: "toggle_mute", label: "Mute Audio", icon: Music },
-      { interaction: "exit_game", label: "Stop Game", icon: X },
-    ],
-  },
-];
-
-const allResponseChoices = responseChoiceGroups.flatMap((group) => group.choices);
-
-const labelForInteraction = (interaction: InteractionType) =>
-  allResponseChoices.find((choice) => choice.interaction === interaction)?.label ||
-  interaction.replace(/_/g, " ");
-
 export const ClickResponseTypePicker: React.FC<{
   value: InteractionType;
   targetUiId?: string;
@@ -156,6 +58,7 @@ export const ClickResponseTypePicker: React.FC<{
   onChange: (interaction: InteractionType) => void;
   onChooseAction?: (updates: Partial<ClickResponse>) => void;
 }> = ({ value, targetUiId, uiMenus = [], onChange, onChooseAction }) => {
+  const screenActions = buildUiScreenActions(uiMenus);
   const choose = (updates: Partial<ClickResponse>) => {
     if (onChooseAction) onChooseAction(updates);
     else if (updates.interaction) onChange(updates.interaction);
@@ -166,6 +69,8 @@ export const ClickResponseTypePicker: React.FC<{
       <button
         type="button"
         onClick={() => choose({ interaction: "none", targetUiId: "" })}
+        aria-label="Set click response to do nothing"
+        data-testid="click-response-none"
         className={`w-full rounded border px-2 py-2 text-left text-[10px] font-bold ${
           value === "none"
             ? "border-emerald-400 bg-emerald-500/15 text-white"
@@ -175,18 +80,20 @@ export const ClickResponseTypePicker: React.FC<{
         Do nothing
       </button>
       <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
-        {uiMenus.length > 0 && (
+        {screenActions.length > 0 && (
           <div>
             <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-wide text-neutral-500">
-              Your Interface Screens
+              Open Your Custom Screens
             </div>
             <div className="grid grid-cols-2 gap-1.5">
-              {uiMenus.map((menu) => {
+              {screenActions.map(({ menu, kind, description }) => {
                 const isActive = value === "open_ui" && targetUiId === menu.id;
                 return (
                   <button
                     key={menu.id}
                     type="button"
+                    aria-label={`Open custom screen ${menu.name}`}
+                    data-testid={`click-response-open-ui-${menu.id}`}
                     onClick={() =>
                       choose({
                         interaction: "open_ui",
@@ -206,7 +113,7 @@ export const ClickResponseTypePicker: React.FC<{
                     <span className="min-w-0">
                       <span className="block truncate">{menu.name}</span>
                       <span className="block truncate text-[8px] text-neutral-500">
-                        open this UI canvas
+                        {kind}: {description}
                       </span>
                     </span>
                   </button>
@@ -215,6 +122,47 @@ export const ClickResponseTypePicker: React.FC<{
             </div>
           </div>
         )}
+        <div>
+          <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-wide text-neutral-500">
+            Built-in HUD and Menus
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {quickInterfaceChoices.map((choice) => {
+              const Icon = choice.icon;
+              const isActive = value === choice.interaction;
+              return (
+                <button
+                  key={choice.interaction}
+                  type="button"
+                  aria-label={choice.label}
+                  data-testid={`click-response-built-in-${choice.interaction}`}
+                  onClick={() =>
+                    choose({
+                      interaction: choice.interaction,
+                      targetUiId: "",
+                    })
+                  }
+                  className={`flex min-h-[38px] items-center gap-2 rounded border px-2 py-2 text-left text-[10px] font-bold ${
+                    isActive
+                      ? "border-cyan-300 bg-cyan-500/15 text-white"
+                      : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-cyan-400/50 hover:text-white"
+                  }`}
+                >
+                  <Icon
+                    size={13}
+                    className={isActive ? "text-cyan-200" : "text-cyan-400"}
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate">{choice.label}</span>
+                    <span className="block truncate text-[8px] text-neutral-500">
+                      built-in player surface
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
         {responseChoiceGroups.map((group) => (
           <div key={group.label}>
             <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-wide text-neutral-500">
@@ -227,6 +175,8 @@ export const ClickResponseTypePicker: React.FC<{
                   <button
                     key={choice.interaction}
                     type="button"
+                    aria-label={choice.label}
+                    data-testid={`click-response-action-${testIdPart(choice.interaction)}`}
                     onClick={() =>
                       choose({
                         interaction: choice.interaction,
@@ -285,6 +235,7 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
   startNumber = 2,
 }) => {
   const [isAdding, setIsAdding] = useState(responses.length === 0);
+  const screenActions = buildUiScreenActions(uiMenus);
 
   useEffect(() => {
     if (responses.length === 0) setIsAdding(true);
@@ -370,13 +321,13 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
 
       {isAdding && (
         <div className="max-h-[52vh] space-y-3 overflow-y-auto rounded border border-neutral-700 bg-neutral-950 p-2 pr-1">
-          {uiMenus.length > 0 && (
+          {screenActions.length > 0 && (
             <div>
               <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-wide text-neutral-500">
-                Your Interface Screens
+                Open Your Custom Screens
               </div>
               <div className="grid grid-cols-2 gap-1.5">
-                {uiMenus.map((menu) => (
+                {screenActions.map(({ menu, kind, description }) => (
                   <button
                     key={menu.id}
                     type="button"
@@ -397,7 +348,7 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
                     <span className="min-w-0">
                       <span className="block truncate">{menu.name}</span>
                       <span className="block truncate text-[8px] text-neutral-500">
-                        open this UI canvas
+                        {kind}: {description}
                       </span>
                     </span>
                   </button>
@@ -405,6 +356,41 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
               </div>
             </div>
           )}
+          <div>
+            <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-wide text-neutral-500">
+              Built-in HUD and Menus
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {quickInterfaceChoices.map((choice) => {
+                const Icon = choice.icon;
+                return (
+                  <button
+                    key={choice.interaction}
+                    type="button"
+                    onClick={() => {
+                      onChange([
+                        ...responses,
+                        {
+                          id: crypto.randomUUID(),
+                          interaction: choice.interaction,
+                        },
+                      ]);
+                      setIsAdding(false);
+                    }}
+                    className="flex min-h-[38px] items-center gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-2 text-left text-[10px] font-bold text-neutral-300 hover:border-cyan-400/50 hover:text-white"
+                  >
+                    <Icon size={13} className="text-cyan-400" />
+                    <span className="min-w-0">
+                      <span className="block truncate">{choice.label}</span>
+                      <span className="block truncate text-[8px] text-neutral-500">
+                        built-in player surface
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           {responseChoiceGroups.map((group) => (
             <div key={group.label}>
               <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-wide text-neutral-500">
@@ -447,7 +433,7 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
         >
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="font-comic text-xs font-bold text-emerald-300">
-              {index + startNumber}. {labelForInteraction(response.interaction)}
+              {index + startNumber}. {labelForResponse(response, uiMenus)}
             </span>
             <div className="flex items-center gap-0.5">
               <button
@@ -702,7 +688,7 @@ export const ClickResponseEditor: React.FC<ClickResponseEditorProps> = ({
             >
               <option value="">
                 {response.interaction === "open_ui"
-                  ? "Choose UI…"
+                  ? "Choose custom Screen UI…"
                   : "Close top open UI"}
               </option>
               {uiMenus.map((menu) => (

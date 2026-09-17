@@ -120,8 +120,17 @@ import {
   getInteractionSummary,
   getNextObjectPlacement,
   getObscuredInteractiveWarnings,
+  isInteractiveObject,
   selectSceneObjectById,
 } from "./utils/sceneObjectReliability";
+import {
+  createInterfaceOpenerObject,
+  findProjectObjectById,
+  findInterfaceWiringTargets,
+  interfaceOpenActionFor,
+  wireProjectObjectToInterface,
+} from "./utils/interfaceWiring";
+import { pointClickQuickActions } from "./utils/pointClickActions";
 import {
   createRuntimeGameState,
   evaluateRuleConditions,
@@ -212,9 +221,11 @@ type SmartUiRegionKind = "inventory_grid" | "journal_text" | "quest_list" | "sta
 type InterfacePresetGroupId =
   | "shell"
   | "session"
+  | "pointclick"
   | "rpg"
   | "tactical"
-  | "knowledge";
+  | "knowledge"
+  | "media";
 type InterfaceStudioPane = "workshop" | "presets" | "screens";
 
 const INTERFACE_PRESET_GROUPS: Array<{
@@ -239,6 +250,9 @@ const INTERFACE_PRESET_GROUPS: Array<{
       "Game Over",
       "Results Screen",
       "Rewards & Experience",
+      "Mission Complete",
+      "Daily Summary",
+      "Calendar / Day Planner",
     ],
   },
   {
@@ -254,8 +268,28 @@ const INTERFACE_PRESET_GROUPS: Array<{
       "Pause Menu",
       "Cutscene Panel",
       "Dialogue Choice",
+      "Dialogue History",
       "Item Get",
       "Feature Unlocked",
+      "Notification Toast",
+    ],
+  },
+  {
+    id: "pointclick",
+    title: "Point & Click Play",
+    blurb: "Hotspot inspect, object use, NPC talk, doors, puzzles, clues, evidence, saves.",
+    template: "modal",
+    presets: [
+      "Hotspot Inspector",
+      "Object Examine Popup",
+      "Use Item Prompt",
+      "NPC Talk Panel",
+      "Door / Travel Prompt",
+      "Puzzle Panel",
+      "Clue Board",
+      "Evidence Board",
+      "Timed Choice",
+      "Save Point",
     ],
   },
   {
@@ -273,6 +307,10 @@ const INTERFACE_PRESET_GROUPS: Array<{
       "Character Customization",
       "Upgrade Screen",
       "Crafting",
+      "Recipe Book",
+      "Shop Dialogue",
+      "Storage Chest",
+      "Skill Tree",
     ],
   },
   {
@@ -290,6 +328,10 @@ const INTERFACE_PRESET_GROUPS: Array<{
       "Ability Menu",
       "Targeting Overlay",
       "Game Log",
+      "Interaction Prompt",
+      "Quick Save Chip",
+      "Status Effects",
+      "Day / Time HUD",
     ],
   },
   {
@@ -308,6 +350,29 @@ const INTERFACE_PRESET_GROUPS: Array<{
       "Sound Player",
       "Level Editor",
       "Content Browser",
+      "Field Notes",
+      "Mailbox",
+      "Bestiary",
+      "Recipe Codex",
+      "Photo Album",
+    ],
+  },
+  {
+    id: "media",
+    title: "Audio, Video & Accessibility",
+    blurb: "Audio controls, cutscenes, subtitles, control remap, accessibility, language, photo mode.",
+    template: "settings",
+    presets: [
+      "Audio Mixer",
+      "Music Jukebox",
+      "SFX Board",
+      "Cutscene Player",
+      "Subtitles / Captions",
+      "Controls Remap",
+      "Accessibility Menu",
+      "Language Select",
+      "Credits Roll",
+      "Photo Mode",
     ],
   },
 ];
@@ -332,20 +397,33 @@ const resolveInterfacePresetTemplate = (
   const lower = presetName.toLowerCase();
 
   if (lower.includes("dialogue choice") || lower.includes("choice")) return "choiceBar";
+  if (
+    lower.includes("timed choice") ||
+    lower.includes("interaction prompt") ||
+    lower.includes("quick save chip") ||
+    lower.includes("notification toast")
+  ) {
+    return "choiceBar";
+  }
   if (lower.includes("inventory")) return "inventory";
   if (
     lower.includes("inspect item") ||
+    lower.includes("hotspot inspector") ||
+    lower.includes("object examine") ||
+    lower.includes("use item prompt") ||
+    lower.includes("storage chest") ||
     lower.includes("equipment") ||
     lower.includes("loadout") ||
     lower.includes("buying") ||
     lower.includes("trading") ||
+    lower.includes("shop dialogue") ||
     lower.includes("player menu") ||
     lower.includes("character customization") ||
     lower.includes("upgrade")
   ) {
     return "inventory";
   }
-  if (lower.includes("craft")) return "crafting";
+  if (lower.includes("craft") || lower.includes("recipe")) return "crafting";
   if (lower.includes("quest")) return "quest";
   if (
     lower.includes("player vitals") ||
@@ -356,15 +434,26 @@ const resolveInterfacePresetTemplate = (
     lower.includes("item wheel") ||
     lower.includes("ability menu") ||
     lower.includes("targeting") ||
-    lower.includes("game log")
+    lower.includes("game log") ||
+    lower.includes("status effects") ||
+    lower.includes("day / time") ||
+    lower.includes("day time")
   ) {
     return "hud";
   }
   if (lower.includes("world map") || lower.includes("stage select")) return "map";
-  if (lower.includes("map")) return "map";
-  if (lower.includes("relationship") || lower.includes("roster")) return "relationships";
+  if (lower.includes("map") || lower.includes("door / travel")) return "map";
+  if (lower.includes("relationship") || lower.includes("roster") || lower.includes("npc talk")) return "relationships";
   if (
     lower.includes("setting") ||
+    lower.includes("audio") ||
+    lower.includes("music") ||
+    lower.includes("sfx") ||
+    lower.includes("subtitles") ||
+    lower.includes("captions") ||
+    lower.includes("controls remap") ||
+    lower.includes("accessibility") ||
+    lower.includes("language") ||
     lower.includes("pause") ||
     lower.includes("load / save") ||
     lower.includes("load/save") ||
@@ -372,8 +461,8 @@ const resolveInterfacePresetTemplate = (
   ) {
     return "settings";
   }
-  if (lower.includes("sound player")) return "modal";
-  if (lower.includes("level editor")) return "map";
+  if (lower.includes("sound player") || lower.includes("cutscene player") || lower.includes("photo mode")) return "modal";
+  if (lower.includes("level editor") || lower.includes("puzzle panel") || lower.includes("clue board") || lower.includes("evidence board")) return "map";
   if (
     lower.includes("almanac") ||
     lower.includes("journal") ||
@@ -382,7 +471,12 @@ const resolveInterfacePresetTemplate = (
     lower.includes("tutorial") ||
     lower.includes("gallery") ||
     lower.includes("collectable") ||
-    lower.includes("content browser")
+    lower.includes("content browser") ||
+    lower.includes("field notes") ||
+    lower.includes("mailbox") ||
+    lower.includes("bestiary") ||
+    lower.includes("photo album") ||
+    lower.includes("dialogue history")
   ) {
     return "journal";
   }
@@ -399,19 +493,45 @@ const interfaceTemplateLabel = (
   if (lower.includes("inspect item")) return "item detail";
   if (lower.includes("equipment") || lower.includes("loadout")) return "gear slots";
   if (lower.includes("buying") || lower.includes("trading")) return "shop surface";
+  if (lower.includes("shop dialogue")) return "shop talk";
+  if (lower.includes("storage chest")) return "storage slots";
   if (lower.includes("character customization")) return "profile editor";
-  if (lower.includes("upgrade")) return "upgrade board";
+  if (lower.includes("upgrade") || lower.includes("skill tree")) return "upgrade board";
   if (lower.includes("objective chip")) return "quest HUD";
   if (lower.includes("minimap")) return "minimap HUD";
   if (lower.includes("compass")) return "direction HUD";
   if (lower.includes("button prompts")) return "input prompts";
+  if (lower.includes("interaction prompt")) return "context prompt";
   if (lower.includes("item wheel")) return "quick wheel";
   if (lower.includes("ability menu")) return "action bar";
   if (lower.includes("targeting")) return "aim overlay";
   if (lower.includes("game log")) return "event feed";
-  if (lower.includes("sound player")) return "audio controls";
+  if (lower.includes("status effects")) return "status HUD";
+  if (lower.includes("day / time")) return "time HUD";
+  if (lower.includes("quick save")) return "save HUD";
+  if (lower.includes("hotspot inspector")) return "inspect surface";
+  if (lower.includes("object examine")) return "examine popup";
+  if (lower.includes("use item prompt")) return "item-use prompt";
+  if (lower.includes("npc talk")) return "talk panel";
+  if (lower.includes("door / travel")) return "travel prompt";
+  if (lower.includes("puzzle")) return "puzzle board";
+  if (lower.includes("clue") || lower.includes("evidence")) return "clue board";
+  if (lower.includes("save point")) return "save surface";
+  if (lower.includes("audio") || lower.includes("sound player")) return "audio controls";
+  if (lower.includes("jukebox")) return "music menu";
+  if (lower.includes("sfx")) return "sound board";
+  if (lower.includes("cutscene")) return "video surface";
+  if (lower.includes("subtitles") || lower.includes("captions")) return "caption settings";
+  if (lower.includes("controls remap")) return "input remap";
+  if (lower.includes("accessibility")) return "accessibility";
+  if (lower.includes("language")) return "language menu";
+  if (lower.includes("photo mode")) return "camera tools";
   if (lower.includes("almanac")) return "almanac browser";
   if (lower.includes("level editor")) return "tool surface";
+  if (lower.includes("field notes")) return "field notes";
+  if (lower.includes("mailbox")) return "messages";
+  if (lower.includes("bestiary")) return "creature log";
+  if (lower.includes("photo album")) return "album";
   if (lower.includes("inventory")) return "live item slots";
   if (lower.includes("craft")) return "recipe builder";
   if (lower.includes("quest")) return "quest tracker";
@@ -1144,11 +1264,6 @@ const App: React.FC = () => {
   const [rightSidebarTab, setRightSidebarTab] = useState<
     "properties" | "layers" | "prefabs" | "assets"
   >("properties");
-  useEffect(() => {
-    if (rightSidebarTab === "assets" || rightSidebarTab === "prefabs") {
-      setRightSidebarTab("properties");
-    }
-  }, [rightSidebarTab]);
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(256);
   const [rightSidebarWidth, setRightSidebarWidth] = useState(() =>
     window.innerWidth <= 1150 ? 0 : 320,
@@ -2132,7 +2247,12 @@ const App: React.FC = () => {
 
   const playRuntimeAudioAsset = (audioAsset?: Asset | null) => {
     const audioSrc = getAssetDisplaySrc(audioAsset);
-    if (!audioAsset || !audioSrc || isAudioMuted) return;
+    if (!audioAsset || !audioSrc || isAudioMuted) {
+      if (audioAsset && !audioSrc) {
+        setPreviewDialogue(`Sound could not play: ${audioAsset.name || audioAsset.id || "missing source"}`);
+      }
+      return;
+    }
     const mediaFragment =
       audioAsset.trimStart || audioAsset.trimEnd
         ? `#t=${audioAsset.trimStart || 0}${audioAsset.trimEnd ? `,${audioAsset.trimEnd}` : ""}`
@@ -2143,7 +2263,10 @@ const App: React.FC = () => {
     runtimeAudioRefs.current = runtimeAudioRefs.current
       .filter((candidate) => !candidate.paused)
       .concat(audio);
-    audio.play().catch((e) => console.error("SFX playback failed", e));
+    audio.play().catch((e) => {
+      console.error("SFX playback failed", e);
+      setPreviewDialogue(`Sound could not play: ${audioAsset.name || audioAsset.id || "unsupported audio source"}`);
+    });
   };
 
   useEffect(() => {
@@ -2648,6 +2771,10 @@ const App: React.FC = () => {
   };
   const selectedObject = currentScene?.objects.find(
     (o) => o.id === selectedObjectId,
+  );
+  const selectedProjectObject = useMemo(
+    () => findProjectObjectById(project, selectedObjectId),
+    [project.scenes, project.uiMenus, selectedObjectId],
   );
   const currentSceneObjectsForRender = useMemo(
     () => [...currentScene.objects].sort((a, b) => a.zIndex - b.zIndex),
@@ -3845,7 +3972,7 @@ const App: React.FC = () => {
     setSelectedHudWidget(null);
     setContextMenu(null);
 
-    if (!e.shiftKey && stageRef.current) {
+    if (e.altKey && stageRef.current) {
       const rect = stageRef.current.getBoundingClientRect();
       const stageWidth =
         currentScene.width || project.globalSettings.stageWidth || 800;
@@ -4476,11 +4603,7 @@ const App: React.FC = () => {
 
   const handleExport = () => {
     try {
-      const exportProject = prepareProjectForExport(project, {
-        assetScope: "used",
-        includeEmbeddedAssetData: "fallback",
-      });
-      const html = generateExportHtml(exportProject);
+      const html = generateExportHtml(project);
       const blob = new Blob([html], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -4506,6 +4629,11 @@ const App: React.FC = () => {
       }
     } else {
       setEditorMode(editorModeBeforePlayRef.current);
+      closePlayOverlays();
+      setActiveUiMenus([]);
+      setActiveDialogue(null);
+      setActiveCutscene(null);
+      setPreviewDialogue(null);
     }
     setIsPlaying(newState);
     setRuntimeOverrides({});
@@ -5331,7 +5459,9 @@ const App: React.FC = () => {
         uiMenus: (prev.uiMenus || []).map(updateObjHelper),
       }));
     } else if (obj.interaction === "open_ui" && obj.targetUiId) {
-      setActiveUiMenus((prev) => [...prev, obj.targetUiId!]);
+      setActiveUiMenus((prev) =>
+        prev.includes(obj.targetUiId!) ? prev : [...prev, obj.targetUiId!],
+      );
     } else if (obj.interaction === "close_ui") {
       setActiveUiMenus((prev) => {
         if (obj.targetUiId) {
@@ -5792,7 +5922,9 @@ const App: React.FC = () => {
         ) {
           ruleState.currentSceneId = response.interactionData;
         } else if (response.interaction === "open_ui" && response.targetUiId) {
-          ruleState.activeUiMenus.push(response.targetUiId);
+          if (!ruleState.activeUiMenus.includes(response.targetUiId)) {
+            ruleState.activeUiMenus.push(response.targetUiId);
+          }
         } else if (
           (response.interaction === "unlock_lore_entry" ||
             response.interaction === "show_lore_entry") &&
@@ -5957,26 +6089,20 @@ const App: React.FC = () => {
       )
     : 1;
   const deviceFrameStageScaleX = showDeviceFrame
-    ? isPlaying
-      ? deviceFramePlayableWidth / logicalStageWidth
-      : deviceFrameUniformScale
+    ? deviceFrameUniformScale
     : 1;
   const deviceFrameStageScaleY = showDeviceFrame
-    ? isPlaying
-      ? deviceFramePlayableHeight / logicalStageHeight
-      : deviceFrameUniformScale
+    ? deviceFrameUniformScale
     : 1;
   const deviceFrameStageLeft = showDeviceFrame
-    ? isPlaying
-      ? deviceFrame!.screen.x + deviceFramePlayInset
-      : deviceFrame!.screen.x +
-        (deviceFramePlayableWidth - logicalStageWidth * deviceFrameUniformScale) / 2
+    ? deviceFrame!.screen.x +
+      deviceFramePlayInset +
+      (deviceFramePlayableWidth - logicalStageWidth * deviceFrameUniformScale) / 2
     : 0;
   const deviceFrameStageTop = showDeviceFrame
-    ? isPlaying
-      ? deviceFrame!.screen.y + deviceFramePlayInset
-      : deviceFrame!.screen.y +
-        (deviceFramePlayableHeight - logicalStageHeight * deviceFrameUniformScale) / 2
+    ? deviceFrame!.screen.y +
+      deviceFramePlayInset +
+      (deviceFramePlayableHeight - logicalStageHeight * deviceFrameUniformScale) / 2
     : 0;
   const getPlayOverlaySurfaceStyle = (
     padding: string,
@@ -5988,6 +6114,23 @@ const App: React.FC = () => {
     height: showDeviceFrame ? deviceFramePlayableHeight : undefined,
     padding,
   });
+  const getUiMenuPreviewLayout = (uiMenu: Scene) => {
+    const width =
+      uiMenu.width || logicalStageWidth || project.globalSettings.stageWidth || 800;
+    const height =
+      uiMenu.height || logicalStageHeight || project.globalSettings.stageHeight || 600;
+    const scale = Math.min(
+      logicalStageWidth / Math.max(1, width),
+      logicalStageHeight / Math.max(1, height),
+    );
+    return {
+      width,
+      height,
+      scale,
+      left: (logicalStageWidth - width * scale) / 2,
+      top: (logicalStageHeight - height * scale) / 2,
+    };
+  };
   type PlayOverlay =
     | "map"
     | "inventory"
@@ -6362,7 +6505,7 @@ const App: React.FC = () => {
 
   const createInterfaceTemplate = (
     template: InterfaceTemplateKind,
-    options: { name?: string } = {},
+    options: { name?: string; placeOpener?: boolean; openFromObjectId?: string } = {},
   ) => {
     const existingEditableMenu = options.name
       ? (project.uiMenus || []).find((menu) => menu.name === options.name)
@@ -6670,6 +6813,189 @@ const App: React.FC = () => {
       text(`${title} Title`, title.toUpperCase(), stageW * 0.15, stageH * 0.15, stageW * 0.52, 34, 12, 24),
     ];
     const buildPresetObjects = (): SceneObject[] => {
+      if (
+        normalizedPresetName.includes("hotspot inspector") ||
+        normalizedPresetName.includes("object examine") ||
+        normalizedPresetName.includes("use item prompt")
+      ) {
+        const title = normalizedPresetName.includes("use item")
+          ? "Use Item"
+          : normalizedPresetName.includes("hotspot")
+            ? "Hotspot Inspector"
+            : "Examine";
+        return [
+          ...titledScreen(title),
+          panel("Target Preview Slot", stageW * 0.15, stageH * 0.25, stageW * 0.26, stageH * 0.34, 11, "rgba(255,255,255,0.04)"),
+          smartRegion("journal_text", "Inspection Text Region", stageW * 0.46, stageH * 0.25, stageW * 0.32, stageH * 0.24, 12, {
+            uiPadding: 12,
+            textFontSize: 12,
+            uiTextSource: "all",
+            uiEmptyText: "Object description, clues, or item-use feedback",
+          }),
+          ...(normalizedPresetName.includes("use item")
+            ? [
+                smartRegion("inventory_grid", "Usable Item Grid", stageW * 0.46, stageH * 0.53, stageW * 0.2, stageH * 0.16, 12, {
+                  uiGridColumns: 4,
+                  uiGridRows: 1,
+                  uiEmptyText: "Choose item",
+                  cursor: "pointer",
+                }),
+                button("Apply Selected Item", "Use", stageW * 0.68, stageH * 0.56, stageW * 0.1, 36, 13, "set_flag", {
+                  interactionData: "used_item_on_target",
+                }),
+              ]
+            : [
+                button("Inspect Again", "Inspect", stageW * 0.46, stageH * 0.55, stageW * 0.13, 36, 13, "set_flag", {
+                  interactionData: "inspected_object",
+                }),
+                button("Open Notes From Inspect", "Notes", stageW * 0.62, stageH * 0.55, stageW * 0.13, 36, 13, "open_almanac"),
+              ]),
+          closeButton(`Close ${title}`, "Close", stageW * 0.64, stageH * 0.72, stageW * 0.12, 38),
+        ];
+      }
+
+      if (normalizedPresetName.includes("npc talk")) {
+        return [
+          ...titledScreen("NPC Talk"),
+          panel("Portrait Slot", stageW * 0.15, stageH * 0.25, stageW * 0.2, stageH * 0.3, 11, "rgba(255,255,255,0.04)"),
+          smartRegion("journal_text", "Dialogue Recap Region", stageW * 0.4, stageH * 0.25, stageW * 0.36, stageH * 0.2, 12, {
+            uiPadding: 12,
+            textFontSize: 12,
+            uiTextSource: "all",
+            uiEmptyText: "Recent dialogue or relationship context",
+          }),
+          smartRegion("stat_list", "Relationship Preview Region", stageW * 0.4, stageH * 0.5, stageW * 0.22, stageH * 0.14, 12, {
+            uiPadding: 10,
+            textFontSize: 11,
+          }),
+          button("Talk Choice Button", "Talk", stageW * 0.15, stageH * 0.62, stageW * 0.15, 36, 13, "dialogue"),
+          button("Gift Choice Button", "Gift", stageW * 0.33, stageH * 0.62, stageW * 0.15, 36, 13, "gift_item"),
+          button("Quest Choice Button", "Quest", stageW * 0.51, stageH * 0.62, stageW * 0.15, 36, 13, "open_quest_log"),
+          closeButton("Close NPC Talk", "Close", stageW * 0.64, stageH * 0.72, stageW * 0.12, 38),
+        ];
+      }
+
+      if (normalizedPresetName.includes("door / travel")) {
+        return [
+          ...titledScreen("Travel"),
+          panel("Destination Preview", stageW * 0.15, stageH * 0.25, stageW * 0.34, stageH * 0.34, 11, "rgba(5,20,28,0.62)"),
+          smartRegion("journal_text", "Destination Notes Region", stageW * 0.54, stageH * 0.25, stageW * 0.24, stageH * 0.22, 12, {
+            uiPadding: 12,
+            textFontSize: 12,
+            uiTextSource: "all",
+            uiEmptyText: "Travel requirements or warnings",
+          }),
+          button("Travel Confirm Button", "Go", stageW * 0.54, stageH * 0.54, stageW * 0.11, 38, 13, "scene_change", {
+            interactionData: project.scenes.find((scene) => scene.id !== project.currentSceneId)?.id || project.scenes[0]?.id || "",
+          }),
+          button("Open Map From Travel", "Map", stageW * 0.67, stageH * 0.54, stageW * 0.11, 38, 13, "open_map"),
+          closeButton("Close Travel", "Cancel", stageW * 0.61, stageH * 0.68, stageW * 0.12, 38),
+        ];
+      }
+
+      if (
+        normalizedPresetName.includes("puzzle panel") ||
+        normalizedPresetName.includes("clue board") ||
+        normalizedPresetName.includes("evidence board")
+      ) {
+        const title = normalizedPresetName.includes("evidence")
+          ? "Evidence Board"
+          : normalizedPresetName.includes("clue")
+            ? "Clue Board"
+            : "Puzzle";
+        return [
+          ...titledScreen(title),
+          panel(`${title} Work Surface`, stageW * 0.15, stageH * 0.24, stageW * 0.46, stageH * 0.42, 11, "rgba(255,255,255,0.04)"),
+          text(`${title} Work Hint`, "Place clue cards, locks, symbols, or puzzle buttons here.", stageW * 0.2, stageH * 0.42, stageW * 0.34, 58, 12, 13),
+          smartRegion("journal_text", `${title} Notes Region`, stageW * 0.65, stageH * 0.24, stageW * 0.18, stageH * 0.24, 12, {
+            uiPadding: 10,
+            textFontSize: 11,
+            uiTextSource: "all",
+            uiEmptyText: "Known clues",
+          }),
+          button(`${title} Solve Button`, "Solve", stageW * 0.65, stageH * 0.55, stageW * 0.12, 36, 13, "set_flag", {
+            interactionData: `${title.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_solved`,
+          }),
+          closeButton(`Close ${title}`, "Close", stageW * 0.65, stageH * 0.68, stageW * 0.12, 38),
+        ];
+      }
+
+      if (normalizedPresetName.includes("save point")) {
+        return [
+          ...titledScreen("Save Point"),
+          text("Save Point Body", "Save progress, load a file, or return to the current room.", stageW * 0.18, stageH * 0.3, stageW * 0.5, 58, 12, 15),
+          button("Save Point Save Button", "Save Game", stageW * 0.2, stageH * 0.45, stageW * 0.18, 42, 13, "save_game"),
+          button("Save Point Load Button", "Load Game", stageW * 0.42, stageH * 0.45, stageW * 0.18, 42, 13, "load_game"),
+          closeButton("Close Save Point", "Close", stageW * 0.62, stageH * 0.68, stageW * 0.12, 38),
+        ];
+      }
+
+      if (
+        normalizedPresetName.includes("audio mixer") ||
+        normalizedPresetName.includes("music jukebox") ||
+        normalizedPresetName.includes("sfx board")
+      ) {
+        const title = normalizedPresetName.includes("jukebox")
+          ? "Music Jukebox"
+          : normalizedPresetName.includes("sfx")
+            ? "SFX Board"
+            : "Audio Mixer";
+        return [
+          ...titledScreen(title),
+          panel("Track / Bus List", stageW * 0.16, stageH * 0.26, stageW * 0.3, stageH * 0.34, 11, "rgba(255,255,255,0.04)"),
+          text("Track / Bus Label", normalizedPresetName.includes("sfx") ? "SFX" : "TRACKS", stageW * 0.19, stageH * 0.31, stageW * 0.18, 28, 12, 15),
+          button("Audio Play Button", "Play", stageW * 0.52, stageH * 0.28, stageW * 0.14, 38, 13, "sound"),
+          button("Audio Mute Button", "Mute", stageW * 0.52, stageH * 0.38, stageW * 0.14, 38, 13, "toggle_mute"),
+          button("Audio Settings Button", "Settings", stageW * 0.52, stageH * 0.48, stageW * 0.14, 38, 13, "open_settings"),
+          closeButton(`Close ${title}`, "Close", stageW * 0.62, stageH * 0.68, stageW * 0.14, 38),
+        ];
+      }
+
+      if (
+        normalizedPresetName.includes("subtitles") ||
+        normalizedPresetName.includes("captions") ||
+        normalizedPresetName.includes("accessibility") ||
+        normalizedPresetName.includes("controls remap") ||
+        normalizedPresetName.includes("language")
+      ) {
+        const title = normalizedPresetName.includes("controls")
+          ? "Controls"
+          : normalizedPresetName.includes("language")
+            ? "Language"
+            : normalizedPresetName.includes("accessibility")
+              ? "Accessibility"
+              : "Captions";
+        return [
+          ...titledScreen(title),
+          panel(`${title} Options List`, stageW * 0.17, stageH * 0.25, stageW * 0.42, stageH * 0.36, 11, "rgba(255,255,255,0.04)"),
+          button(`${title} Option 1`, normalizedPresetName.includes("controls") ? "Move / Click" : "Option A", stageW * 0.2, stageH * 0.31, stageW * 0.18, 34, 12, "set_flag", {
+            interactionData: `${title.toLowerCase()}_option_a`,
+          }),
+          button(`${title} Option 2`, normalizedPresetName.includes("language") ? "Language B" : "Option B", stageW * 0.2, stageH * 0.4, stageW * 0.18, 34, 12, "set_flag", {
+            interactionData: `${title.toLowerCase()}_option_b`,
+          }),
+          smartRegion("journal_text", `${title} Preview Region`, stageW * 0.63, stageH * 0.25, stageW * 0.18, stageH * 0.28, 12, {
+            uiPadding: 10,
+            textFontSize: 11,
+            uiTextSource: "all",
+            uiEmptyText: "Preview text",
+          }),
+          closeButton(`Close ${title}`, "Close", stageW * 0.62, stageH * 0.68, stageW * 0.14, 38),
+        ];
+      }
+
+      if (normalizedPresetName.includes("photo mode")) {
+        return [
+          panel("Photo Mode Top Rail", stageW * 0.15, stageH * 0.08, stageW * 0.7, 48, 10, "rgba(0,0,0,0.46)"),
+          text("Photo Mode Title", "PHOTO MODE", stageW * 0.18, stageH * 0.095, stageW * 0.28, 24, 12, 16),
+          panel("Photo Safe Frame", stageW * 0.2, stageH * 0.2, stageW * 0.6, stageH * 0.5, 10, "rgba(255,255,255,0.02)"),
+          button("Photo Capture Button", "Capture", stageW * 0.48, stageH * 0.095, stageW * 0.12, 30, 12, "set_flag", {
+            interactionData: "photo_captured",
+          }),
+          closeButton("Close Photo Mode", "Close", stageW * 0.64, stageH * 0.095, stageW * 0.1, 30),
+        ];
+      }
+
       if (normalizedPresetName.includes("player menu")) {
         return [
           ...titledScreen("Player Menu"),
@@ -6924,6 +7250,36 @@ const App: React.FC = () => {
             button("Quest Prompt", "Quests", stageW * 0.6, stageH - 62, stageW * 0.12, 30, 12, "open_quest_log"),
           ];
         }
+        if (normalizedPresetName.includes("interaction prompt")) {
+          return [
+            panel("Interaction Prompt Backing", stageW * 0.32, stageH - 88, stageW * 0.36, 44, 10, "rgba(0,0,0,0.56)"),
+            text("Interaction Prompt Text", "Click -> Inspect / Talk / Use", stageW * 0.36, stageH - 75, stageW * 0.28, 22, 12, 13),
+          ];
+        }
+        if (normalizedPresetName.includes("quick save")) {
+          return [
+            panel("Quick Save Chip Backing", stageW * 0.72, stageH - 72, stageW * 0.2, 42, 10, "rgba(0,0,0,0.54)"),
+            button("Quick Save Button", "Save", stageW * 0.745, stageH - 64, stageW * 0.07, 28, 12, "save_game"),
+            button("Quick Load Button", "Load", stageW * 0.825, stageH - 64, stageW * 0.07, 28, 12, "load_game"),
+          ];
+        }
+        if (normalizedPresetName.includes("status effects")) {
+          return [
+            panel("Status Effects Backing", stageW * 0.03, stageH * 0.23, stageW * 0.26, stageH * 0.12, 10, "rgba(0,0,0,0.5)"),
+            smartRegion("stat_list", "Status Effects Region", stageW * 0.05, stageH * 0.25, stageW * 0.22, stageH * 0.08, 12, {
+              uiPadding: 8,
+              textFontSize: 11,
+              uiEmptyText: "No status effects",
+            }),
+          ];
+        }
+        if (normalizedPresetName.includes("day / time") || normalizedPresetName.includes("day time")) {
+          return [
+            panel("Day Time HUD Backing", stageW * 0.38, stageH * 0.04, stageW * 0.24, 42, 10, "rgba(0,0,0,0.5)"),
+            text("Day Time HUD Text", "DAY 1 - MORNING", stageW * 0.415, stageH * 0.055, stageW * 0.18, 22, 12, 13),
+            button("Advance Day HUD Button", "Next", stageW * 0.55, stageH * 0.052, stageW * 0.055, 26, 12, "advance_day"),
+          ];
+        }
         if (normalizedPresetName.includes("item wheel")) {
           return [
             panel("Item Wheel Backing", stageW * 0.35, stageH * 0.28, stageW * 0.3, stageW * 0.3, 10, "rgba(0,0,0,0.5)"),
@@ -7029,6 +7385,38 @@ const App: React.FC = () => {
         wiredCount,
       };
     };
+    const wireObjectToOpenScreen = (
+      source: Project,
+      objectId: string | undefined,
+      targetMenu: Scene,
+    ): { project: Project; wiredObjectName?: string } => {
+      if (!objectId) return { project: source };
+      let wiredObjectName: string | undefined;
+      const wireObject = (object: SceneObject) => {
+        if (object.id !== objectId) return object;
+        wiredObjectName = object.name || object.id;
+        return {
+          ...object,
+          interaction: "open_ui" as InteractionType,
+          targetUiId: targetMenu.id,
+          cursor: object.cursor === "default" ? "pointer" : object.cursor || "pointer",
+        };
+      };
+      return {
+        project: {
+          ...source,
+          scenes: (source.scenes || []).map((scene) => ({
+            ...scene,
+            objects: (scene.objects || []).map(wireObject),
+          })),
+          uiMenus: (source.uiMenus || []).map((menu) => ({
+            ...menu,
+            objects: (menu.objects || []).map(wireObject),
+          })),
+        },
+        wiredObjectName,
+      };
+    };
     const genericScaffoldNames = new Set([
       "Panel Backing",
       "Panel Title",
@@ -7059,10 +7447,42 @@ const App: React.FC = () => {
         },
         existingEditableMenu.id,
       );
-      if (wiredCount) {
-        pushHistory(openedProject);
+      const openerResult = options.placeOpener
+        ? addInterfaceOpenerToProject(openedProject, existingEditableMenu)
+        : null;
+      const objectWireResult = wireObjectToOpenScreen(
+        openerResult?.project || openedProject,
+        options.openFromObjectId,
+        existingEditableMenu,
+      );
+      const finalProject = objectWireResult.project;
+      if (wiredCount || openerResult || objectWireResult.wiredObjectName) {
+        pushHistory(finalProject);
       } else {
-        setProject(openedProject);
+        setProject(finalProject);
+      }
+      if (objectWireResult.wiredObjectName) {
+        setHideEditorHud(false);
+        setSelectedObjectId(options.openFromObjectId || null);
+        setSelectedMultiIds(options.openFromObjectId ? [options.openFromObjectId] : []);
+        setRightSidebarTab("properties");
+        if (rightSidebarWidth === 0) setRightSidebarWidth(340);
+        showError(
+          `"${objectWireResult.wiredObjectName}" now opens ${existingEditableMenu.name}.`,
+        );
+        return;
+      }
+      if (openerResult) {
+        setEditorMode("stage");
+        setHideEditorHud(false);
+        setSelectedObjectId(openerResult.opener.id);
+        setSelectedMultiIds([openerResult.opener.id]);
+        setRightSidebarTab("properties");
+        if (rightSidebarWidth === 0) setRightSidebarWidth(340);
+        showError(
+          `Opened existing ${existingEditableMenu.name} and placed "${openerResult.opener.name}" on ${openerResult.targetScene.name}.`,
+        );
+        return;
       }
       setEditorMode("ui_stage");
       setHideEditorHud(true);
@@ -7098,7 +7518,40 @@ const App: React.FC = () => {
       currentUiMenuId: menuId,
     }, menuId);
 
-    pushHistory(projectWithWiredShell);
+    const openerResult = options.placeOpener
+      ? addInterfaceOpenerToProject(projectWithWiredShell, newMenu)
+      : null;
+    const objectWireResult = wireObjectToOpenScreen(
+      openerResult?.project || projectWithWiredShell,
+      options.openFromObjectId,
+      newMenu,
+    );
+    const finalProject = objectWireResult.project;
+
+    pushHistory(finalProject);
+    if (objectWireResult.wiredObjectName) {
+      setHideEditorHud(false);
+      setSelectedObjectId(options.openFromObjectId || null);
+      setSelectedMultiIds(options.openFromObjectId ? [options.openFromObjectId] : []);
+      setRightSidebarTab("properties");
+      if (rightSidebarWidth === 0) setRightSidebarWidth(340);
+      showError(
+        `${newMenu.name} is ready and "${objectWireResult.wiredObjectName}" opens it.`,
+      );
+      return;
+    }
+    if (openerResult) {
+      setEditorMode("stage");
+      setHideEditorHud(false);
+      setSelectedObjectId(openerResult.opener.id);
+      setSelectedMultiIds([openerResult.opener.id]);
+      setRightSidebarTab("properties");
+      if (rightSidebarWidth === 0) setRightSidebarWidth(340);
+      showError(
+        `${newMenu.name} is ready and "${openerResult.opener.name}" opens it from ${openerResult.targetScene.name}.`,
+      );
+      return;
+    }
     if (resolvedTemplate === "hud") {
       setHideEditorHud(false);
       setIsHudPlacementMode(true);
@@ -7325,6 +7778,170 @@ const App: React.FC = () => {
     showError("Created a starter HUD kit. Edit the generated screens like normal canvas objects.");
   };
 
+  const addInterfaceOpenerToProject = (source: Project, menu: Scene) => {
+    const targetScene =
+      source.scenes.find((scene) => scene.id === source.currentSceneId) ||
+      source.scenes[0];
+    if (!targetScene) return null;
+
+    const sceneWidth =
+      targetScene.width || source.globalSettings.stageWidth || logicalStageWidth || 800;
+    const sceneHeight =
+      targetScene.height || source.globalSettings.stageHeight || logicalStageHeight || 600;
+    const opener = createInterfaceOpenerObject({
+      menu,
+      existingObjects: targetScene.objects || [],
+      sceneWidth,
+      sceneHeight,
+      label: menu.name,
+    });
+
+    return {
+      opener,
+      targetScene,
+      project: {
+        ...source,
+        currentSceneId: targetScene.id,
+        scenes: source.scenes.map((scene) =>
+          scene.id === targetScene.id
+            ? { ...scene, objects: [...(scene.objects || []), opener] }
+            : scene,
+        ),
+      },
+    };
+  };
+
+  const placeInterfaceOpenerOnCanvas = (menu: Scene) => {
+    const result = addInterfaceOpenerToProject(project, menu);
+    if (!result) {
+      showError("Create a room first, then Cavebot can place a button that opens this interface.");
+      return;
+    }
+    pushHistory(result.project);
+    setEditorMode("stage");
+    setHideEditorHud(false);
+    setSelectedObjectId(result.opener.id);
+    setSelectedMultiIds([result.opener.id]);
+    setRightSidebarTab("properties");
+    if (rightSidebarWidth === 0) setRightSidebarWidth(340);
+    showError(`Placed "${result.opener.name}" on ${result.targetScene.name}. Its click action opens ${menu.name}.`);
+  };
+
+  const wireSelectedObjectToInterface = (menu: Scene) => {
+    if (!selectedProjectObject) {
+      showError("Select a room object first, then Cavebot can wire it to this interface.");
+      return;
+    }
+    const result = wireProjectObjectToInterface(project, selectedProjectObject.object.id, menu);
+    if (!result.target) {
+      showError("Cavebot could not find that selected object anymore. Select it again from Layers.");
+      return;
+    }
+    const projectWithSelection =
+      result.target.kind === "ui_object"
+        ? { ...result.project, currentUiMenuId: result.target.sourceId }
+        : { ...result.project, currentSceneId: result.target.sourceId };
+    pushHistory(projectWithSelection);
+    setEditorMode(result.target.kind === "ui_object" ? "ui_stage" : "stage");
+    setHideEditorHud(false);
+    setRightSidebarTab("properties");
+    if (rightSidebarWidth === 0) setRightSidebarWidth(340);
+    showError(
+      `Wired "${result.target.object.name || "selected object"}" on ${result.target.sourceName} to open ${menu.name}.`,
+    );
+  };
+
+  const testInterfaceScreen = (menu: Scene) => {
+    editorModeBeforePlayRef.current = editorMode;
+    setProject((p) => ({ ...p, currentUiMenuId: menu.id }));
+    setEditorMode("ui_stage");
+    setHideEditorHud(true);
+    setIsPlaying(true);
+    setRuntimeOverrides({});
+    setTriggeredObjects(new Set());
+    setCollectedObjects([]);
+    setTriggeredResponseIds(new Set());
+    setActiveUiMenus([menu.id]);
+    setActiveDialogue(null);
+    setPreviewDialogue(null);
+    closePlayOverlays();
+    showError(`Testing ${menu.name} over the current room.`);
+  };
+
+  const applyPointClickQuickAction = (actionId: string) => {
+    if (!selectedObject) return;
+    if (actionId === "talk") {
+      const firstCharacter = (project.characters || [])[0];
+      updateObject(selectedObject.id, {
+        interaction: "dialogue",
+        characterId: firstCharacter?.id,
+        affinityId:
+          firstCharacter?.id ||
+          selectedObject.affinityId ||
+          selectedObject.id,
+        cursor: "help",
+      });
+      return;
+    }
+    if (actionId === "inspect") {
+      updateObject(selectedObject.id, {
+        interaction: project.loreEntries?.[0] ? "show_lore_entry" : "dialogue",
+        interactionData:
+          project.loreEntries?.[0]?.id ||
+          selectedObject.interactionData ||
+          "There is something interesting here.",
+        cursor: "help",
+      });
+      return;
+    }
+    if (actionId === "take") {
+      updateObject(selectedObject.id, {
+        interaction: "collect",
+        giveItemId:
+          selectedObject.giveItemId ||
+          project.inventoryItems[0]?.id ||
+          "",
+        interactionData:
+          selectedObject.interactionData ||
+          "You picked it up.",
+        cursor: "pointer",
+      });
+      return;
+    }
+    if (actionId === "use_item") {
+      updateObject(selectedObject.id, {
+        requireItemId:
+          selectedObject.requireItemId ||
+          project.inventoryItems[0]?.id,
+        interaction:
+          selectedObject.interaction === "none"
+            ? "dialogue"
+            : selectedObject.interaction,
+        interactionData:
+          selectedObject.interactionData ||
+          "That worked.",
+        cursor: "pointer",
+      });
+      return;
+    }
+    if (actionId === "travel") {
+      updateObject(selectedObject.id, {
+        interaction: "scene_change",
+        interactionData:
+          project.scenes.find((scene) => scene.id !== currentScene?.id)?.id ||
+          "",
+        cursor: "pointer",
+      });
+      return;
+    }
+    const action = pointClickQuickActions.find((candidate) => candidate.id === actionId);
+    if (!action?.updates.interaction) return;
+    updateObject(selectedObject.id, {
+      interaction: action.updates.interaction,
+      cursor: action.updates.cursor === "help" ? "help" : "pointer",
+    });
+  };
+
   const createInterfaceScreenKit = (
     presetNames: string[],
     kitLabel: string,
@@ -7543,6 +8160,105 @@ const App: React.FC = () => {
       const craftId = findId("craft", "recipe", "buying", "trading");
       const settingsId = findId("setting", "pause", "load", "save", "mode select");
       const relationshipId = findId("relationship", "roster", "character");
+
+      if (
+        lower.includes("hotspot inspector") ||
+        lower.includes("object examine") ||
+        lower.includes("use item prompt")
+      ) {
+        const title = lower.includes("use item") ? "Use Item" : lower.includes("hotspot") ? "Hotspot Inspector" : "Examine";
+        return [
+          ...screenShell(name, title),
+          panel(`${name} Target Preview`, stageW * 0.14, stageH * 0.24, stageW * 0.26, stageH * 0.34, 11, "rgba(255,255,255,0.04)"),
+          smartRegion("journal_text", `${name} Detail Text`, stageW * 0.45, stageH * 0.24, stageW * 0.34, stageH * 0.28, 12, {
+            uiEmptyText: "Object notes, clues, or item feedback",
+          }),
+          ...(lower.includes("use item")
+            ? [smartRegion("inventory_grid", `${name} Item Choices`, stageW * 0.45, stageH * 0.57, stageW * 0.22, stageH * 0.14, 12, {
+                uiGridColumns: 4,
+                uiGridRows: 1,
+                uiEmptyText: "Choose item",
+                cursor: "pointer",
+              })]
+            : [button(`${name} Notes`, "Notes", stageW * 0.5, stageH * 0.58, stageW * 0.12, 36, 13, "open_almanac")]),
+          closeButton(name),
+        ];
+      }
+
+      if (lower.includes("npc talk")) {
+        return [
+          ...screenShell(name, "NPC Talk"),
+          panel(`${name} Portrait`, stageW * 0.14, stageH * 0.24, stageW * 0.2, stageH * 0.28, 11, "rgba(255,255,255,0.04)"),
+          smartRegion("journal_text", `${name} Dialogue Recap`, stageW * 0.39, stageH * 0.24, stageW * 0.36, stageH * 0.2, 12, {
+            uiEmptyText: "Recent dialogue",
+          }),
+          button(`${name} Talk`, "Talk", stageW * 0.16, stageH * 0.6, stageW * 0.14, 36, 13, "dialogue"),
+          button(`${name} Gift`, "Gift", stageW * 0.34, stageH * 0.6, stageW * 0.14, 36, 13, "gift_item"),
+          ...(relationshipId ? [button(`${name} People`, "People", stageW * 0.52, stageH * 0.6, stageW * 0.14, 36, 13, "open_ui", { targetUiId: relationshipId })] : []),
+          closeButton(name),
+        ];
+      }
+
+      if (
+        lower.includes("puzzle panel") ||
+        lower.includes("clue board") ||
+        lower.includes("evidence board") ||
+        lower.includes("door / travel")
+      ) {
+        const title = lower.includes("door") ? "Travel" : lower.includes("evidence") ? "Evidence Board" : lower.includes("clue") ? "Clue Board" : "Puzzle";
+        return [
+          ...screenShell(name, title),
+          panel(`${name} Work Surface`, stageW * 0.14, stageH * 0.24, stageW * 0.46, stageH * 0.42, 11, "rgba(255,255,255,0.04)"),
+          smartRegion("journal_text", `${name} Notes`, stageW * 0.64, stageH * 0.24, stageW * 0.18, stageH * 0.24, 12, {
+            uiEmptyText: lower.includes("door") ? "Destination notes" : "Known clues",
+          }),
+          button(`${name} Primary Action`, lower.includes("door") ? "Go" : "Solve", stageW * 0.64, stageH * 0.56, stageW * 0.12, 36, 13, lower.includes("door") ? "scene_change" : "set_flag", {
+            interactionData: lower.includes("door")
+              ? project.scenes.find((scene) => scene.id !== project.currentSceneId)?.id || project.scenes[0]?.id || ""
+              : `${title.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_complete`,
+          }),
+          closeButton(name),
+        ];
+      }
+
+      if (
+        lower.includes("audio mixer") ||
+        lower.includes("music jukebox") ||
+        lower.includes("sfx board") ||
+        lower.includes("subtitles") ||
+        lower.includes("captions") ||
+        lower.includes("controls remap") ||
+        lower.includes("accessibility") ||
+        lower.includes("language")
+      ) {
+        const title = lower.includes("jukebox")
+          ? "Music Jukebox"
+          : lower.includes("sfx")
+            ? "SFX Board"
+            : lower.includes("controls")
+              ? "Controls"
+              : lower.includes("language")
+                ? "Language"
+                : lower.includes("accessibility")
+                  ? "Accessibility"
+                  : lower.includes("subtitle") || lower.includes("caption")
+                    ? "Captions"
+                    : "Audio Mixer";
+        return [
+          ...screenShell(name, title),
+          panel(`${name} Options List`, stageW * 0.16, stageH * 0.26, stageW * 0.36, stageH * 0.34, 11, "rgba(255,255,255,0.04)"),
+          button(`${name} Option A`, lower.includes("audio") || lower.includes("music") || lower.includes("sfx") ? "Play" : "Option A", stageW * 0.2, stageH * 0.32, stageW * 0.16, 34, 12, lower.includes("audio") || lower.includes("music") || lower.includes("sfx") ? "sound" : "set_flag", {
+            interactionData: `${title.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_a`,
+          }),
+          button(`${name} Option B`, lower.includes("audio") || lower.includes("music") || lower.includes("sfx") ? "Mute" : "Option B", stageW * 0.2, stageH * 0.42, stageW * 0.16, 34, 12, lower.includes("audio") || lower.includes("music") || lower.includes("sfx") ? "toggle_mute" : "set_flag", {
+            interactionData: `${title.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_b`,
+          }),
+          smartRegion("journal_text", `${name} Preview`, stageW * 0.58, stageH * 0.26, stageW * 0.22, stageH * 0.28, 12, {
+            uiEmptyText: "Preview",
+          }),
+          closeButton(name),
+        ];
+      }
 
       if (lower.includes("hud") || lower.includes("action bar") || lower.includes("button prompt")) {
         return [
@@ -7785,14 +8501,10 @@ const App: React.FC = () => {
     const shouldCreateMenu = !targetMenu;
     const menuId = targetMenu?.id || uuidv4();
     const menuName = targetMenu?.name || "Custom Interface Screen";
-    const existingRegion = targetMenu?.objects?.find((object) => object.uiElementType === kind);
-    if (existingRegion) {
-      setEditorMode("ui_stage");
-      setHideEditorHud(true);
-      setSelectedObjectId(existingRegion.id);
-      showError(`This interface already has a ${existingRegion.name || "smart region"} selected. Resize or style this one instead of stacking another.`);
-      return;
-    }
+    const sameKindCount =
+      targetMenu?.objects?.filter((object) => object.uiElementType === kind)
+        .length || 0;
+    const duplicateOffset = sameKindCount * 28;
     const hasInventoryGrid = targetMenu?.objects?.some((object) => object.uiElementType === "inventory_grid");
     const hasPageArt = targetMenu?.objects?.some(
       (object) =>
@@ -7856,6 +8568,11 @@ const App: React.FC = () => {
         textFontSize: 12,
       },
     };
+    const defaults = regionDefaults[kind];
+    const regionWidth = Number(defaults.width || stageW * 0.4);
+    const regionHeight = Number(defaults.height || stageH * 0.3);
+    const clampRegionPosition = (value: number, size: number, max: number) =>
+      Math.max(0, Math.min(Math.max(0, max - size), value));
     const region: SceneObject = {
       id: uuidv4(),
       src: "",
@@ -7875,7 +8592,15 @@ const App: React.FC = () => {
       uiBorderType: hasPageArt ? "none" : "dashed",
       uiBorderRadius: 4,
       hasPhysics: false,
-      ...regionDefaults[kind],
+      ...defaults,
+      name:
+        sameKindCount > 0
+          ? `${defaults.name || "Smart Region"} ${sameKindCount + 1}`
+          : defaults.name,
+      x: clampRegionPosition(Number(defaults.x || 0) + duplicateOffset, regionWidth, stageW),
+      y: clampRegionPosition(Number(defaults.y || 0) + duplicateOffset, regionHeight, stageH),
+      width: regionWidth,
+      height: regionHeight,
     } as SceneObject;
 
     const nextUiMenus = shouldCreateMenu
@@ -8259,11 +8984,33 @@ const App: React.FC = () => {
   );
 
   const handleWorkflowModeChange = (mode: EditorMode) => {
+    if (isPlaying) {
+      setIsPlaying(false);
+      setRuntimeOverrides({});
+      setActiveUiMenus([]);
+      setActiveDialogue(null);
+      setActiveCutscene(null);
+      setPreviewDialogue(null);
+      closePlayOverlays();
+    }
     if (mode === "ui_stage") {
       openScreenControlsEditor();
       return;
     }
     setEditorMode(mode);
+  };
+
+  const handleWorkflowExport = () => {
+    if (isPlaying) {
+      setIsPlaying(false);
+      setRuntimeOverrides({});
+      setActiveUiMenus([]);
+      setActiveDialogue(null);
+      setActiveCutscene(null);
+      setPreviewDialogue(null);
+      closePlayOverlays();
+    }
+    setIsPublishMenuOpen(true);
   };
 
   return (
@@ -8842,7 +9589,7 @@ const App: React.FC = () => {
         onModeChange={handleWorkflowModeChange}
         onRpgTabChange={setRpgTab}
         onTogglePlay={togglePlayMode}
-        onExport={() => setIsPublishMenuOpen(true)}
+        onExport={handleWorkflowExport}
       />
 
       {isPublishMenuOpen && (
@@ -8866,6 +9613,8 @@ const App: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsPublishMenuOpen(false)}
+                aria-label="Close publish dialog"
+                data-testid="publish-close"
                 className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm font-bold text-neutral-300 hover:border-neutral-500 hover:text-white"
               >
                 ×
@@ -8878,6 +9627,7 @@ const App: React.FC = () => {
                   handleExport();
                   setIsPublishMenuOpen(false);
                 }}
+                data-testid="publish-playable-html"
                 className="rounded-xl border border-emerald-300/50 bg-emerald-500/15 px-4 py-3 text-left font-bold text-emerald-100 hover:bg-emerald-500/25"
               >
                 <span className="block text-base">Playable HTML</span>
@@ -8891,6 +9641,7 @@ const App: React.FC = () => {
 	                  handleExportProject("used");
 	                  setIsPublishMenuOpen(false);
 	                }}
+	                data-testid="publish-clean-json"
 	                className="rounded-xl border border-indigo-300/50 bg-indigo-500/15 px-4 py-3 text-left font-bold text-indigo-100 hover:bg-indigo-500/25"
 	              >
 	                <span className="block text-base">Clean editable JSON</span>
@@ -8962,8 +9713,7 @@ const App: React.FC = () => {
                           Asset Library
                         </div>
                         <p className="mt-1 text-sm leading-relaxed text-neutral-300">
-                          Place files into the current room, or drag them onto
-                          the canvas.
+                          Place files into the {editorMode === "ui_stage" ? "active UI screen" : "current room"}, or drag them onto the canvas.
                         </p>
                       </div>
                       <button
@@ -9099,6 +9849,7 @@ const App: React.FC = () => {
                               asset={asset}
                               onDragStart={handleDragStartAsset}
                               onPrimaryAction={handleInsertAssetToStage}
+                              primaryLabel={editorMode === "ui_stage" ? "Place in UI screen" : "Place in room"}
                               onEditImage={setEditingAssetId}
                               onUpdateAsset={(assetId, updates) =>
                                 setProject((current) => ({
@@ -9340,9 +10091,12 @@ const App: React.FC = () => {
             <main
               className="studio-stage-shell min-w-0 flex-1 bg-neutral-950 overflow-auto p-4 relative flex flex-col"
               onPointerDown={() => {
-                if (isPlaying && selectedInventoryItemId) {
-                  setSelectedInventoryItemId(null);
-                  setPreviewDialogue(null);
+                if (isPlaying) {
+                  if (selectedInventoryItemId) {
+                    setSelectedInventoryItemId(null);
+                    setPreviewDialogue(null);
+                  }
+                  return;
                 }
                 setSelectedObjectId(null);
                 setSelectedMultiIds([]);
@@ -10095,6 +10849,30 @@ const App: React.FC = () => {
                             (obj.id === draggingId ||
                               obj.id === resizingId ||
                               obj.id === rotatingId);
+                          const hasInteractiveUiRole =
+                            obj.isUiElement &&
+                            (obj.uiElementType === "button" ||
+                              obj.uiElementType === "toggle" ||
+                              obj.uiElementType === "inventory_grid");
+                          const canReceiveRuntimePointer =
+                            hasInteractiveUiRole || isInteractiveObject(obj);
+                          const clickSummary = getInteractionSummary(obj, {
+                            dialogueName: (id) =>
+                              project.dialogueTrees.find((tree) => tree.id === id)
+                                ?.name || "",
+                            sceneName: (id) =>
+                              project.scenes.find((scene) => scene.id === id)?.name ||
+                              "",
+                            uiName: (id) =>
+                              project.uiMenus?.find((menu) => menu.id === id)?.name ||
+                              "",
+                            itemName: (id) =>
+                              project.inventoryItems.find((item) => item.id === id)
+                                ?.name || "",
+                            loreName: (id) =>
+                              project.loreEntries.find((entry) => entry.id === id)
+                                ?.title || "",
+                          });
 
                           if ((isPlaying || isSelected) && !isBeingManipulated) {
                             if (obj.animation === "glow") {
@@ -10234,11 +11012,12 @@ const App: React.FC = () => {
                               data-dialogue-tree={obj.dialogueTreeId || ""}
                               data-target-ui={obj.targetUiId || ""}
                               data-give-item={obj.giveItemId || ""}
+                              data-click-summary={clickSummary}
+                              data-runtime-clickable={canReceiveRuntimePointer ? "true" : "false"}
                               aria-label={
                                 isPlaying &&
-                                obj.interaction &&
-                                obj.interaction !== "none"
-                                  ? `${obj.name || "Scene object"} (${obj.interaction})`
+                                canReceiveRuntimePointer
+                                  ? `${obj.name || "Scene object"}: ${clickSummary}`
                                   : undefined
                               }
                               className={`absolute ${animClass} ${obj.customCssClasses || ""}`}
@@ -10277,7 +11056,11 @@ const App: React.FC = () => {
                                     ? "default"
                                     : "move",
                                 pointerEvents:
-                                  obj.ignoreClicks && (isPlaying || obj.locked)
+                                  isPlaying
+                                    ? canReceiveRuntimePointer
+                                      ? undefined
+                                      : "none"
+                                    : obj.ignoreClicks && obj.locked
                                     ? "none"
                                     : undefined,
                                 outline:
@@ -10891,50 +11674,65 @@ const App: React.FC = () => {
                         (!project.currentUiMenuId ||
                           m.id === project.currentUiMenuId),
                     )
-                    .map((uiMenu) => (
-                      <div
-                        key={`ghost-fg-ui-${uiMenu.id}`}
-                        className="absolute pointer-events-none select-none z-[500]"
-                        style={{
-                          inset: 0,
-                          width: logicalStageWidth,
-                          height: logicalStageHeight,
-                          overflow: "visible",
-                        }}
-                      >
-                        {uiMenu.objects
-                          .filter(
-                            (obj) =>
-                              !!obj.src ||
-                              !!obj.isUiElement ||
-                              !!obj.isText ||
-                              !!obj.isHitbox,
-                          )
-                          .map((obj) => (
+                    .map((uiMenu) => {
+                      const uiMenuLayout = getUiMenuPreviewLayout(uiMenu);
+                      return (
+                        <div
+                          key={`ghost-fg-ui-${uiMenu.id}`}
+                          className="absolute pointer-events-none select-none z-[500]"
+                          style={{
+                            inset: 0,
+                            width: logicalStageWidth,
+                            height: logicalStageHeight,
+                            overflow: "hidden",
+                          }}
+                        >
                           <div
-                            key={`ghost-fg-obj-${obj.id}`}
-                            className="absolute border border-dashed border-emerald-500/45 opacity-70 pointer-events-none"
+                            className="absolute left-0 top-0"
                             style={{
-                              left: obj.x,
-                              top: obj.y,
-                              width: obj.width,
-                              height: obj.height,
-                              transform: `rotate(${obj.rotation}deg)`,
+                              left: uiMenuLayout.left,
+                              top: uiMenuLayout.top,
+                              width: uiMenuLayout.width,
+                              height: uiMenuLayout.height,
+                              transform: `scale(${uiMenuLayout.scale})`,
+                              transformOrigin: "top left",
                             }}
                           >
-                            {!obj.isHitbox &&
-                              !obj.isText &&
-                              renderObjectMedia(
-                                obj,
-                                "h-full w-full object-contain opacity-60 pointer-events-none",
-                              )}
-                            <span className="absolute -top-5 left-0 text-[8px] text-emerald-200 bg-neutral-950/90 px-1 rounded truncate max-w-full">
-                              UI preview · {obj.name}
-                            </span>
+                            {uiMenu.objects
+                              .filter(
+                                (obj) =>
+                                  !!obj.src ||
+                                  !!obj.isUiElement ||
+                                  !!obj.isText ||
+                                  !!obj.isHitbox,
+                              )
+                              .map((obj) => (
+                                <div
+                                  key={`ghost-fg-obj-${obj.id}`}
+                                  className="absolute border border-dashed border-emerald-500/45 opacity-70 pointer-events-none"
+                                  style={{
+                                    left: obj.x,
+                                    top: obj.y,
+                                    width: obj.width,
+                                    height: obj.height,
+                                    transform: `rotate(${obj.rotation}deg)`,
+                                  }}
+                                >
+                                  {!obj.isHitbox &&
+                                    !obj.isText &&
+                                    renderObjectMedia(
+                                      obj,
+                                      "h-full w-full object-contain opacity-60 pointer-events-none",
+                                    )}
+                                  <span className="absolute -top-5 left-0 text-[8px] text-emerald-200 bg-neutral-950/90 px-1 rounded truncate max-w-full">
+                                    UI preview · {obj.name}
+                                  </span>
+                                </div>
+                              ))}
                           </div>
-                        ))}
-                      </div>
-                    ))}
+                        </div>
+                      );
+                    })}
 
                 {/* Render Active UI Menus */}
                 {isPlaying &&
@@ -10943,12 +11741,7 @@ const App: React.FC = () => {
                       (m) => m.id === uiId,
                     );
                     if (!uiMenu) return null;
-                    const uiMenuWidth =
-                      uiMenu.width || logicalStageWidth || project.globalSettings.stageWidth || 800;
-                    const uiMenuHeight =
-                      uiMenu.height || logicalStageHeight || project.globalSettings.stageHeight || 600;
-                    const uiMenuScaleX = logicalStageWidth / Math.max(1, uiMenuWidth);
-                    const uiMenuScaleY = logicalStageHeight / Math.max(1, uiMenuHeight);
+                    const uiMenuLayout = getUiMenuPreviewLayout(uiMenu);
 
                     return (
                       <div
@@ -10978,9 +11771,11 @@ const App: React.FC = () => {
                         <div
                           className="absolute left-0 top-0"
                           style={{
-                            width: uiMenuWidth,
-                            height: uiMenuHeight,
-                            transform: `scale(${uiMenuScaleX}, ${uiMenuScaleY})`,
+                            left: uiMenuLayout.left,
+                            top: uiMenuLayout.top,
+                            width: uiMenuLayout.width,
+                            height: uiMenuLayout.height,
+                            transform: `scale(${uiMenuLayout.scale})`,
                             transformOrigin: "top left",
                             pointerEvents: "none",
                           }}
@@ -14155,7 +14950,11 @@ const App: React.FC = () => {
                   />
                 )}
                 {showDeviceFrame &&
-                  (deviceFrame!.controls || []).map((control) => (
+                  (deviceFrame!.controls || []).map((control) => {
+                    const controlReceivesRuntimePointer = (control.clickResponses || []).some(
+                      (response) => response.interaction && response.interaction !== "none",
+                    );
+                    return (
                     <button
                       key={control.id}
                       type="button"
@@ -14197,6 +14996,10 @@ const App: React.FC = () => {
                           isPlaying && hasPlayableCursorAsset(control.cursorAssetId)
                             ? "none"
                             : control.cursor || "pointer",
+                        pointerEvents:
+                          isPlaying && !controlReceivesRuntimePointer
+                            ? "none"
+                            : undefined,
                       }}
                     >
                       {!isPlaying &&
@@ -14206,7 +15009,8 @@ const App: React.FC = () => {
                           </span>
                         )}
                     </button>
-                  ))}
+                    );
+                  })}
 
                 {/* Drag-to-resize handles for canvas (stage) boundary */}
                 {!isPlaying && editorMode === "stage" && isCanvasResizeMode && (
@@ -14435,6 +15239,20 @@ const App: React.FC = () => {
                   className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${rightSidebarTab === "layers" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
                 >
                   <Layers size={14} /> Layers
+                </button>
+                <button
+                  onClick={() => setRightSidebarTab("prefabs")}
+                  className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${rightSidebarTab === "prefabs" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
+                  aria-label="Open stamps panel"
+                >
+                  <LayoutTemplate size={14} /> Stamps
+                </button>
+                <button
+                  onClick={() => setRightSidebarTab("assets")}
+                  className={`flex-1 p-2 text-[11px] font-bold uppercase tracking-wider flex flex-col items-center justify-center gap-1 transition-all ${rightSidebarTab === "assets" ? "text-indigo-400 border-b-2 border-indigo-500 bg-neutral-900" : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900"}`}
+                  aria-label="Open collected assets panel"
+                >
+                  <Package size={14} /> Assets
                 </button>
                 <button
                   type="button"
@@ -14840,7 +15658,7 @@ const App: React.FC = () => {
                         Collected Assets
                       </div>
                       <p className="mt-1 text-xs leading-relaxed text-neutral-400">
-                        Click Place or drag a file straight onto the room. This is the same collection from Collect.
+                        Click Place or drag a file straight onto the {editorMode === "ui_stage" ? "active UI screen" : "current room"}. This is the same collection from Collect.
                       </p>
                     </div>
                     <div className="flex gap-2">
@@ -14927,6 +15745,7 @@ const App: React.FC = () => {
                             className="rounded bg-neutral-950"
                             onDragStart={handleDragStartAsset}
                             onPrimaryAction={handleInsertAssetToStage}
+                            primaryLabel={editorMode === "ui_stage" ? "Place in UI screen" : "Place in room"}
                             onEditImage={setEditingAssetId}
                             onUpdateAsset={(assetId, updates) =>
                               setProject((current) => ({
@@ -18538,12 +19357,17 @@ const App: React.FC = () => {
                             };
                             const previewSound = () => {
                               if (!soundAsset) return;
+                              const soundSrc = getAssetDisplaySrc(soundAsset);
+                              if (!soundSrc) {
+                                showError(`Sound source missing: ${soundAsset.name || soundAsset.id}`);
+                                return;
+                              }
                               const fragment =
                                 soundAsset.trimStart || soundAsset.trimEnd
                                   ? `#t=${soundAsset.trimStart || 0}${soundAsset.trimEnd ? `,${soundAsset.trimEnd}` : ""}`
                                   : "";
                               const audio = new Audio(
-                                soundAsset.src + fragment,
+                                soundSrc + fragment,
                               );
                               audio.volume = Math.min(
                                 1,
@@ -18699,105 +19523,21 @@ const App: React.FC = () => {
                                 Prefill this object with common in-game behavior, then refine it below.
                               </p>
                             <div className="grid grid-cols-2 gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const firstCharacter = (project.characters || [])[0];
-                                  updateObject(selectedObject.id, {
-                                    interaction: "dialogue",
-                                    characterId: firstCharacter?.id,
-                                    affinityId:
-                                      firstCharacter?.id ||
-                                      selectedObject.affinityId ||
-                                      selectedObject.id,
-                                    cursor: "pointer",
-                                  });
-                                }}
-                                className="rounded border border-cyan-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-cyan-100 hover:border-cyan-300"
-                              >
-                                Talk / roster
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  updateObject(selectedObject.id, {
-                                    interaction: "collect",
-                                    giveItemId:
-                                      selectedObject.giveItemId ||
-                                      project.inventoryItems[0]?.id ||
-                                      "",
-                                    interactionData:
-                                      selectedObject.interactionData ||
-                                      "You picked it up.",
-                                    cursor: "pointer",
-                                  })
-                                }
-                                className="rounded border border-amber-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-amber-100 hover:border-amber-300"
-                              >
-                                Pickup item
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  updateObject(selectedObject.id, {
-                                    requireItemId:
-                                      selectedObject.requireItemId ||
-                                      project.inventoryItems[0]?.id,
-                                    interaction:
-                                      selectedObject.interaction === "none"
-                                        ? "dialogue"
-                                        : selectedObject.interaction,
-                                    interactionData:
-                                      selectedObject.interactionData ||
-                                      "That worked.",
-                                    cursor: "pointer",
-                                  })
-                                }
-                                className="rounded border border-pink-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-pink-100 hover:border-pink-300"
-                              >
-                                Use item on this
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  updateObject(selectedObject.id, {
-                                    interaction: "toggle_inventory",
-                                    cursor: "pointer",
-                                  })
-                                }
-                                className="rounded border border-indigo-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-indigo-100 hover:border-indigo-300"
-                              >
-                                Open inventory
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  updateObject(selectedObject.id, {
-                                    interaction: "start_quest",
-                                    interactionData: project.quests[0]?.id || "",
-                                    cursor: "pointer",
-                                  })
-                                }
-                                className="rounded border border-yellow-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-yellow-100 hover:border-yellow-300"
-                              >
-                                Start quest
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  updateObject(selectedObject.id, {
-                                    interaction: "scene_change",
-                                    interactionData:
-                                      project.scenes.find(
-                                        (scene) => scene.id !== currentScene?.id,
-                                      )?.id || "",
-                                    cursor: "pointer",
-                                  })
-                                }
-                                className="rounded border border-emerald-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-emerald-100 hover:border-emerald-300"
-                              >
-                                Go to room
-                              </button>
+                              {pointClickQuickActions.map((action) => (
+                                <button
+                                  key={action.id}
+                                  type="button"
+                                  onClick={() => applyPointClickQuickAction(action.id)}
+                                  className="rounded border border-cyan-400/25 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-cyan-100 hover:border-cyan-300 hover:bg-cyan-400/10"
+                                  title={action.description}
+                                  data-testid={`point-click-quick-action-${action.id}`}
+                                >
+                                  <span className="block">{action.label}</span>
+                                  <span className="mt-0.5 block truncate text-[8px] text-neutral-500">
+                                    {action.description}
+                                  </span>
+                                </button>
+                              ))}
                             </div>
                             </div>
                           </details>
@@ -18837,6 +19577,55 @@ const App: React.FC = () => {
                               }
                             />
                           </div>
+
+                          <details className="mt-3 rounded-lg border border-cyan-400/20 bg-cyan-500/5">
+                            <summary className="cursor-pointer px-3 py-2 font-comic text-xs font-bold text-cyan-100 hover:bg-cyan-400/10">
+                              Create a screen type and make this click open it
+                            </summary>
+                            <div className="max-h-[360px] space-y-3 overflow-y-auto border-t border-cyan-400/10 p-3">
+                              {INTERFACE_PRESET_GROUPS.map((group) => (
+                                <section key={group.id}>
+                                  <div className="mb-1 flex items-center justify-between gap-2">
+                                    <h5 className="font-comic text-[11px] font-bold text-white">
+                                      {group.title}
+                                    </h5>
+                                    <span className="text-[8px] font-bold uppercase tracking-wide text-cyan-300/80">
+                                      {group.presets.length} screens
+                                    </span>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    {group.presets.map((preset) => {
+                                      const presetTemplate = resolveInterfacePresetTemplate(
+                                        group.template,
+                                        preset,
+                                      );
+                                      return (
+                                        <button
+                                          key={`${group.id}-${preset}`}
+                                          type="button"
+                                          onClick={() =>
+                                            createInterfaceTemplate(presetTemplate, {
+                                              name: preset,
+                                              openFromObjectId: selectedObject.id,
+                                            })
+                                          }
+                                          className="min-h-[42px] rounded border border-neutral-800 bg-neutral-950 px-2 py-2 text-left text-[10px] font-bold text-neutral-200 hover:border-cyan-300/70 hover:bg-cyan-400/10 hover:text-white"
+                                          aria-label={`Create ${preset} screen and make this click open it`}
+                                          title={`Create ${preset} and set this object to open it`}
+                                          data-testid={`first-click-create-ui-${preset.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                                        >
+                                          <span className="block truncate">{preset}</span>
+                                          <span className="block truncate text-[8px] text-neutral-500">
+                                            {interfaceTemplateLabel(group.template, preset)}
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </section>
+                              ))}
+                            </div>
+                          </details>
 
                           {selectedObject.interaction !== "none" && (
                             <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-neutral-800">
@@ -21939,19 +22728,41 @@ const App: React.FC = () => {
                       preset,
                     );
                     return (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() =>
-                          createInterfaceTemplate(presetTemplate, {
-                            name: preset,
-                          })
-                        }
-                        className="interface-preset-button"
-                      >
-                        <span>{preset}</span>
-                        <small>{interfaceTemplateLabel(activeInterfaceGroup.template, preset)}</small>
-                      </button>
+                      <div key={preset} className="grid grid-cols-[minmax(0,1fr)_auto] gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            createInterfaceTemplate(presetTemplate, {
+                              name: preset,
+                            })
+                          }
+                          className="interface-preset-button"
+                          aria-label={`Create ${preset} interface screen`}
+                          data-testid={`interface-preset-${preset.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                        >
+                          <span>{preset}</span>
+                          <small>{interfaceTemplateLabel(activeInterfaceGroup.template, preset)}</small>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            createInterfaceTemplate(presetTemplate, {
+                              name: preset,
+                              openFromObjectId: selectedProjectObject?.object.id,
+                              placeOpener: !selectedProjectObject,
+                            })
+                          }
+                          className="rounded border border-emerald-300/45 bg-emerald-400/10 px-2 py-1 font-pixel text-[9px] font-bold uppercase text-emerald-100 hover:bg-emerald-400/20"
+                          title={
+                            selectedProjectObject
+                              ? `Create ${preset} and wire ${selectedProjectObject.object.name || selectedProjectObject.object.id} to open it`
+                              : `Create ${preset} and place a room button that opens it`
+                          }
+                          data-testid={`interface-preset-wire-${preset.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                        >
+                          {selectedProjectObject ? "Wire selected" : "Place"}
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -22071,7 +22882,10 @@ const App: React.FC = () => {
                     </button>
                   </div>
                   <div className="interface-screen-grid">
-                    {(project.uiMenus || []).map((scene) => (
+                    {(project.uiMenus || []).map((scene) => {
+                      const wiringTargets = findInterfaceWiringTargets(project, scene.id);
+                      const openAction = interfaceOpenActionFor(scene);
+                      return (
                       <div
                         key={scene.id}
                         className={`studio-card interface-menu-card bg-neutral-900 border flex flex-col gap-3 transition-colors ${project.currentUiMenuId === scene.id ? "is-selected border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.2)]" : "border-neutral-800 hover:border-neutral-700"}`}
@@ -22107,6 +22921,22 @@ const App: React.FC = () => {
                                   ? "Visible automatically during play."
                                   : "Opens only when a button, object, shell control, or response calls it."}
                               </strong>
+                            </div>
+                            <div className="mt-2 rounded border border-cyan-300/20 bg-cyan-400/10 p-2 text-[10px]">
+                              <div className="font-bold uppercase tracking-wide text-cyan-200">
+                                Canvas wiring
+                              </div>
+                              <div className="mt-1 break-words font-comic text-[11px] font-bold text-white">
+                                {openAction.summary}
+                              </div>
+                              <div className="mt-1 text-neutral-400">
+                                {wiringTargets.length
+                                  ? `${wiringTargets.length} opener${wiringTargets.length === 1 ? "" : "s"}: ${wiringTargets
+                                      .slice(0, 2)
+                                      .map((target) => `${target.objectName} in ${target.sourceName}`)
+                                      .join(", ")}${wiringTargets.length > 2 ? `, +${wiringTargets.length - 2} more` : ""}`
+                                  : "No room, HUD, shell, or response opens this yet."}
+                              </div>
                             </div>
                           </div>
                           <div className="flex gap-2">
@@ -22304,6 +23134,39 @@ const App: React.FC = () => {
                             )}
                           </div>
                           <button
+                            type="button"
+                            onClick={() => placeInterfaceOpenerOnCanvas(scene)}
+                            className="rounded border border-cyan-300/40 bg-cyan-400/10 px-3 py-1.5 text-sm font-bold text-cyan-100 transition-colors hover:bg-cyan-400/20"
+                            data-testid={`place-ui-opener-${scene.id}`}
+                          >
+                            Place opener
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => testInterfaceScreen(scene)}
+                            className="rounded border border-emerald-300/40 bg-emerald-400/10 px-3 py-1.5 text-sm font-bold text-emerald-100 transition-colors hover:bg-emerald-400/20"
+                            aria-label={`Test ${scene.name} custom screen in Play mode`}
+                            data-testid={`test-ui-screen-${scene.id}`}
+                          >
+                            Test screen
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => wireSelectedObjectToInterface(scene)}
+                            disabled={!selectedProjectObject}
+                            className="rounded border border-pink-300/40 bg-pink-400/10 px-3 py-1.5 text-sm font-bold text-pink-100 transition-colors hover:bg-pink-400/20 disabled:cursor-not-allowed disabled:opacity-40"
+                            aria-label={
+                              selectedProjectObject
+                                ? `Wire ${selectedProjectObject.object.name || selectedProjectObject.object.id} from ${selectedProjectObject.sourceName} to open ${scene.name}`
+                                : `Select an object before wiring ${scene.name}`
+                            }
+                            data-testid={`wire-selected-to-ui-${scene.id}`}
+                          >
+                            {selectedProjectObject
+                              ? `Wire ${selectedProjectObject.kind === "ui_object" ? "UI" : "room"} selected`
+                              : "Wire selected"}
+                          </button>
+                          <button
                             onClick={() => {
                               setProject((p) => ({
                                 ...p,
@@ -22319,7 +23182,8 @@ const App: React.FC = () => {
                           </button>
                         </div>
                       </div>
-                    ))}
+                    );
+                    })}
                     {(project.uiMenus || []).length === 0 && (
                       <div className="rounded-lg border border-dashed border-neutral-800 bg-neutral-900/50 p-8 text-center text-sm text-neutral-500">
                         Create an interface screen or start from a game-system preset.
@@ -27846,6 +28710,9 @@ const App: React.FC = () => {
             >
               <div className="border-b border-neutral-800 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-cyan-200">
                 Choose Overlapping Object
+                <span className="mt-0.5 block normal-case tracking-normal text-neutral-500">
+                  Option-click opens this picker. Normal drag moves the top object.
+                </span>
               </div>
               {candidates.map((candidate) => (
                 <button

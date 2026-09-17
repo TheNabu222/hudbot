@@ -731,6 +731,22 @@ const Preview = {
       case 'give-item':
         if (obj.giveItemId) this.giveItem(obj.giveItemId, obj);
         break;
+      case 'open-ui':
+        if (typeof HudRuntime !== 'undefined') {
+          HudRuntime.openMenu(obj.targetUiId || obj.interactionData, this);
+        } else if (typeof DeviceFrame !== 'undefined') {
+          DeviceFrame.showUiMenu(obj.targetUiId || obj.interactionData, this);
+        }
+        break;
+      case 'close-ui':
+        this.previewStage
+          ?.querySelectorAll(
+            obj.targetUiId || obj.interactionData
+              ? `[data-hud-menu-id="${obj.targetUiId || obj.interactionData}"]`
+              : '.hud-runtime-menu.is-open'
+          )
+          .forEach(layer => layer.remove());
+        break;
       case 'custom':
         try {
           const fn = new Function('flags', 'inventory', 'preview', obj.customJS);

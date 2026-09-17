@@ -499,4 +499,4 @@ export interface Project {
 }
 
 // ---- Active Editor Tab ----
-export type EditorTab = 'scenes' | 'scene-editor' | 'dialogue' | 'characters' | 'quests' | 'items' | 'needs' | 'settings' | 'preview';
+export type EditorTab = 'scenes' | 'scene-editor' | 'dialogue' | 'characters' | 'quests' | 'items' | 'needs' | 'settings' | 'preview' | 'hudbot-bridge';
