@@ -187,5 +187,30 @@ assert.match(
   /Open Screen UI -> \$\{menu\.name\}/,
   "saved responses should summarize the exact custom UI target",
 );
+assert.match(
+  appSource,
+  /data-testid="preview-click-sound"/,
+  "Click Sound preview should expose a stable test control",
+);
+assert.match(
+  appSource,
+  /Click sound preview failed[\s\S]*?showError\(/,
+  "Click Sound preview failures should be visible instead of swallowed",
+);
+assert.match(
+  appSource,
+  /data-testid="replace-click-sound-file"/,
+  "a broken linked sound should be replaceable without rebuilding object wiring",
+);
+assert.match(
+  appSource,
+  /The linked file returned \$\{response\.status\}\. Replace or relink it\./,
+  "linked audio failures should report their HTTP status",
+);
+assert.doesNotMatch(
+  appSource,
+  /audio\.play\(\)\.catch\(\(\) => undefined\)/,
+  "audio preview controls must not silently discard playback failures",
+);
 
 console.log("ui wiring smoke ok");

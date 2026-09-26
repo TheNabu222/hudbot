@@ -1351,7 +1351,7 @@ const App: React.FC = () => {
   const [activeItemGroup, setActiveItemGroup] = useState("all");
   const [newItemGroupText, setNewItemGroupText] = useState("");
   const [activeInterfacePresetGroup, setActiveInterfacePresetGroup] =
-    useState<InterfacePresetGroupId>("tactical");
+    useState<InterfacePresetGroupId>("rpg");
   const [interfaceStudioPane, setInterfaceStudioPane] =
     useState<InterfaceStudioPane>("presets");
   const [rpgTab, setRpgTab] = useState<
@@ -19355,8 +19355,35 @@ const App: React.FC = () => {
                                 ),
                               }));
                             };
+                            const replaceSoundFile = (file?: File) => {
+                              if (!file || !soundAsset) return;
+                              const reader = new FileReader();
+                              reader.onload = () => {
+                                if (typeof reader.result !== "string") {
+                                  showError(`Could not read ${file.name}.`);
+                                  return;
+                                }
+                                updateSoundAsset({
+                                  name: file.name,
+                                  src: reader.result,
+                                  dataURL: reader.result,
+                                  type: "audio",
+                                  category: "audio",
+                                  exportSource: undefined,
+                                  exportReason: undefined,
+                                });
+                                showError(`Replaced sound file without changing its click wiring: ${file.name}`);
+                              };
+                              reader.onerror = () =>
+                                showError(`Could not read ${file.name}.`);
+                              reader.readAsDataURL(file);
+                            };
                             const previewSound = () => {
                               if (!soundAsset) return;
+                              if (isAudioMuted) {
+                                showError("Audio is muted. Unmute audio to preview this sound.");
+                                return;
+                              }
                               const soundSrc = getAssetDisplaySrc(soundAsset);
                               if (!soundSrc) {
                                 showError(`Sound source missing: ${soundAsset.name || soundAsset.id}`);
@@ -19373,7 +19400,26 @@ const App: React.FC = () => {
                                 1,
                                 soundAsset.volume ?? 1,
                               );
-                              audio.play().catch(() => undefined);
+                              runtimeAudioRefs.current = runtimeAudioRefs.current
+                                .filter((candidate) => !candidate.paused)
+                                .concat(audio);
+                              audio.play().catch((error) => {
+                                console.error("Click sound preview failed", error);
+                                if (/^https?:\/\//i.test(soundSrc)) {
+                                  fetch(soundSrc, { method: "HEAD" })
+                                    .then((response) => {
+                                      const reason = response.ok
+                                        ? "The browser rejected this audio format."
+                                        : `The linked file returned ${response.status}. Replace or relink it.`;
+                                      showError(`Sound could not play: ${soundAsset.name || soundAsset.id}. ${reason}`);
+                                    })
+                                    .catch(() =>
+                                      showError(`Sound could not play: ${soundAsset.name || soundAsset.id}. The linked file could not be reached.`),
+                                    );
+                                  return;
+                                }
+                                showError(`Sound could not play: ${soundAsset.name || soundAsset.id || "unsupported audio source"}. The browser rejected this audio format.`);
+                              });
                             };
 
                             return soundAsset ? (
@@ -19384,6 +19430,7 @@ const App: React.FC = () => {
                                     onClick={previewSound}
                                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#00ffcc]/40 bg-[#00ffcc]/10 text-[#00ffcc] hover:bg-[#00ffcc]/20"
                                     aria-label="Preview click sound"
+                                    data-testid="preview-click-sound"
                                   >
                                     <Play size={14} />
                                   </button>
@@ -19479,6 +19526,20 @@ const App: React.FC = () => {
                                     )}
                                     %
                                   </span>
+                                </label>
+                                <label className="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 font-comic text-[10px] font-bold text-neutral-200 hover:border-[#00ffcc]/50 hover:text-[#00ffcc]">
+                                  <Upload size={12} />
+                                  Replace audio file (keep wiring)
+                                  <input
+                                    type="file"
+                                    accept="audio/*,.mp3,.m4a,.wav,.ogg"
+                                    className="hidden"
+                                    data-testid="replace-click-sound-file"
+                                    onChange={(event) => {
+                                      replaceSoundFile(event.target.files?.[0]);
+                                      event.target.value = "";
+                                    }}
+                                  />
                                 </label>
                               </div>
                             ) : (
@@ -22496,13 +22557,22 @@ const App: React.FC = () => {
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <div className="font-comic text-lg font-bold text-cyan-100">
-                      What do you want to build?
+                      {interfaceStudioPane === "presets"
+                        ? "Start with a screen"
+                        : interfaceStudioPane === "workshop"
+                          ? "Frame and HUD controls"
+                          : "Your interface screens"}
                     </div>
                     <p className="mt-1 max-w-4xl text-sm text-neutral-400">
-                      Pick a player-facing screen first. Cavebot opens a canvas where you can drop your own art, then draw live zones for items, journal text, quest steps, maps, or meters.
+                      {interfaceStudioPane === "presets"
+                        ? "Choose what the player will open. Each starter creates an editable canvas for your art and live game data."
+                        : interfaceStudioPane === "workshop"
+                          ? "Set up the device frame, in-game overlay, and built-in HUD pieces."
+                          : "Open a screen to edit it, test it in Play, or connect a button that opens it."}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                  {interfaceStudioPane === "presets" && (
                     <button
                       type="button"
                       onClick={createPointClickAdventureKit}
@@ -22510,6 +22580,7 @@ const App: React.FC = () => {
                     >
                       Build adventure kit
                     </button>
+                  )}
                   {interfaceStudioPane === "workshop" && (
                     <button
                       type="button"
@@ -22524,9 +22595,9 @@ const App: React.FC = () => {
 
                 <div className="interface-pane-tabs" role="tablist" aria-label="Interface Studio sections">
                   {([
-                    ["presets", "Make a screen", "Inventory, journal, map, crafting, settings, and popups"],
-                    ["workshop", "Frame buttons", "Outer CRT buttons, default HUD pieces, and live zones"],
-                    ["screens", "My screens", "Open, rename, duplicate, and wire your custom interfaces"],
+                    ["presets", "Make a screen", "Start with a ready-made screen"],
+                    ["workshop", "Frame & HUD", "Set up the frame and game HUD"],
+                    ["screens", `My screens (${(project.uiMenus || []).length})`, "Edit, test, and connect screens"],
                   ] as const).map(([pane, label, helper]) => (
                     <button
                       key={pane}
@@ -22679,10 +22750,10 @@ const App: React.FC = () => {
               <aside className="interface-template-panel interface-template-panel--starter overflow-hidden border border-emerald-300/25 bg-emerald-400/5 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.16)]">
                 <div className="mb-3 flex items-center gap-2 font-comic text-lg font-bold text-emerald-100">
                   <LayoutTemplate size={18} />
-                  Screen starters
+                  Choose a screen type
                 </div>
                 <p className="mb-3 text-sm leading-relaxed text-neutral-400">
-                  Pick what you want the player to open. Cavebot makes a Screen UI canvas you can edit like a room, then wire to buttons, objects, dialogue, or quest events.
+                  Pick a category, then create one screen. You can connect it to a button now or later.
                 </p>
                 <div className="interface-family-tabs">
                   {INTERFACE_PRESET_GROUPS.map((group) => (
@@ -22742,6 +22813,7 @@ const App: React.FC = () => {
                         >
                           <span>{preset}</span>
                           <small>{interfaceTemplateLabel(activeInterfaceGroup.template, preset)}</small>
+                          <span className="interface-preset-button__action">Create screen →</span>
                         </button>
                         <button
                           type="button"
@@ -22760,7 +22832,7 @@ const App: React.FC = () => {
                           }
                           data-testid={`interface-preset-wire-${preset.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
                         >
-                          {selectedProjectObject ? "Wire selected" : "Place"}
+                          {selectedProjectObject ? "Create + wire" : "Create + button"}
                         </button>
                       </div>
                     );
@@ -23034,6 +23106,8 @@ const App: React.FC = () => {
                           )}
                         </button>
 
+                        <details className="interface-menu-advanced">
+                          <summary>Screen behavior</summary>
                         <div className="interface-menu-settings">
                           <label>
                             <input
@@ -23090,6 +23164,7 @@ const App: React.FC = () => {
                             Click-out closes
                           </label>
                         </div>
+                        </details>
 
                         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-neutral-800 pt-3">
                           <div className="flex min-w-[12rem] flex-1 gap-2">

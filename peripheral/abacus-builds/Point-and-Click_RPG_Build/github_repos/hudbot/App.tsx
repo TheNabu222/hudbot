@@ -19355,8 +19355,35 @@ const App: React.FC = () => {
                                 ),
                               }));
                             };
+                            const replaceSoundFile = (file?: File) => {
+                              if (!file || !soundAsset) return;
+                              const reader = new FileReader();
+                              reader.onload = () => {
+                                if (typeof reader.result !== "string") {
+                                  showError(`Could not read ${file.name}.`);
+                                  return;
+                                }
+                                updateSoundAsset({
+                                  name: file.name,
+                                  src: reader.result,
+                                  dataURL: reader.result,
+                                  type: "audio",
+                                  category: "audio",
+                                  exportSource: undefined,
+                                  exportReason: undefined,
+                                });
+                                showError(`Replaced sound file without changing its click wiring: ${file.name}`);
+                              };
+                              reader.onerror = () =>
+                                showError(`Could not read ${file.name}.`);
+                              reader.readAsDataURL(file);
+                            };
                             const previewSound = () => {
                               if (!soundAsset) return;
+                              if (isAudioMuted) {
+                                showError("Audio is muted. Unmute audio to preview this sound.");
+                                return;
+                              }
                               const soundSrc = getAssetDisplaySrc(soundAsset);
                               if (!soundSrc) {
                                 showError(`Sound source missing: ${soundAsset.name || soundAsset.id}`);
@@ -19373,7 +19400,26 @@ const App: React.FC = () => {
                                 1,
                                 soundAsset.volume ?? 1,
                               );
-                              audio.play().catch(() => undefined);
+                              runtimeAudioRefs.current = runtimeAudioRefs.current
+                                .filter((candidate) => !candidate.paused)
+                                .concat(audio);
+                              audio.play().catch((error) => {
+                                console.error("Click sound preview failed", error);
+                                if (/^https?:\/\//i.test(soundSrc)) {
+                                  fetch(soundSrc, { method: "HEAD" })
+                                    .then((response) => {
+                                      const reason = response.ok
+                                        ? "The browser rejected this audio format."
+                                        : `The linked file returned ${response.status}. Replace or relink it.`;
+                                      showError(`Sound could not play: ${soundAsset.name || soundAsset.id}. ${reason}`);
+                                    })
+                                    .catch(() =>
+                                      showError(`Sound could not play: ${soundAsset.name || soundAsset.id}. The linked file could not be reached.`),
+                                    );
+                                  return;
+                                }
+                                showError(`Sound could not play: ${soundAsset.name || soundAsset.id || "unsupported audio source"}. The browser rejected this audio format.`);
+                              });
                             };
 
                             return soundAsset ? (
@@ -19384,6 +19430,7 @@ const App: React.FC = () => {
                                     onClick={previewSound}
                                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#00ffcc]/40 bg-[#00ffcc]/10 text-[#00ffcc] hover:bg-[#00ffcc]/20"
                                     aria-label="Preview click sound"
+                                    data-testid="preview-click-sound"
                                   >
                                     <Play size={14} />
                                   </button>
@@ -19479,6 +19526,20 @@ const App: React.FC = () => {
                                     )}
                                     %
                                   </span>
+                                </label>
+                                <label className="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 font-comic text-[10px] font-bold text-neutral-200 hover:border-[#00ffcc]/50 hover:text-[#00ffcc]">
+                                  <Upload size={12} />
+                                  Replace audio file (keep wiring)
+                                  <input
+                                    type="file"
+                                    accept="audio/*,.mp3,.m4a,.wav,.ogg"
+                                    className="hidden"
+                                    data-testid="replace-click-sound-file"
+                                    onChange={(event) => {
+                                      replaceSoundFile(event.target.files?.[0]);
+                                      event.target.value = "";
+                                    }}
+                                  />
                                 </label>
                               </div>
                             ) : (
