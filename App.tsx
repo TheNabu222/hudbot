@@ -1200,6 +1200,12 @@ const App: React.FC = () => {
   } | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [stageZoom, setStageZoom] = useState<number>(1);
+  const [playViewZoom, setPlayViewZoom] = useState<number>(1);
+  const autoFitCanvasRef = useRef(true);
+  const setManualStageZoom = (zoom: React.SetStateAction<number>) => {
+    autoFitCanvasRef.current = false;
+    setStageZoom(zoom);
+  };
   const [triggeredObjects, setTriggeredObjects] = useState<Set<string>>(
     new Set(),
   );
@@ -1247,7 +1253,7 @@ const App: React.FC = () => {
   const editorModeBeforePlayRef = useRef<EditorMode>("stage");
   const [isHelpCenterOpen, setIsHelpCenterOpen] = useState(false);
   const [isPublishMenuOpen, setIsPublishMenuOpen] = useState(false);
-  const [isLibraryPaletteOpen, setIsLibraryPaletteOpen] = useState(true);
+  const [isLibraryPaletteOpen, setIsLibraryPaletteOpen] = useState(() => window.innerWidth > 1000);
   const [libraryPaletteTab, setLibraryPaletteTab] = useState<
     "assets" | "prefabs" | "theme"
   >("assets");
@@ -1325,15 +1331,6 @@ const App: React.FC = () => {
     null,
   );
   const runtimeDraggingIdRef = useRef<string | null>(null);
-  const [quickEditPos, setQuickEditPos] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [quickEditDragging, setQuickEditDragging] = useState<{
-    startX: number;
-    startY: number;
-    startPos: { x: number; y: number };
-  } | null>(null);
   const [activeCutscene, setActiveCutscene] = useState<{
     src: string;
     targetSceneId?: string;
@@ -3492,13 +3489,15 @@ const App: React.FC = () => {
     return ids;
   };
 
-  const readDroppedFile = (
-    file: File,
-  ): Promise<{
+  type LocalAssetReadSuccess = {
     asset: Asset;
     width: number;
     height: number;
-  } | null> =>
+  };
+
+  const readDroppedFile = (
+    file: File,
+  ): Promise<LocalAssetReadSuccess | { error: string }> =>
     new Promise((resolve) => {
       const extension = file.name.split(".").pop()?.toLowerCase() || "";
       const isImage =
@@ -3512,21 +3511,24 @@ const App: React.FC = () => {
         ["mp4", "webm", "mov"].includes(extension);
 
       if (!isImage && !isAudio && !isVideo) {
-        resolve(null);
+        resolve({ error: `${file.name} is not an image, audio, or video file.` });
         return;
       }
 
-      const maxSize = 5 * 1024 * 1024;
+      const maxSize = 64 * 1024 * 1024;
       if (file.size > maxSize) {
-        showError(`${file.name} is larger than 5MB and was skipped.`);
-        resolve(null);
+        resolve({ error: `${file.name} is larger than 64 MB. Use a smaller file or a repository link.` });
         return;
       }
 
       const reader = new FileReader();
-      reader.onerror = () => resolve(null);
+      reader.onerror = () => resolve({ error: `Could not read ${file.name}.` });
       reader.onload = () => {
-        const src = reader.result as string;
+        const src = reader.result;
+        if (typeof src !== "string") {
+          resolve({ error: `Could not read ${file.name}.` });
+          return;
+        }
           const asset: Asset = {
             id: uuidv4(),
             name: file.name,
@@ -3574,14 +3576,15 @@ const App: React.FC = () => {
     });
 
   const importFilesToLibrary = async (files: File[]) => {
-    const imported = (await Promise.all(files.map(readDroppedFile))).filter(
-      (
-        result,
-      ): result is { asset: Asset; width: number; height: number } =>
-        result !== null,
+    const results = await Promise.all(files.map(readDroppedFile));
+    const imported = results.filter(
+      (result): result is LocalAssetReadSuccess => "asset" in result,
+    );
+    const errors = results.flatMap((result) =>
+      "error" in result ? [result.error] : [],
     );
     if (!imported.length) {
-      showError("Choose images, GIFs, audio, or video files.");
+      showError(errors[0] || "Choose images, GIFs, audio, or video files.");
       return;
     }
     setProject((current) => ({
@@ -3594,7 +3597,7 @@ const App: React.FC = () => {
     setLibraryPaletteTab("assets");
     setIsLibraryPaletteOpen(true);
     showError(
-      `${imported.length} file${imported.length === 1 ? "" : "s"} added to your collection ✦`,
+      `${imported.length} file${imported.length === 1 ? "" : "s"} added to your collection ✦${errors.length ? ` ${errors.length} skipped: ${errors[0]}` : ""}`,
     );
   };
 
@@ -3615,17 +3618,16 @@ const App: React.FC = () => {
     try {
       const finderFiles = Array.from(e.dataTransfer.files || []);
       if (finderFiles.length > 0) {
-        const imported = (
-          await Promise.all(finderFiles.map(readDroppedFile))
-        ).filter(
-          (
-            result,
-          ): result is { asset: Asset; width: number; height: number } =>
-            result !== null,
+        const results = await Promise.all(finderFiles.map(readDroppedFile));
+        const imported = results.filter(
+          (result): result is LocalAssetReadSuccess => "asset" in result,
+        );
+        const errors = results.flatMap((result) =>
+          "error" in result ? [result.error] : [],
         );
 
         if (imported.length === 0) {
-          showError("Drop images, GIFs, audio, or video files onto the canvas.");
+          showError(errors[0] || "Drop images, GIFs, audio, or video files onto the canvas.");
           return;
         }
 
@@ -3710,7 +3712,7 @@ const App: React.FC = () => {
         pushHistory(newProject);
         setSelectedObjectId(newObjects[newObjects.length - 1].id);
         showError(
-          `${newObjects.length} file${newObjects.length === 1 ? "" : "s"} imported from Finder ✦`,
+          `${newObjects.length} file${newObjects.length === 1 ? "" : "s"} imported from Finder ✦${errors.length ? ` ${errors.length} skipped: ${errors[0]}` : ""}`,
         );
         return;
       }
@@ -4957,30 +4959,6 @@ const App: React.FC = () => {
       setIsFetchingGithub(false);
     }
   };
-
-  // Quick Edit UI Dragging
-  useEffect(() => {
-    if (!quickEditDragging) return;
-    const handlePointerMove = (e: PointerEvent) => {
-      setQuickEditPos({
-        x:
-          quickEditDragging.startPos.x + (e.clientX - quickEditDragging.startX),
-        y:
-          quickEditDragging.startPos.y + (e.clientY - quickEditDragging.startY),
-      });
-    };
-    const stopDrag = () => setQuickEditDragging(null);
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopDrag);
-    window.addEventListener("pointercancel", stopDrag);
-    window.addEventListener("blur", stopDrag);
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopDrag);
-      window.removeEventListener("pointercancel", stopDrag);
-      window.removeEventListener("blur", stopDrag);
-    };
-  }, [quickEditDragging]);
 
   // Sidebar Resizing Logic
   useEffect(() => {
@@ -6268,11 +6246,11 @@ const App: React.FC = () => {
   }, [activeRosterCharacterId, project.characters, rpgTab]);
 
   useEffect(() => {
-    if (isPlaying || (editorMode !== "stage" && editorMode !== "ui_stage")) {
+    if (editorMode !== "stage" && editorMode !== "ui_stage") {
       return;
     }
     const fitForWorkspace = () => {
-      if (window.innerWidth > 1200) return;
+      if (!isPlaying && !autoFitCanvasRef.current) return;
       const mainElement = document.querySelector<HTMLElement>(
         ".studio-stage-shell",
       );
@@ -6283,13 +6261,17 @@ const App: React.FC = () => {
       const targetHeight = showDeviceFrame
         ? deviceFrame!.outerHeight
         : logicalStageHeight;
-      const availableWidth = Math.max(160, mainElement.clientWidth - 48);
-      const availableHeight = Math.max(160, mainElement.clientHeight - 120);
+      const toolbarHeight = Array.from(mainElement.querySelectorAll<HTMLElement>(
+        ".studio-stage-actions, .studio-quick-edit-toolbar",
+      )).reduce((height, toolbar) => height + toolbar.offsetHeight + 12, 0);
+      const availableWidth = Math.max(80, mainElement.clientWidth - 48);
+      const availableHeight = Math.max(80, mainElement.clientHeight - toolbarHeight - (isPlaying ? 48 : 88));
       const nextZoom = Math.max(
         0.15,
         Math.min(1, availableWidth / targetWidth, availableHeight / targetHeight),
       );
-      setStageZoom(Number(nextZoom.toFixed(2)));
+      if (isPlaying) setPlayViewZoom(Number(nextZoom.toFixed(2)));
+      else setStageZoom(Number(nextZoom.toFixed(2)));
     };
     const frameId = window.requestAnimationFrame(() =>
       window.requestAnimationFrame(fitForWorkspace),
@@ -6311,6 +6293,7 @@ const App: React.FC = () => {
     logicalStageHeight,
     logicalStageWidth,
     rightSidebarWidth,
+    isLibraryPaletteOpen,
     showDeviceFrame,
     deviceFrame?.outerHeight,
     deviceFrame?.outerWidth,
@@ -9014,7 +8997,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className={`studio-app ${studioTheme === "sunny" ? "sunny-theme" : ""} flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans overflow-hidden`}>
+    <div className={`studio-app ${isPlaying ? "is-playing" : ""} ${studioTheme === "sunny" ? "sunny-theme" : ""} flex flex-col h-screen bg-neutral-900 text-neutral-100 font-sans overflow-hidden`}>
       {/* Top Bar */}
       {editorError && (
         <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[9999] bg-red-500 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2">
@@ -9654,7 +9637,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <div className="studio-workspace flex flex-1 overflow-hidden">
+      <div className="studio-workspace relative min-h-0 flex flex-1 overflow-hidden">
         {(editorMode === "stage" || editorMode === "ui_stage") && (
           <>
             {/* Left Sidebar */}
@@ -10077,16 +10060,6 @@ const App: React.FC = () => {
               </aside>
             )}
 
-            {!isPlaying && !isLibraryPaletteOpen && (
-              <button
-                type="button"
-                onClick={() => setIsLibraryPaletteOpen(true)}
-                className="studio-show-library absolute left-3 top-32 z-[5200] rounded-[8px_18px_8px_18px] border border-cyan-300/50 bg-neutral-950/90 px-3 py-2 text-sm font-bold text-cyan-100 shadow-xl backdrop-blur hover:bg-cyan-400/15"
-              >
-                Show Assets
-              </button>
-            )}
-
             {/* Center - Stage */}
             <main
               className="studio-stage-shell min-w-0 flex-1 bg-neutral-950 overflow-auto p-4 relative flex flex-col"
@@ -10110,7 +10083,8 @@ const App: React.FC = () => {
               }}
             >
               {!isPlaying && (
-                <div className="studio-stage-actions sticky top-0 z-[5100] mb-3 flex items-center gap-1.5">
+                <div className="studio-stage-actions relative z-40 mb-3 flex items-center gap-1.5"
+                  onPointerDown={(event) => event.stopPropagation()}>
                   <button
                     type="button"
                     onClick={() =>
@@ -10207,81 +10181,29 @@ const App: React.FC = () => {
                 </div>
               )}
 
-              {!isPlaying && rightSidebarWidth === 0 && (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setRightSidebarWidth(320);
-                  }}
-                  className="studio-show-inspector absolute left-4 top-20 z-[5200] rounded-[8px_18px_8px_18px] border border-pink-400/50 bg-neutral-950/90 px-3 py-2 font-comic text-sm font-bold text-pink-200 shadow-xl backdrop-blur hover:bg-pink-500/15"
-                  title="Bring the Options / Layers panel back"
-                >
-                  Show Inspector
-                </button>
-              )}
-
-              {/* Quick Edit Toggle for Canvas */}
+              {/* Docked canvas manager keeps navigation clear of the artwork. */}
               {(editorMode === "stage" || editorMode === "ui_stage") &&
                 !isPlaying && (
                   <div
-                    className={`studio-quick-edit-toolbar ${quickEditPos ? "absolute" : "relative self-center mb-3"} z-30 flex max-w-[calc(100vw-2rem)] flex-wrap justify-center bg-neutral-900 border border-neutral-700 p-1 rounded-lg shadow-2xl items-center gap-1`}
-                    style={{
-                      ...(quickEditPos && {
-                        left: quickEditPos.x,
-                        top: quickEditPos.y,
-                      }),
-                    }}
+                    className="studio-quick-edit-toolbar relative z-30 flex flex-wrap border border-neutral-700 rounded-lg items-center gap-1"
                     onPointerDown={(e) => e.stopPropagation()}
                   >
-                    <div
-                      className="px-2 py-1 cursor-grab active:cursor-grabbing text-neutral-500 hover:text-neutral-300"
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        // If there is no quickEditPos yet, initialize to its center-top position so it doesn't jump
-                        const rect = (
-                          e.currentTarget.parentElement as HTMLElement
-                        ).getBoundingClientRect();
-                        const parentRect = (
-                          e.currentTarget.parentElement!
-                            .parentElement as HTMLElement
-                        ).getBoundingClientRect();
-                        const startPos = quickEditPos || {
-                          x: rect.left - parentRect.left,
-                          y: rect.top - parentRect.top,
-                        };
-                        setQuickEditPos(startPos);
-                        setQuickEditDragging({
-                          startX: e.clientX,
-                          startY: e.clientY,
-                          startPos,
-                        });
-                      }}
+                    <button
+                      type="button"
+                      aria-expanded={isLibraryPaletteOpen}
+                      onClick={() => setIsLibraryPaletteOpen((open) => !open)}
+                      className="rounded border border-neutral-700 px-3 py-1 text-xs font-bold"
                     >
-                      <svg
-                        width="12"
-                        height="20"
-                        viewBox="0 0 12 20"
-                        fill="currentColor"
-                      >
-                        <circle cx="4" cy="4" r="1.5" />
-                        <circle cx="4" cy="10" r="1.5" />
-                        <circle cx="4" cy="16" r="1.5" />
-                        <circle cx="8" cy="4" r="1.5" />
-                        <circle cx="8" cy="10" r="1.5" />
-                        <circle cx="8" cy="16" r="1.5" />
-                      </svg>
-                    </div>
-                    {quickEditPos && (
-                      <button
-                        type="button"
-                        onClick={() => setQuickEditPos(null)}
-                        className="rounded border border-neutral-700 bg-neutral-950/60 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-neutral-400 hover:border-[#00ffcc]/60 hover:text-[#00ffcc]"
-                        title="Dock this manager above the canvas again"
-                      >
-                        Dock
-                      </button>
-                    )}
+                      {isLibraryPaletteOpen ? "Hide Assets" : "Show Assets"}
+                    </button>
+                    <button
+                      type="button"
+                      aria-expanded={rightSidebarWidth > 0}
+                      onClick={() => setRightSidebarWidth((width) => width > 0 ? 0 : 320)}
+                      className="rounded border border-neutral-700 px-3 py-1 text-xs font-bold"
+                    >
+                      {rightSidebarWidth > 0 ? "Hide Inspector" : "Show Inspector"}
+                    </button>
                     <div
                       className={`flex items-center gap-2 rounded-md px-2 transition-all ${editorMode === "stage" ? "bg-indigo-600 text-white shadow-inner" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
                     >
@@ -10289,6 +10211,7 @@ const App: React.FC = () => {
                         🎮 Scene
                       </span>
                       <select
+                        aria-label="Room canvas"
                         className={`bg-neutral-950/55 outline-none px-2 py-1 text-xs font-bold w-32 cursor-pointer border border-white/10 rounded-sm ${editorMode === "stage" ? "text-white" : "text-neutral-300"}`}
                         value={project.currentSceneId}
                         onChange={(e) => {
@@ -10349,6 +10272,7 @@ const App: React.FC = () => {
                         ✨ UI
                       </span>
                       <select
+                        aria-label="Screen UI canvas"
                         className={`bg-neutral-950/55 outline-none px-2 py-1 text-xs font-bold w-28 cursor-pointer border border-white/10 rounded-sm ${editorMode === "ui_stage" ? "text-white" : "text-neutral-300"}`}
                         value={project.currentUiMenuId || ""}
                         onChange={(e) => {
@@ -10540,7 +10464,7 @@ const App: React.FC = () => {
                   height: showDeviceFrame
                     ? deviceFrame!.outerHeight
                     : logicalStageHeight,
-                  zoom: stageZoom,
+                  zoom: isPlaying ? playViewZoom : stageZoom,
                   cursor: isPlaying && activeCursorAsset ? "none" : undefined,
                 }}
               >
@@ -15147,7 +15071,7 @@ const App: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-1.5">
                     <button 
-                      onClick={() => setStageZoom(prev => Math.max(0.15, +(prev - 0.05).toFixed(2)))} 
+                      onClick={() => setManualStageZoom(prev => Math.max(0.15, +(prev - 0.05).toFixed(2)))}
                       className="h-8 w-8 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white rounded flex items-center justify-center transition-colors border border-neutral-700 active:scale-95"
                       title="Zoom Out"
                     >
@@ -15159,18 +15083,22 @@ const App: React.FC = () => {
                         type="range"
                         min="15"
                         max="150"
-                        step="5"
+                        step="1"
                         value={Math.round(stageZoom * 100)}
-                        onChange={(event) => setStageZoom(Number(event.target.value) / 100)}
+                        onChange={(event) => setManualStageZoom(Number(event.target.value) / 100)}
                         className="studio-zoom-slider w-full accent-cyan-300"
                       />
                     </label>
                     <button
                       onClick={() => {
+                        autoFitCanvasRef.current = true;
                         const mainEl = document.querySelector('.studio-stage-shell');
                         if (mainEl) {
                           const availableWidth = mainEl.clientWidth - 48;
-                          const availableHeight = mainEl.clientHeight - 120;
+                          const toolbarHeight = Array.from(mainEl.querySelectorAll<HTMLElement>(
+                            ".studio-stage-actions, .studio-quick-edit-toolbar",
+                          )).reduce((height, toolbar) => height + toolbar.offsetHeight + 12, 0);
+                          const availableHeight = Math.max(80, mainEl.clientHeight - toolbarHeight - 88);
                           const targetWidth = showDeviceFrame
                             ? deviceFrame!.outerWidth
                             : logicalStageWidth;
@@ -15192,14 +15120,14 @@ const App: React.FC = () => {
                       Fit
                     </button>
                     <button 
-                      onClick={() => setStageZoom(1)} 
+                      onClick={() => setManualStageZoom(1)}
                       className="h-8 px-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white text-xs font-bold rounded transition-colors active:scale-95"
                       title="Show the room at its actual pixel size"
                     >
                       100%
                     </button>
                     <button
-                      onClick={() => setStageZoom(prev => Math.min(1.5, +(prev + 0.05).toFixed(2)))}
+                      onClick={() => setManualStageZoom(prev => Math.min(1.5, +(prev + 0.05).toFixed(2)))}
                       className="h-8 w-8 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white rounded flex items-center justify-center transition-colors border border-neutral-700 active:scale-95"
                       title="Zoom In"
                     >

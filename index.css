@@ -10,35 +10,14 @@ body,
 }
 
 .studio-canvas-view {
-  left: auto !important;
-  right: 0.75rem !important;
-  z-index: 7200 !important;
-  width: 42px !important;
-  max-width: 42px !important;
-  min-height: 40px;
-  overflow: hidden !important;
-  opacity: 0.68;
-  transition:
-    width 150ms ease,
-    max-width 150ms ease,
-    opacity 150ms ease,
-    border-color 150ms ease;
-}
-
-.studio-canvas-view:hover,
-.studio-canvas-view:focus-within {
-  width: min(360px, calc(100vw - 1.5rem)) !important;
-  max-width: min(360px, calc(100vw - 1.5rem)) !important;
-  opacity: 1;
+  z-index: 40 !important;
+  width: auto !important;
+  max-width: calc(100% - 1.5rem) !important;
+  overflow: visible !important;
 }
 
 .studio-canvas-view > div {
-  width: max-content !important;
-  min-width: 330px;
-}
-
-.studio-canvas-view .flex.items-center {
-  width: auto !important;
+  min-width: 0;
 }
 
 @layer components {
@@ -512,7 +491,7 @@ body,
 
   .studio-workflow__rail {
     padding: 0.35rem 0.5rem 0;
-    overflow-x: visible;
+    overflow-x: auto;
   }
 
   .studio-workflow__steps {
@@ -2798,6 +2777,9 @@ body,
   gap: 0.35rem !important;
   max-width: 100% !important;
   min-height: 42px !important;
+  flex: 0 0 auto;
+  align-self: stretch;
+  margin-bottom: 1rem;
   overflow: visible;
   padding: 0.35rem !important;
 }
@@ -2816,7 +2798,7 @@ body,
 }
 
 .studio-canvas-view > div > div:first-child {
-  display: none !important;
+  display: flex !important;
 }
 
 .studio-canvas-view label {
@@ -2950,10 +2932,10 @@ body,
   }
 
   .studio-titlebar__actions {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
     gap: 0.45rem;
-    overflow: visible;
+    overflow-x: auto;
   }
 
   .studio-titlebar__actions > * {
@@ -2966,8 +2948,13 @@ body,
   }
 
   .studio-workflow__steps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    min-width: max-content;
     gap: 0.45rem;
+  }
+
+  .studio-step {
+    flex: 0 0 auto;
   }
 
   .studio-workflow__context {
@@ -2975,8 +2962,14 @@ body,
   }
 
   .studio-subtools {
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    justify-content: flex-start;
+  }
+
+  .studio-subtool {
+    flex: 0 0 auto;
   }
 
   .studio-stage-shell {
@@ -2988,6 +2981,9 @@ body,
   }
 
   .studio-library-palette {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 100;
     width: min(82vw, 280px) !important;
     max-width: min(82vw, 280px) !important;
   }
@@ -3011,7 +3007,7 @@ body,
     right: 0;
     top: 0;
     bottom: 0;
-    z-index: 7000;
+    z-index: 100;
     order: 0;
     width: min(100vw, 360px) !important;
     max-width: 88vw !important;
@@ -3170,7 +3166,11 @@ body,
 }
 
 .studio-canvas-stage {
-  background-color: #30323a !important;
+  background-color: #30323a;
+}
+
+.studio-app.is-playing .studio-canvas-stage::before {
+  content: none;
 }
 
 .quest-step-card {
